@@ -365,6 +365,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
       .map((item) => [(item as { id: string }).id, item]),
   );
 
+  const transferAtCost = shouldTransferBranchPurchaseAtCost(
+    request.branch?.branchType ?? request.branchType ?? null,
+  );
   const branchItems = request.items.map((item) => {
     const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
@@ -376,6 +379,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
       branchPurchasePriceKgs: branchUnitPrice,
       resolvedBranchPriceKgs: branchUnitPrice,
       totalAmount: fullItem?.totalAmount ?? item.totalAmount,
+      transferAtCost,
     });
     return {
       id: item.id,
@@ -425,7 +429,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
-  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems);
+  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems, { transferAtCost });
 
   return {
     ...full,

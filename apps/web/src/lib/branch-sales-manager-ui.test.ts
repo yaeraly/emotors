@@ -96,6 +96,6 @@ describe('branch sales manager ui cleanup', () => {
   it('create and draft product table derives totals from quantity times branch price', () => {
     assert.match(listPage, /draftFormLineTotal\(line\)/);
     assert.match(listPage, /draftFormOrderTotal\(lines\)/);
-    assert.doesNotMatch(listPage, /authoritativeLineTotalKgs != null && Number\(line\.authoritativeLineTotalKgs\) > 0/);
+    assert.match(listPage, /authoritativeLineTotalKgs/);
   });
 });

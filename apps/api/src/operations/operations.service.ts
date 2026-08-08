@@ -210,9 +210,19 @@ export class OperationsService {
     });
     const hideSensitive = isBranchOnlyRequestUser(user, this.canViewAllBranchPurchaseRequests(user));
     const hideFinancialCost = !canViewProductCost(user);
-    return rows.map((row) =>
-      presentBranchPurchaseRequestForUser(row, { hideSensitive, hideFinancialCost }),
+    const presentedRows = await Promise.all(
+      rows.map(async (row) => {
+        const transferAtCost = shouldTransferBranchPurchaseAtCost(row.branch?.branchType);
+        const needsAtCostRefresh =
+          transferAtCost && row.status === BranchPurchaseRequestStatus.DRAFT;
+        const enriched =
+          !hideSensitive || needsAtCostRefresh
+            ? await this.enrichBranchPurchaseRequestWithHqStock(user, row)
+            : row;
+        return presentBranchPurchaseRequestForUser(enriched, { hideSensitive, hideFinancialCost });
+      }),
     );
+    return presentedRows;
   }
 
   async branchPurchaseRequestById(user: AuthUser, id: string) {
@@ -257,14 +267,16 @@ export class OperationsService {
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);
     const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
     const hideFinancialCost = !canViewProductCost(user);
+    const transferAtCost = shouldTransferBranchPurchaseAtCost(request.branch?.branchType);
     let enriched: typeof request & {
       authoritativeTransferCostKgs?: number;
       convertedOrderNumber?: string;
       totalProductCostKgs?: number;
       hqStockStatus?: 'loaded' | 'unavailable';
-    } = hideSensitive
-      ? request
-      : await this.enrichBranchPurchaseRequestWithHqStock(user, request);
+    } =
+      !hideSensitive || transferAtCost
+        ? await this.enrichBranchPurchaseRequestWithHqStock(user, request)
+        : request;
     if (request.convertedOrderId) {
       const linkedOrder = await this.prisma.branchDistributionOrder.findFirst({
         where: { id: request.convertedOrderId, deletedAt: null },

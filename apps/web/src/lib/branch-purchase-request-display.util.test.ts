@@ -9,6 +9,7 @@ import {
   requestLineTotal,
   requestOrderTotal,
 } from './branch-purchase-request-display.util';
+import { roundMoney } from './money';
 
 const t = (key: string) => key;
 
@@ -160,6 +161,30 @@ describe('branch purchase request draft form totals', () => {
         { productId: 'p3', quantity: '3', branchPurchasePriceKgs: 5000 },
       ]),
       100000,
+    );
+  });
+
+  it('prefers authoritative backend line total over unit×qty for HQ at-cost', () => {
+    const line = { quantity: 11, totalCostKgs: 162317.33, unit: 14756.12 };
+    const roundedUnitTotal = roundMoney(line.unit * line.quantity);
+    assert.notEqual(roundedUnitTotal, line.totalCostKgs);
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: String(line.quantity),
+        branchPurchasePriceKgs: line.unit,
+        authoritativeLineTotalKgs: line.totalCostKgs,
+      }),
+      line.totalCostKgs,
+    );
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: String(line.quantity),
+        branchPurchasePriceKgs: line.unit,
+        authoritativeLineTotalKgs: null,
+      }),
+      roundedUnitTotal,
     );
   });
 });

@@ -14,6 +14,8 @@ export type DraftFormLinePricing = {
   productId?: string;
   quantity: string | number;
   branchPurchasePriceKgs?: number | null;
+  /** Authoritative FIFO/payable line total from backend — never recompute as unit×qty for HQ at-cost. */
+  authoritativeLineTotalKgs?: number | null;
   pricingPending?: boolean;
   priceResolving?: boolean;
 };
@@ -62,8 +64,12 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
   return price;
 }
 
-/** Row total for NEW/DRAFT form: displayed quantity × displayed branch price. */
+/** Row total for NEW/DRAFT form: prefer authoritative backend total, else quantity × branch price. */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
+  const authoritative = line.authoritativeLineTotalKgs;
+  if (authoritative != null && Number.isFinite(Number(authoritative)) && Number(authoritative) > 0) {
+    return roundMoney(Number(authoritative));
+  }
   const price = getDraftFormBranchPrice(line);
   if (price == null) return 0;
   const qty = parseDraftFormQuantity(line.quantity);

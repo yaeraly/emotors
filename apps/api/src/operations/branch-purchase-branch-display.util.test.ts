@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BranchPurchaseRequestStatus } from '@prisma/client';
+import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
+import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import {
   resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
   sumBranchPurchaseBranchLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { sanitizeBranchPurchaseRequest } from './branch-purchase-request.presenter';
+
+const CHINA_BATCH_TOTAL = 914369.8;
+
+function buildChinaBatchLine() {
+  const quantity = 11;
+  const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
+  const lineTotals = distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL);
+  const totalCostKgs = lineTotals[0];
+  return { quantity, totalCostKgs, unit: deriveDisplayUnitCost(totalCostKgs, quantity) };
+}
 
 describe('branch purchase branch display totals', () => {
   it('calculates line total as quantity times resolved branch price', () => {
@@ -28,6 +40,32 @@ describe('branch purchase branch display totals', () => {
         totalAmount: 0,
       }),
       25000,
+    );
+  });
+
+  it('HQ at-cost transfer uses authoritative FIFO line total instead of rounded unit×qty', () => {
+    const line = buildChinaBatchLine();
+    const roundedUnitTotal = roundDisplayMoney(line.unit * line.quantity);
+    assert.notEqual(roundedUnitTotal, line.totalCostKgs);
+    assert.equal(
+      resolveBranchPurchaseBranchLineTotalKgs({
+        quantity: line.quantity,
+        branchPurchasePriceKgs: line.unit,
+        resolvedBranchPriceKgs: line.unit,
+        totalAmount: line.totalCostKgs,
+        transferAtCost: true,
+      }),
+      line.totalCostKgs,
+    );
+    assert.notEqual(
+      resolveBranchPurchaseBranchLineTotalKgs({
+        quantity: line.quantity,
+        branchPurchasePriceKgs: line.unit,
+        resolvedBranchPriceKgs: line.unit,
+        totalAmount: line.totalCostKgs,
+        transferAtCost: false,
+      }),
+      line.totalCostKgs,
     );
   });
 
@@ -99,5 +137,49 @@ describe('branch purchase branch display totals', () => {
     assert.equal(sanitized.totalEstimatedAmount, 70000);
     assert.equal((sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs, 15000);
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
+  });
+
+  it('sanitized HQ branch draft preserves FIFO line totals instead of unit×qty drift', () => {
+    const quantity = 11;
+    const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
+    const lineTotals = distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL);
+    const lines = lineTotals.map((totalCostKgs, index) => ({
+      sku: `SKU-${index}`,
+      quantity,
+      totalCostKgs,
+      unit: deriveDisplayUnitCost(totalCostKgs, quantity),
+    }));
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.DRAFT,
+        reviewedAt: null,
+        totalEstimatedAmount: roundDisplayMoney(
+          lines.reduce((sum, line) => sum + roundDisplayMoney(line.unit * line.quantity), 0),
+        ),
+        transportCostKgs: 0,
+        branch: { branchType: 'HQ_BRANCH' },
+        items: lines.map((line, index) => ({
+          id: `line-${index}`,
+          productId: `prod-${index}`,
+          sku: `SKU-${index}`,
+          productName: `SKU-${index}`,
+          quantity: line.quantity,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: line.totalCostKgs,
+          resolvedBranchPriceKgs: line.unit,
+          wholesalePriceKgs: line.unit,
+          totalAmount: roundDisplayMoney(line.unit * line.quantity),
+        })),
+      },
+      true,
+    );
+    const lineSum = roundDisplayMoney(
+      sanitized.items.reduce(
+        (sum, item) => sum + Number((item as { totalAmount?: number }).totalAmount ?? 0),
+        0,
+      ),
+    );
+    assert.equal(lineSum, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
   });
 });

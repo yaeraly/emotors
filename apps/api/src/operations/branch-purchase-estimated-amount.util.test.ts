@@ -161,7 +161,8 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
     );
     assert.equal(sanitized.totalEstimatedAmount, lineSum);
-    assert.ok(Math.abs(lineSum - CHINA_BATCH_TOTAL) <= 1);
+    assert.equal(lineSum, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
     assert.equal(sanitized.totalProductCostKgs, undefined);
   });
 
