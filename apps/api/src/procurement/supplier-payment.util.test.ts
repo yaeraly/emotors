@@ -126,4 +126,55 @@ const multiRate = summarizeSupplierPayments(
 assertClose(multiRate.weightedAverageYuanRate ?? 0, 609500 / 50000, 'weighted rate by amounts', 0.0001);
 assertEqual(maskCardNumber('4111111111111111'), '************1111', 'card mask');
 
+// Two payments both at rate 13 → weighted rate exactly 13.00
+{
+  const bothThirteen = summarizeSupplierPayments(
+    [
+      { amountYuan: 10000, exchangeRate: 13, status: 'ACTIVE', actualPaidKgs: 130000 },
+      { amountYuan: 20000, exchangeRate: 13, status: 'ACTIVE', actualPaidKgs: 260000 },
+    ],
+    30000,
+  );
+  assertClose(bothThirteen.weightedAverageYuanRate ?? 0, 13, 'two payments rate 13 weighted average');
+  assertClose(bothThirteen.totalPaidKgs, 390000, 'two payments total kgs');
+}
+
+// Unequal CNY amounts with same rate still produce 13.00
+{
+  const unequalCnySameRate = summarizeSupplierPayments(
+    [
+      { amountYuan: 5000, exchangeRate: 13, status: 'PAID', actualPaidKgs: 65000 },
+      { amountYuan: 25000, exchangeRate: 13, status: 'PAID', actualPaidKgs: 325000 },
+    ],
+    30000,
+  );
+  assertClose(unequalCnySameRate.weightedAverageYuanRate ?? 0, 13, 'unequal cny same rate');
+}
+
+// Pending cashier excluded from weighted rate
+{
+  const pendingExcludedRate = summarizeSupplierPayments(
+    [
+      { amountYuan: 10000, exchangeRate: 12, status: 'PENDING_CASHIER', actualPaidKgs: 120000 },
+      { amountYuan: 20000, exchangeRate: 13, status: 'ACTIVE', actualPaidKgs: 260000 },
+    ],
+    30000,
+  );
+  assertClose(pendingExcludedRate.weightedAverageYuanRate ?? 0, 13, 'pending excluded from rate');
+  assertClose(pendingExcludedRate.totalPaidYuan, 20000, 'pending excluded from paid yuan');
+}
+
+// Returned and superseded excluded
+{
+  const excludedStatuses = summarizeSupplierPayments(
+    [
+      { amountYuan: 10000, exchangeRate: 11, status: 'RETURNED', actualPaidKgs: 110000 },
+      { amountYuan: 10000, exchangeRate: 12, status: 'CANCELLED', actualPaidKgs: 120000 },
+      { amountYuan: 20000, exchangeRate: 13, status: 'ACTIVE', actualPaidKgs: 260000 },
+    ],
+    30000,
+  );
+  assertClose(excludedStatuses.weightedAverageYuanRate ?? 0, 13, 'returned/cancelled excluded');
+}
+
 console.log('supplier-payment.util.test.ts passed');

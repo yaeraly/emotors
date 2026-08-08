@@ -1,7 +1,13 @@
 import {
   ProcurementSupplierPaymentLedgerStatus,
   ProcurementSupplierPaymentStatus,
+  Prisma,
 } from '@prisma/client';
+import {
+  roundMoneyDecimal,
+  sumMoneyDecimals,
+  toMoneyDecimal,
+} from './landed-cost-money.util';
 
 export type SupplierPaymentInput = {
   amountYuan: number;
@@ -36,12 +42,15 @@ const EXCLUDED_SUPPLIER_PAYMENT_STATUSES = new Set([
   'DRAFT',
   'PENDING_CASHIER',
   'RETURNED',
+  'RETURNED_FOR_CORRECTION',
   'CANCELLED',
   'CANCELED',
   'FAILED',
   'REJECTED',
   'VOID',
   'REVERSED',
+  'SUPERSEDED',
+  'POSTPONED',
 ]);
 
 const CONFIRMED_SUPPLIER_PAYMENT_STATUSES = new Set([
@@ -73,6 +82,35 @@ export function isAllocatedSupplierPayment(status?: string | null) {
   return ALLOCATED_SUPPLIER_PAYMENT_STATUSES.has(normalized);
 }
 
+export function resolveSupplierPaymentKgsDecimal(payment: {
+  amountKgs?: number | string | null;
+  actualPaidKgs?: number | string | null;
+  approvedAmountKgs?: number | string | null;
+  amountYuan?: number | string | null;
+  exchangeRate?: number | string | null;
+}) {
+  const actual = payment.actualPaidKgs;
+  if (actual != null && Number(actual) >= 0) {
+    return toMoneyDecimal(actual).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  const approved = payment.approvedAmountKgs;
+  if (approved != null && Number(approved) >= 0) {
+    return toMoneyDecimal(approved).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  const stored = payment.amountKgs;
+  if (stored != null && Number(stored) >= 0) {
+    return toMoneyDecimal(stored).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  const yuan = Number(payment.amountYuan ?? 0);
+  const rate = Number(payment.exchangeRate ?? 0);
+  if (!Number.isFinite(yuan) || !Number.isFinite(rate)) {
+    return toMoneyDecimal(0);
+  }
+  return toMoneyDecimal(yuan)
+    .times(toMoneyDecimal(rate))
+    .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
 export function resolveSupplierPaymentKgs(payment: {
   amountKgs?: number | string | null;
   actualPaidKgs?: number | string | null;
@@ -80,16 +118,7 @@ export function resolveSupplierPaymentKgs(payment: {
   amountYuan?: number | string | null;
   exchangeRate?: number | string | null;
 }) {
-  const actual = Number(payment.actualPaidKgs);
-  if (Number.isFinite(actual) && actual >= 0) return roundMoney(actual);
-  const approved = Number(payment.approvedAmountKgs);
-  if (Number.isFinite(approved) && approved >= 0) return roundMoney(approved);
-  const stored = Number(payment.amountKgs);
-  if (Number.isFinite(stored) && stored >= 0) return roundMoney(stored);
-  const yuan = Number(payment.amountYuan ?? 0);
-  const rate = Number(payment.exchangeRate ?? 0);
-  if (!Number.isFinite(yuan) || !Number.isFinite(rate)) return 0;
-  return calculateAmountKgs(yuan, rate);
+  return roundMoneyDecimal(resolveSupplierPaymentKgsDecimal(payment));
 }
 
 export function sumConfirmedSupplierPaymentsKgs(
@@ -181,15 +210,20 @@ export function summarizeSupplierPayments(
       .reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
   );
 
-  const totalPaidYuan = roundMoney(
-    confirmed.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+  const totalPaidYuan = roundMoneyDecimal(
+    sumMoneyDecimals(confirmed.map((payment) => Number(payment.amountYuan || 0))),
   );
-  const totalPaidKgs = roundMoney(
-    confirmed.reduce((sum, payment) => sum + resolveSupplierPaymentKgs(payment), 0),
+  const totalPaidKgs = roundMoneyDecimal(
+    sumMoneyDecimals(confirmed.map((payment) => resolveSupplierPaymentKgsDecimal(payment))),
   );
   const remainingYuan = roundMoney(Math.max(totalOrderYuan - totalPaidYuan, 0));
   const weightedAverageYuanRate =
-    totalPaidYuan > 0 ? roundMoney(totalPaidKgs / totalPaidYuan, 4) : null;
+    totalPaidYuan > 0
+      ? toMoneyDecimal(totalPaidKgs)
+          .div(toMoneyDecimal(totalPaidYuan))
+          .toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP)
+          .toNumber()
+      : null;
 
   const supplierPaymentStatus = resolvePurchasePaymentLedgerStatus({
     totalOrderYuan,

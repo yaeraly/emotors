@@ -26,8 +26,10 @@ import {
   estimateSupplierCostKgs,
   expensesFullySettled,
   isSupplierPaymentApprovedForLandedCost,
+  mapSupplierPaymentsForCosting,
   reconcileSupplierLineCostTotals,
   resolveApprovedSupplierCostBaseYuan,
+  resolveAuthoritativeSupplierPurchaseCost,
   resolveApprovedSupplierAmountKgs,
   resolveProcurementCostConfirmationStatus,
   sumConfirmedExpenseAmountKgs,
@@ -427,10 +429,7 @@ export class LandedCostService {
           totalPaidYuan: summary.totalPaidYuan,
           totalPaidKgs: summary.totalPaidKgs,
           remainingYuan: summary.remainingYuan,
-          weightedAverageYuanRate:
-            supplierCost.isFullyPaid && supplierCost.finalWeightedAverageRate != null
-              ? supplierCost.finalWeightedAverageRate
-              : summary.weightedAverageYuanRate,
+          weightedAverageYuanRate: summary.weightedAverageYuanRate,
           supplierPaymentStatus: summary.supplierPaymentStatus,
         },
         include: {
@@ -658,6 +657,17 @@ export class LandedCostService {
             status: true,
           },
         },
+        supplierPayments: {
+          select: {
+            id: true,
+            amountYuan: true,
+            exchangeRate: true,
+            amountKgs: true,
+            actualPaidKgs: true,
+            approvedAmountKgs: true,
+            status: true,
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Procurement order not found');
@@ -666,9 +676,16 @@ export class LandedCostService {
       (item) => item.weightStatus !== ProcurementItemWeightStatus.CONFIRMED,
     );
 
-    const estimatedRate = Number(order.weightedAverageYuanRate ?? order.defaultYuanRate ?? 0);
+    const supplierPaymentInputs = mapSupplierPaymentsForCosting(order.supplierPayments ?? []);
+    const authoritativeSupplierCost = resolveAuthoritativeSupplierPurchaseCost({
+      totalProcurementYuan: Number(order.totalYuan ?? 0),
+      payments: supplierPaymentInputs,
+      estimatedYuanRate: Number(order.defaultYuanRate ?? 0),
+    });
+    const effectiveRate = authoritativeSupplierCost.effectiveYuanRate;
+    const estimatedSupplierCostKgs = authoritativeSupplierCost.authoritativeSupplierPurchaseCostKgs;
     const importExpenseLines = buildProcurementImportExpenseLines({
-      estimatedYuanRate: estimatedRate,
+      estimatedYuanRate: effectiveRate,
       supplier: {
         invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
         supplierInvoiceNumber: order.supplierInvoiceNumber,
@@ -677,9 +694,9 @@ export class LandedCostService {
         totalYuan: Number(order.totalYuan ?? 0),
         requestedPaymentYuan:
           order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
-        totalPaidYuan: Number(order.totalPaidYuan ?? 0),
-        totalPaidKgs: Number(order.totalPaidKgs ?? 0),
-        estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+        totalPaidYuan: authoritativeSupplierCost.completedPaidYuan,
+        totalPaidKgs: authoritativeSupplierCost.completedPaidKgs,
+        estimatedSupplierCostKgs,
       },
       transportExpenses: (order.transportExpenses ?? []).map((row) => ({
         id: row.id,
@@ -711,13 +728,14 @@ export class LandedCostService {
       procurementOrderId: order.id,
       landedCostStatus: order.landedCostStatus,
       costConfirmationStatus: order.costConfirmationStatus,
-      estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+      estimatedSupplierCostKgs,
+      authoritativeSupplierPurchaseCostKgs: estimatedSupplierCostKgs,
       estimatedYuanRate: Number(order.defaultYuanRate ?? 0),
       totalYuan: Number(order.totalYuan ?? 0),
-      totalPaidYuan: Number(order.totalPaidYuan ?? 0),
-      remainingYuan: Number(order.remainingYuan ?? 0),
-      weightedAverageYuanRate:
-        order.weightedAverageYuanRate != null ? Number(order.weightedAverageYuanRate) : null,
+      totalPaidYuan: authoritativeSupplierCost.completedPaidYuan,
+      remainingYuan: authoritativeSupplierCost.remainingYuan,
+      weightedAverageYuanRate: authoritativeSupplierCost.weightedAverageYuanRate,
+      effectiveYuanRate: effectiveRate,
       landedCostCalculationVersion: order.landedCostCalculationVersion,
       landedCostCalculatedAt: order.landedCostCalculatedAt,
       isProvisional: order.landedCostStatus === ProcurementLandedCostStatus.PENDING_WEIGHT,

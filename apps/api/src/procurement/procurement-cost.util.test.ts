@@ -1,10 +1,12 @@
 import {
   estimateSectionExpenseCostKgs,
   estimateSupplierCostKgs,
+  resolveAuthoritativeSupplierPurchaseCost,
   resolveProcurementCostConfirmationStatus,
   sumConfirmedExpenseAmountKgs,
   weightedAveragePaidYuanRate,
 } from './procurement-cost.util';
+import { summarizeSupplierPayments } from './supplier-payment.util';
 
 function assertClose(actual: number, expected: number, label: string, tolerance = 0.02) {
   if (Math.abs(actual - expected) > tolerance) {
@@ -91,8 +93,101 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   assertEqual(full.isFullyPaid, true, '9. fully paid');
   assertClose(full.finalSupplierCostKgs ?? 0, 1233500, '9. actual = sum completed KGS', 1);
   assertClose(full.estimatedSupplierCostKgs, 1233500, '9. estimated becomes actual', 1);
-  assertClose(full.finalWeightedAverageRate ?? 0, 12.335, '9. final rate vs full order CNY', 0.001);
+  assertClose(full.finalWeightedAverageRate ?? 0, 12.335, '9. final rate from payment sums', 0.001);
   assertClose(full.remainingYuan, 0, 'fully paid remaining zero');
+}
+
+// Two payments both rate 13 → weighted rate exactly 13.00 and purchase cost = sum KGS
+{
+  const payments = [
+    { amountYuan: 10000, exchangeRate: 13, amountKgs: 130000, status: 'PAID' },
+    { amountYuan: 20000, exchangeRate: 13, amountKgs: 260000, status: 'PAID' },
+  ];
+  const result = resolveAuthoritativeSupplierPurchaseCost({
+    totalProcurementYuan: 30000,
+    estimatedYuanRate: 12,
+    payments,
+  });
+  assertClose(result.weightedAverageYuanRate ?? 0, 13, 'two rate-13 payments weighted rate');
+  assertEqual(result.isFullyPaid, true, 'fully paid two payments');
+  assertClose(result.authoritativeSupplierPurchaseCostKgs, 390000, 'purchase cost = sum confirmed KGS');
+  assertClose(
+    result.authoritativeSupplierPurchaseCostKgs,
+    30000 * (result.weightedAverageYuanRate ?? 0),
+    'purchase cost reconciles with cny × rate',
+    0.05,
+  );
+}
+
+// Different rates use weighted average, not simple average
+{
+  const payments = [
+    { amountYuan: 10000, exchangeRate: 12.9, amountKgs: 129000, status: 'PAID' },
+    { amountYuan: 20000, exchangeRate: 13.1, amountKgs: 262000, status: 'PAID' },
+  ];
+  const weighted = weightedAveragePaidYuanRate(payments);
+  assertClose(weighted ?? 0, 391000 / 30000, 'different rates weighted by cny', 0.0001);
+  assertClose((12.9 + 13.1) / 2, 13, 'simple average differs from weighted', 0.0001);
+  assertEqual(Math.abs((weighted ?? 0) - 13) < 0.0001, false, 'weighted not simple average');
+}
+
+// Pending/returned/superseded excluded from authoritative purchase cost
+{
+  const payments = [
+    { amountYuan: 10000, exchangeRate: 11, amountKgs: 110000, status: 'PENDING_CASHIER' },
+    { amountYuan: 10000, exchangeRate: 11, amountKgs: 110000, status: 'RETURNED' },
+    { amountYuan: 10000, exchangeRate: 11, amountKgs: 110000, status: 'CANCELLED' },
+    { amountYuan: 20000, exchangeRate: 13, amountKgs: 260000, status: 'PAID' },
+  ];
+  const result = resolveAuthoritativeSupplierPurchaseCost({
+    totalProcurementYuan: 30000,
+    estimatedYuanRate: 12,
+    payments,
+  });
+  assertClose(result.completedPaidKgs, 260000, 'only confirmed payment kgs counted');
+  assertClose(result.weightedAverageYuanRate ?? 0, 13, 'weighted from confirmed only');
+}
+
+// Shared backend fields stay aligned
+{
+  const payments = [
+    { amountYuan: 10000, exchangeRate: 13, amountKgs: 130000, status: 'PAID' },
+    { amountYuan: 20000, exchangeRate: 13, amountKgs: 260000, status: 'PAID' },
+  ];
+  const authoritative = resolveAuthoritativeSupplierPurchaseCost({
+    totalProcurementYuan: 30000,
+    estimatedYuanRate: 12,
+    payments,
+  });
+  assertClose(
+    authoritative.authoritativeSupplierPurchaseCostKgs,
+    authoritative.estimatedSupplierCostKgs,
+    'authoritative matches estimated supplier cost',
+  );
+  assertClose(
+    authoritative.effectiveYuanRate,
+    authoritative.weightedAverageYuanRate ?? 0,
+    'effective rate matches weighted when paid',
+  );
+  const summary = summarizeSupplierPayments(payments, 30000);
+  assertClose(
+    summary.weightedAverageYuanRate ?? 0,
+    authoritative.weightedAverageYuanRate ?? 0,
+    'summary matches authoritative weighted rate',
+  );
+}
+
+// Partial payment: actual paid + estimated remaining
+{
+  const partial = resolveAuthoritativeSupplierPurchaseCost({
+    totalProcurementYuan: 30000,
+    estimatedYuanRate: 12,
+    payments: [{ amountYuan: 10000, exchangeRate: 13, amountKgs: 130000, status: 'PAID' }],
+  });
+  assertEqual(partial.isFullyPaid, false, 'partial not fully paid');
+  assertClose(partial.completedPaidKgs, 130000, 'partial paid kgs');
+  assertClose(partial.remainingYuan, 20000, 'partial remaining cny');
+  assertClose(partial.authoritativeSupplierPurchaseCostKgs, 130000 + 20000 * 13, 'paid + remaining at weighted rate');
 }
 
 // 10/11. Transport/other expenses use full requested amounts; partial pay does not shrink cost

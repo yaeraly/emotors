@@ -1,10 +1,14 @@
-import { TransportExpenseStatus } from '@prisma/client';
+import { TransportExpenseStatus, Prisma } from '@prisma/client';
 import {
   isSupplierInvoiceAccountantProcessed,
   isSupplierInvoicePresent,
 } from './hq-receiving-validation.util';
-import { roundMoneyDecimal, toMoneyDecimal } from './landed-cost-money.util';
-import { roundMoney } from './supplier-payment.util';
+import { roundMoneyDecimal, sumMoneyDecimals, toMoneyDecimal } from './landed-cost-money.util';
+import {
+  isConfirmedSupplierPayment,
+  resolveSupplierPaymentKgsDecimal,
+  roundMoney,
+} from './supplier-payment.util';
 
 export type ProcurementCostConfirmationStatus =
   | 'PRELIMINARY'
@@ -158,21 +162,39 @@ export function resolveTransportExpensePaymentStatus(input: {
   return 'UNPAID';
 }
 
+function paymentKgsDecimal(payment: SupplierPaymentCostInput) {
+  return resolveSupplierPaymentKgsDecimal(payment);
+}
+
 function paymentKgs(payment: SupplierPaymentCostInput): number {
-  if (payment.actualPaidKgs != null && Number(payment.actualPaidKgs) > 0) {
-    return Number(payment.actualPaidKgs);
-  }
-  if (payment.approvedAmountKgs != null && Number(payment.approvedAmountKgs) > 0) {
-    return Number(payment.approvedAmountKgs);
-  }
-  if (payment.amountKgs != null && Number(payment.amountKgs) > 0) {
-    return Number(payment.amountKgs);
-  }
-  return roundMoney(Number(payment.amountYuan || 0) * Number(payment.exchangeRate || 0));
+  return roundMoneyDecimal(paymentKgsDecimal(payment));
+}
+
+export function mapSupplierPaymentsForCosting(
+  payments: Array<{
+    id?: string;
+    amountYuan: number | string | Prisma.Decimal;
+    exchangeRate?: number | string | Prisma.Decimal | null;
+    amountKgs?: number | string | Prisma.Decimal | null;
+    actualPaidKgs?: number | string | Prisma.Decimal | null;
+    approvedAmountKgs?: number | string | Prisma.Decimal | null;
+    status: string;
+  }>,
+): SupplierPaymentCostInput[] {
+  return payments.map((payment) => ({
+    id: payment.id,
+    amountYuan: Number(payment.amountYuan),
+    exchangeRate: payment.exchangeRate != null ? Number(payment.exchangeRate) : null,
+    amountKgs: payment.amountKgs != null ? Number(payment.amountKgs) : null,
+    actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+    approvedAmountKgs:
+      payment.approvedAmountKgs != null ? Number(payment.approvedAmountKgs) : null,
+    status: payment.status,
+  }));
 }
 
 export function isCompletedSupplierPaymentStatus(status: string): boolean {
-  return CONFIRMED_PAYMENT.has(String(status ?? '').toUpperCase());
+  return isConfirmedSupplierPayment(status);
 }
 
 /**
@@ -183,12 +205,17 @@ export function weightedAveragePaidYuanRate(
   payments: SupplierPaymentCostInput[],
 ): number | null {
   const completed = payments.filter((payment) => isCompletedSupplierPaymentStatus(payment.status));
-  const paidYuan = roundMoney(
-    completed.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+  const paidYuan = roundMoneyDecimal(
+    sumMoneyDecimals(completed.map((payment) => Number(payment.amountYuan || 0))),
   );
-  const paidKgs = roundMoney(completed.reduce((sum, payment) => sum + paymentKgs(payment), 0));
+  const paidKgs = roundMoneyDecimal(
+    sumMoneyDecimals(completed.map((payment) => paymentKgsDecimal(payment))),
+  );
   if (!(paidYuan > 0) || !(paidKgs > 0)) return null;
-  return roundMoney(paidKgs / paidYuan, 4);
+  return toMoneyDecimal(paidKgs)
+    .div(toMoneyDecimal(paidYuan))
+    .toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
 }
 
 /**
@@ -231,24 +258,31 @@ export function estimateSupplierCostKgs(input: {
   const completed = input.payments.filter((payment) =>
     isCompletedSupplierPaymentStatus(payment.status),
   );
-  const completedPaidYuan = roundMoney(
-    completed.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+  const completedPaidYuan = roundMoneyDecimal(
+    sumMoneyDecimals(completed.map((payment) => Number(payment.amountYuan || 0))),
   );
-  const completedPaidKgs = roundMoney(
-    completed.reduce((sum, payment) => sum + paymentKgs(payment), 0),
+  const completedPaidKgs = roundMoneyDecimal(
+    sumMoneyDecimals(completed.map((payment) => paymentKgsDecimal(payment))),
   );
   const remainingYuan = roundMoney(Math.max(totalProcurementYuan - completedPaidYuan, 0));
+  const weightedRate = weightedAveragePaidYuanRate(input.payments);
   const { rate, source } = resolveCostYuanRate({
     payments: input.payments,
     estimatedYuanRate: input.estimatedYuanRate,
   });
-  const estimatedSupplierCostKgs = roundMoney(totalProcurementYuan * rate);
-  const isFullyPaid = totalProcurementYuan > 0 && remainingYuan <= 0.009 && completedPaidYuan > 0;
+  const isFullyPaid =
+    totalProcurementYuan > 0 && remainingYuan <= 0.009 && completedPaidYuan > 0;
+  const estimatedSupplierCostKgs = isFullyPaid
+    ? completedPaidKgs
+    : completedPaidYuan > 0
+      ? roundMoneyDecimal(
+          toMoneyDecimal(completedPaidKgs).plus(
+            toMoneyDecimal(remainingYuan).times(toMoneyDecimal(rate)),
+          ),
+        )
+      : roundMoney(totalProcurementYuan * rate);
   const finalSupplierCostKgs = isFullyPaid ? completedPaidKgs : null;
-  const finalWeightedAverageRate =
-    isFullyPaid && totalProcurementYuan > 0
-      ? roundMoney(completedPaidKgs / totalProcurementYuan, 4)
-      : null;
+  const finalWeightedAverageRate = weightedRate;
 
   return {
     totalProcurementYuan,
@@ -257,11 +291,25 @@ export function estimateSupplierCostKgs(input: {
     remainingYuan,
     costYuanRate: rate,
     rateSource: source,
-    // Inventory / product cost base — NEVER reduced to paid-only amount.
-    estimatedSupplierCostKgs: isFullyPaid ? completedPaidKgs : estimatedSupplierCostKgs,
+    estimatedSupplierCostKgs,
     isFullyPaid,
     finalSupplierCostKgs,
     finalWeightedAverageRate,
+  };
+}
+
+/** Shared authoritative supplier purchase cost + weighted rate for UI and landed cost. */
+export function resolveAuthoritativeSupplierPurchaseCost(input: {
+  totalProcurementYuan: number;
+  payments: SupplierPaymentCostInput[];
+  estimatedYuanRate: number;
+}) {
+  const costing = estimateSupplierCostKgs(input);
+  return {
+    ...costing,
+    weightedAverageYuanRate: costing.finalWeightedAverageRate,
+    authoritativeSupplierPurchaseCostKgs: costing.estimatedSupplierCostKgs,
+    effectiveYuanRate: costing.costYuanRate,
   };
 }
 

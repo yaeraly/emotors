@@ -106,6 +106,7 @@ type ProcurementOrder = {
   landedCostStatus?: 'PENDING_WEIGHT' | 'READY_TO_CALCULATE' | 'CALCULATED' | 'FINALIZED';
   costConfirmationStatus?: 'PRELIMINARY' | 'PARTIALLY_CONFIRMED' | 'ACTUAL';
   estimatedSupplierCostKgs?: number | string | null;
+  authoritativeSupplierPurchaseCostKgs?: number | string | null;
   estimatedYuanRate?: number | string | null;
   landedCostCalculationVersion?: number;
   landedCostCalculatedAt?: string | null;
@@ -386,10 +387,19 @@ function ProcurementOrderDetailPageContent() {
 
   const effectiveYuanRate = Number(
     order?.effectiveYuanRate ??
-    order?.weightedAverageYuanRate ??
     order?.defaultYuanRate ??
     0,
   );
+
+  const weightedAverageYuanRate =
+    order?.weightedAverageYuanRate != null ? Number(order.weightedAverageYuanRate) : null;
+
+  const authoritativeSupplierPurchaseCostKgs = useMemo(() => {
+    const fromApi = Number(
+      order?.authoritativeSupplierPurchaseCostKgs ?? order?.estimatedSupplierCostKgs ?? 0,
+    );
+    return fromApi > 0 ? fromApi : 0;
+  }, [order?.authoritativeSupplierPurchaseCostKgs, order?.estimatedSupplierCostKgs]);
 
   const previewChinaDomesticTransportKgs = useMemo(
     () => resolveChinaDomesticTransportKgs({
@@ -511,6 +521,14 @@ function ProcurementOrderDetailPageContent() {
     return 0;
   }, [order?.confirmedCargoPaymentKgs, order?.importLogisticsBreakdown?.cargoPaymentKgs]);
 
+  const totalPurchaseCostKgs = useMemo(() => {
+    if (authoritativeSupplierPurchaseCostKgs > 0) {
+      return authoritativeSupplierPurchaseCostKgs;
+    }
+    if (!previewTotals) return 0;
+    return previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0);
+  }, [authoritativeSupplierPurchaseCostKgs, previewTotals]);
+
   const importCostBreakdown = useMemo(() => {
     const chinaDomestic = Math.max(
       Number(order?.confirmedChinaDomesticKgs ?? 0),
@@ -554,7 +572,11 @@ function ProcurementOrderDetailPageContent() {
       otherExpenses,
       totalImportLogistics,
       totalLandedCost:
-        previewTotals != null ? Number(previewTotals.totalCostKgs) : totalImportLogistics,
+        previewTotals != null && authoritativeSupplierPurchaseCostKgs <= 0
+          ? Number(previewTotals.totalCostKgs)
+          : Math.round(
+              (totalPurchaseCostKgs + totalImportLogistics + Number.EPSILON) * 100,
+            ) / 100,
     };
   }, [
     previewChinaDomesticTransportKgs,
@@ -565,29 +587,25 @@ function ProcurementOrderDetailPageContent() {
     order?.importLogisticsBreakdown,
     order?.totalImportLogisticsKgs,
     previewTotals,
+    totalPurchaseCostKgs,
+    authoritativeSupplierPurchaseCostKgs,
   ]);
-
-  const totalPurchaseCostKgs = useMemo(() => {
-    if (!previewTotals) return 0;
-    return previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0);
-  }, [previewTotals]);
 
   const supplierPaymentSummary = useMemo(() => {
     return buildPurchaseOrderSupplierPaymentSummary({
-      estimatedSupplierCostKgs: order?.estimatedSupplierCostKgs,
+      estimatedSupplierCostKgs: authoritativeSupplierPurchaseCostKgs,
       totalYuan: order?.totalYuan,
       defaultYuanRate: order?.defaultYuanRate,
       effectiveYuanRate: order?.effectiveYuanRate,
-      totalPurchaseCostKgs,
+      totalPurchaseCostKgs: authoritativeSupplierPurchaseCostKgs,
       supplierPayments: order?.supplierPayments ?? [],
     });
   }, [
-    order?.estimatedSupplierCostKgs,
+    authoritativeSupplierPurchaseCostKgs,
     order?.totalYuan,
     order?.defaultYuanRate,
     order?.effectiveYuanRate,
     order?.supplierPayments,
-    totalPurchaseCostKgs,
   ]);
 
   const landedCostCalculated = useMemo(() => {
@@ -1266,7 +1284,11 @@ function ProcurementOrderDetailPageContent() {
             <Info label={t('procurement.orders.paidToSupplier')} value={formatKgs(confirmedSupplierPaidKgs)} />
             <Info
               label={t('procurement.orders.weightedAverageYuanRate')}
-              value={effectiveYuanRate > 0 ? effectiveYuanRate.toFixed(4) : '-'}
+              value={
+                weightedAverageYuanRate != null && weightedAverageYuanRate > 0
+                  ? weightedAverageYuanRate.toFixed(4)
+                  : '-'
+              }
             />
             <Info
               label={t('procurement.orders.estimatedYuanRate')}
@@ -1278,11 +1300,7 @@ function ProcurementOrderDetailPageContent() {
             />
             <Info
               label={t('procurement.orders.totalPurchaseCost')}
-              value={formatKgs(
-                Number(order.estimatedSupplierCostKgs || 0) > 0
-                  ? Number(order.estimatedSupplierCostKgs)
-                  : totalPurchaseCostKgs,
-              )}
+              value={formatKgs(totalPurchaseCostKgs)}
               highlight
             />
           </div>

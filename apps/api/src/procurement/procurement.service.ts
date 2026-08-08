@@ -80,6 +80,8 @@ import {
 } from './supplier-payment.util';
 import {
   buildProcurementImportExpenseLines,
+  mapSupplierPaymentsForCosting,
+  resolveAuthoritativeSupplierPurchaseCost,
   sumConfirmedExpenseAmountKgs,
   sumSectionConfirmedExpenseAmountKgs,
   hasApprovedSectionExpenses,
@@ -3767,10 +3769,15 @@ export class ProcurementService {
           where: { procurementOrderId: order.id, status: ProcurementSupplierPaymentStatus.ACTIVE },
         });
 
-    const estimatedRate =
-      order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0
-        ? Number(order.weightedAverageYuanRate)
-        : Number(order.defaultYuanRate || 0);
+    const supplierPaymentInputs = mapSupplierPaymentsForCosting(order.supplierPayments ?? []);
+    const authoritativeSupplierCost = resolveAuthoritativeSupplierPurchaseCost({
+      totalProcurementYuan: Number(order.totalYuan ?? 0),
+      payments: supplierPaymentInputs,
+      estimatedYuanRate: Number(order.defaultYuanRate ?? 0),
+    });
+    const weightedAverageYuanRate = authoritativeSupplierCost.weightedAverageYuanRate;
+    const effectiveYuanRate = authoritativeSupplierCost.effectiveYuanRate;
+    const estimatedSupplierCostKgs = authoritativeSupplierCost.authoritativeSupplierPurchaseCostKgs;
 
     const cargoExpenseRows = (order.transportExpenses ?? []).filter(
       (row: { expenseType: string }) => row.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT,
@@ -3801,7 +3808,7 @@ export class ProcurementService {
     });
     const confirmedCargoFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       cargoExpenseRows.map(mapExpenseCostRow),
-      estimatedRate,
+      effectiveYuanRate,
       {
         sectionTotalAmount: Number(order.totalCargoCostKgs ?? 0),
         sectionCurrency: 'KGS',
@@ -3809,7 +3816,7 @@ export class ProcurementService {
     );
     const confirmedChinaFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       chinaExpenseRows.map(mapExpenseCostRow),
-      estimatedRate,
+      effectiveYuanRate,
       {
         sectionTotalAmount: Number(order.chinaDomesticTransportYuan ?? 0),
         sectionCurrency: 'CNY',
@@ -3817,7 +3824,7 @@ export class ProcurementService {
     );
     const confirmedLocalFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       localExpenseRows.map(mapExpenseCostRow),
-      estimatedRate,
+      effectiveYuanRate,
       {
         sectionTotalAmount: Number(
           order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
@@ -3840,7 +3847,7 @@ export class ProcurementService {
       Number(order.svhToHqTransport?.transportCostKgs || 0),
     );
     const importExpenseLines = buildProcurementImportExpenseLines({
-      estimatedYuanRate: estimatedRate,
+      estimatedYuanRate: effectiveYuanRate,
       supplier: {
         invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
         supplierInvoiceNumber: order.supplierInvoiceNumber,
@@ -3849,9 +3856,9 @@ export class ProcurementService {
         totalYuan: Number(order.totalYuan ?? 0),
         requestedPaymentYuan:
           order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
-        totalPaidYuan: Number(order.totalPaidYuan ?? 0),
-        totalPaidKgs: Number(order.totalPaidKgs ?? 0),
-        estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+        totalPaidYuan: authoritativeSupplierCost.completedPaidYuan,
+        totalPaidKgs: authoritativeSupplierCost.completedPaidKgs,
+        estimatedSupplierCostKgs,
       },
       transportExpenses: order.transportExpenses ?? [],
       sectionBudgets: {
@@ -3897,12 +3904,11 @@ export class ProcurementService {
       remainingYuan: Number(order.remainingYuan ?? 0),
       requestedPaymentYuan:
         order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
-      weightedAverageYuanRate: order.weightedAverageYuanRate
-        ? Number(order.weightedAverageYuanRate)
-        : null,
+      weightedAverageYuanRate,
       defaultYuanRate: Number(order.defaultYuanRate),
       estimatedYuanRate: Number(order.defaultYuanRate),
-      estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+      estimatedSupplierCostKgs,
+      authoritativeSupplierPurchaseCostKgs: estimatedSupplierCostKgs,
       costConfirmationStatus: order.costConfirmationStatus ?? 'PRELIMINARY',
       chinaDomesticTransportYuan: Number(order.chinaDomesticTransportYuan ?? 0),
       chinaDomesticTransportKgs: chinaDomesticKgs,
@@ -3931,7 +3937,7 @@ export class ProcurementService {
         totalImportLogisticsKgs,
       },
       yuanRateLocked: activePaymentCount > 0,
-      effectiveYuanRate: estimatedRate,
+      effectiveYuanRate,
       ...(() => {
         const editState = resolveProcurementEditState(order);
         return {
