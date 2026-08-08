@@ -4,8 +4,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import {
+  roundCnySettlementDecimal,
   roundMoneyDecimal,
   sumMoneyDecimals,
+  toCnySettlementDecimal,
   toMoneyDecimal,
 } from './landed-cost-money.util';
 
@@ -121,6 +123,25 @@ export function resolveSupplierPaymentKgs(payment: {
   return roundMoneyDecimal(resolveSupplierPaymentKgsDecimal(payment));
 }
 
+/**
+ * High-precision settled CNY for a payment.
+ * Prefer KGS ÷ rate so premature 2dp CNY storage cannot create remaining-KGS drift.
+ */
+export function resolvePaymentSettledCnyDecimal(payment: {
+  amountKgs?: number | string | null;
+  actualPaidKgs?: number | string | null;
+  approvedAmountKgs?: number | string | null;
+  amountYuan?: number | string | null;
+  exchangeRate?: number | string | null;
+}) {
+  const kgs = resolveSupplierPaymentKgsDecimal(payment);
+  const rate = Number(payment.exchangeRate || 0);
+  if (kgs.greaterThan(0) && rate > 0) {
+    return toCnySettlementDecimal(kgs.div(toMoneyDecimal(rate)));
+  }
+  return toCnySettlementDecimal(Number(payment.amountYuan || 0));
+}
+
 export function sumConfirmedSupplierPaymentsKgs(
   payments: Array<{
     status?: string | null;
@@ -165,22 +186,22 @@ export function resolvePurchasePaymentLedgerStatus(input: {
   const remainingYuan = roundMoney(input.remainingYuan);
   const previous = String(input.previousStatus ?? '').toUpperCase();
 
-  if (totalPaidYuan > totalOrderYuan) {
+  if (totalPaidYuan > totalOrderYuan + 0.00000001) {
     return ProcurementSupplierPaymentLedgerStatus.OVERPAID;
   }
-  if (totalPaidYuan > 0 && remainingYuan <= 0) {
+  if (totalPaidYuan > 0 && remainingYuan <= 0.00000001) {
     return ProcurementSupplierPaymentLedgerStatus.PAID;
   }
   // Preserve postponed debt when no cashier task is in flight and balance remains
   // (including after a prior partial payment).
   if (
     previous === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED &&
-    remainingYuan > 0.009 &&
+    remainingYuan > 0.00000001 &&
     input.pendingCashierCount <= 0
   ) {
     return ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
   }
-  if (totalPaidYuan > 0 && remainingYuan > 0) {
+  if (totalPaidYuan > 0 && remainingYuan > 0.00000001) {
     return ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID;
   }
   if (input.pendingCashierCount > 0) {
@@ -210,13 +231,15 @@ export function summarizeSupplierPayments(
       .reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
   );
 
-  const totalPaidYuan = roundMoneyDecimal(
-    sumMoneyDecimals(confirmed.map((payment) => Number(payment.amountYuan || 0))),
+  const totalPaidYuan = roundCnySettlementDecimal(
+    sumMoneyDecimals(confirmed.map((payment) => resolvePaymentSettledCnyDecimal(payment))),
   );
   const totalPaidKgs = roundMoneyDecimal(
     sumMoneyDecimals(confirmed.map((payment) => resolveSupplierPaymentKgsDecimal(payment))),
   );
-  const remainingYuan = roundMoney(Math.max(totalOrderYuan - totalPaidYuan, 0));
+  const remainingYuan = roundCnySettlementDecimal(
+    Math.max(toMoneyDecimal(totalOrderYuan).minus(toMoneyDecimal(totalPaidYuan)).toNumber(), 0),
+  );
   const weightedAverageYuanRate =
     totalPaidYuan > 0
       ? toMoneyDecimal(totalPaidKgs)

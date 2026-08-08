@@ -3,9 +3,15 @@ import {
   isSupplierInvoiceAccountantProcessed,
   isSupplierInvoicePresent,
 } from './hq-receiving-validation.util';
-import { roundMoneyDecimal, sumMoneyDecimals, toMoneyDecimal } from './landed-cost-money.util';
+import {
+  roundCnySettlementDecimal,
+  roundMoneyDecimal,
+  sumMoneyDecimals,
+  toMoneyDecimal,
+} from './landed-cost-money.util';
 import {
   isConfirmedSupplierPayment,
+  resolvePaymentSettledCnyDecimal,
   resolveSupplierPaymentKgsDecimal,
   roundMoney,
 } from './supplier-payment.util';
@@ -205,8 +211,8 @@ export function weightedAveragePaidYuanRate(
   payments: SupplierPaymentCostInput[],
 ): number | null {
   const completed = payments.filter((payment) => isCompletedSupplierPaymentStatus(payment.status));
-  const paidYuan = roundMoneyDecimal(
-    sumMoneyDecimals(completed.map((payment) => Number(payment.amountYuan || 0))),
+  const paidYuan = roundCnySettlementDecimal(
+    sumMoneyDecimals(completed.map((payment) => resolvePaymentSettledCnyDecimal(payment))),
   );
   const paidKgs = roundMoneyDecimal(
     sumMoneyDecimals(completed.map((payment) => paymentKgsDecimal(payment))),
@@ -258,8 +264,8 @@ export function estimateSupplierCostKgs(input: {
   const completed = input.payments.filter((payment) =>
     isCompletedSupplierPaymentStatus(payment.status),
   );
-  const completedPaidYuan = roundMoneyDecimal(
-    sumMoneyDecimals(completed.map((payment) => Number(payment.amountYuan || 0))),
+  const completedPaidYuan = roundCnySettlementDecimal(
+    sumMoneyDecimals(completed.map((payment) => resolvePaymentSettledCnyDecimal(payment))),
   );
   const completedPaidKgs = roundMoneyDecimal(
     sumMoneyDecimals(completed.map((payment) => paymentKgsDecimal(payment))),

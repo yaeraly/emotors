@@ -190,6 +190,35 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   assertClose(partial.authoritativeSupplierPurchaseCostKgs, 130000 + 20000 * 13, 'paid + remaining at weighted rate');
 }
 
+// 57630 CNY × 13 = exactly 749190 with partial 500000 then remainder
+{
+  const firstYuan = 500000 / 13;
+  const cost = resolveAuthoritativeSupplierPurchaseCost({
+    totalProcurementYuan: 57630,
+    estimatedYuanRate: 13,
+    payments: [
+      {
+        amountYuan: firstYuan,
+        exchangeRate: 13,
+        amountKgs: 500000,
+        actualPaidKgs: 500000,
+        status: 'PAID',
+      },
+      {
+        amountYuan: 57630 - firstYuan,
+        exchangeRate: 13,
+        amountKgs: 249190,
+        actualPaidKgs: 249190,
+        status: 'PAID',
+      },
+    ],
+  });
+  assertEqual(cost.isFullyPaid, true, '57630 fully paid');
+  assertClose(cost.authoritativeSupplierPurchaseCostKgs, 749190, '57630 purchase cost exact');
+  assertClose(cost.weightedAverageYuanRate ?? 0, 13, '57630 weighted rate exact');
+  assertEqual(Math.abs(cost.authoritativeSupplierPurchaseCostKgs - 749189.98) < 0.001, false, 'no 0.02 drift in cost');
+}
+
 // 10/11. Transport/other expenses use full requested amounts; partial pay does not shrink cost
 {
   const section = estimateSectionExpenseCostKgs({

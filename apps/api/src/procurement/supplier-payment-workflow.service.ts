@@ -1286,6 +1286,7 @@ export class SupplierPaymentWorkflowService {
           requestedAmountKgs: dto.paymentAmountKgs,
           remainingCny,
           exchangeRate: authoritativeRate,
+          remainingKgs,
         });
         amountYuan = partialInstruction.amountYuan;
         instructionAmountKgs = partialInstruction.amountKgs;
@@ -1297,6 +1298,7 @@ export class SupplierPaymentWorkflowService {
             paymentAmountKgs: instructionAmountKgs,
             remainingCny,
             exchangeRate: authoritativeRate,
+            remainingKgs,
           });
         } catch (error) {
           throw new BadRequestException(
@@ -1309,6 +1311,7 @@ export class SupplierPaymentWorkflowService {
         const remainderInstruction = resolveSupplierPayRemainderInstruction({
           remainingCny,
           exchangeRate: authoritativeRate,
+          remainingKgs,
         });
         amountYuan = remainderInstruction.amountYuan;
         instructionAmountKgs = remainderInstruction.amountKgs;
@@ -1443,7 +1446,7 @@ export class SupplierPaymentWorkflowService {
       });
 
       const synced = await this.syncOrderPaymentState(tx, user, order.id, 'Supplier payment sent to HQ Cashier');
-      const isPartialInstruction = amountYuan + 0.009 < remainingCny;
+      const isPartialInstruction = amountYuan + 0.00000001 < remainingCny;
       const auditPayload = {
         supplierPaymentId: payment.id,
         invoiceId: order.id,

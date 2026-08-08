@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
 
+/** Internal CNY settlement scale — never truncate settlement CNY to display 2dp. */
+export const SUPPLIER_CNY_SETTLEMENT_SCALE = 8;
+
 export function toMoneyDecimal(value: number | Prisma.Decimal | string): Prisma.Decimal {
   return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 }
@@ -7,6 +10,20 @@ export function toMoneyDecimal(value: number | Prisma.Decimal | string): Prisma.
 /** Final currency round (2 dp, half-up) — only at allocation/storage boundaries. */
 export function roundMoneyDecimal(value: number | Prisma.Decimal): number {
   return toMoneyDecimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+}
+
+/** Preserve high-precision CNY for settlement math (display may still show 2dp). */
+export function roundCnySettlementDecimal(value: number | Prisma.Decimal | string): number {
+  return toMoneyDecimal(value)
+    .toDecimalPlaces(SUPPLIER_CNY_SETTLEMENT_SCALE, Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+}
+
+export function toCnySettlementDecimal(value: number | Prisma.Decimal | string): Prisma.Decimal {
+  return toMoneyDecimal(value).toDecimalPlaces(
+    SUPPLIER_CNY_SETTLEMENT_SCALE,
+    Prisma.Decimal.ROUND_HALF_UP,
+  );
 }
 
 export function sumMoneyDecimals(values: Array<number | Prisma.Decimal>): Prisma.Decimal {

@@ -81,6 +81,18 @@ const derivedYuan = deriveSupplierPaymentYuanFromKgs({
   exchangeRate: 5,
 });
 assertClose(derivedYuan, 34821.96, '4. cny derived one-way from kgs');
+assertClose(
+  deriveSupplierPaymentYuanFromKgs({ amountKgs: 500000, exchangeRate: 13 }),
+  500000 / 13,
+  '4c. 500000/13 keeps high precision (not 38461.54)',
+  0.00000001,
+);
+if (
+  Math.abs(deriveSupplierPaymentYuanFromKgs({ amountKgs: 500000, exchangeRate: 13 }) - 38461.54) <
+  0.00000001
+) {
+  throw new Error('4d. must not truncate 500000/13 to 2dp CNY');
+}
 assertEqual(
   resolveSupplierPaymentInstructionAmountKgs({
     requestedAmountKgs: 174109.78,
@@ -194,7 +206,7 @@ const partialInstruction = resolveSupplierPartialPaymentInstruction({
   remainingCny: partialPayRemainderBalance.remainingCny,
   exchangeRate: 13,
 });
-assertClose(partialInstruction.amountYuan, 7692.31, '18. partial derives cny from kgs');
+assertClose(partialInstruction.amountYuan, 100000 / 13, '18. partial derives high-precision cny from kgs', 0.00000001);
 assertClose(partialInstruction.amountKgs, 100000, '18b. partial keeps requested kgs');
 
 const remaining20kAt13 = resolveSupplierCurrentRemainingKgs({
@@ -209,7 +221,91 @@ const partial100k = resolveSupplierPartialPaymentInstruction({
   exchangeRate: 13,
 });
 assertClose(partial100k.amountKgs, 100000, '2. partial 100k kgs accepted');
-assertClose(partial100k.amountYuan, 7692.31, '8. partial kgs converts back to cny');
+assertClose(partial100k.amountYuan, 100000 / 13, '8. partial kgs converts back to high-precision cny', 0.00000001);
+
+// 57630 CNY × 13 = 749190; first 500000 KGS leaves exactly 249190 KGS
+{
+  const totalCny = 57630;
+  const rate = 13;
+  const first = resolveSupplierPartialPaymentInstruction({
+    requestedAmountKgs: 500000,
+    remainingCny: totalCny,
+    exchangeRate: rate,
+  });
+  assertClose(first.amountKgs, 500000, '57630 case: first payment kgs');
+  assertClose(first.amountYuan, 500000 / 13, '57630 case: first settled cny high precision', 0.00000001);
+  assertEqual(Math.abs(first.amountYuan - 38461.54) < 0.00000001, false, '57630 case: not 2dp truncated');
+
+  const afterFirst = resolveSupplierPaymentMonetaryBalance({
+    totalYuan: totalCny,
+    exchangeRate: rate,
+    payments: [
+      {
+        amountYuan: first.amountYuan,
+        exchangeRate: rate,
+        amountKgs: first.amountKgs,
+        approvedAmountKgs: first.amountKgs,
+        status: 'ACTIVE',
+      },
+    ],
+  });
+  assertClose(afterFirst.obligationKgs, 749190, '57630 case: obligation kgs');
+  assertClose(afterFirst.remainingKgs, 249190, '57630 case: remaining kgs exact');
+  assertEqual(Math.abs(afterFirst.remainingKgs - 249189.98) < 0.0001, false, '57630 case: no 0.02 drift');
+
+  const closing = resolveSupplierPayRemainderInstruction({
+    remainingCny: afterFirst.remainingCny,
+    exchangeRate: rate,
+    remainingKgs: afterFirst.remainingKgs,
+  });
+  assertClose(closing.amountKgs, 249190, '57630 case: final payment kgs');
+  assertClose(closing.amountYuan + first.amountYuan, totalCny, '57630 case: cny sums to total', 0.0000001);
+
+  const fullyPaid = resolveSupplierPaymentMonetaryBalance({
+    totalYuan: totalCny,
+    exchangeRate: rate,
+    payments: [
+      {
+        amountYuan: first.amountYuan,
+        exchangeRate: rate,
+        amountKgs: 500000,
+        approvedAmountKgs: 500000,
+        actualPaidKgs: 500000,
+        status: 'ACTIVE',
+      },
+      {
+        amountYuan: closing.amountYuan,
+        exchangeRate: rate,
+        amountKgs: 249190,
+        approvedAmountKgs: 249190,
+        actualPaidKgs: 249190,
+        status: 'ACTIVE',
+      },
+    ],
+  });
+  assertEqual(fullyPaid.isFullyPaid, true, '57630 case: fully paid');
+  assertClose(fullyPaid.confirmedPaidKgs, 749190, '57630 case: confirmed total kgs');
+  assertClose(fullyPaid.confirmedPaidKgs / totalCny, 13, '57630 case: weighted rate 13', 0.0001);
+}
+
+// Historical 2dp-truncated amountYuan still recovers remaining via KGS÷rate
+{
+  const recovered = resolveSupplierPaymentMonetaryBalance({
+    totalYuan: 57630,
+    exchangeRate: 13,
+    payments: [
+      {
+        amountYuan: 38461.54, // previously truncated storage
+        exchangeRate: 13,
+        amountKgs: 500000,
+        approvedAmountKgs: 500000,
+        actualPaidKgs: 500000,
+        status: 'ACTIVE',
+      },
+    ],
+  });
+  assertClose(recovered.remainingKgs, 249190, 'historical truncated cny still yields 249190 remaining');
+}
 
 const partial250k = resolveSupplierPartialPaymentInstruction({
   requestedAmountKgs: 250000,

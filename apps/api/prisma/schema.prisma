@@ -3312,9 +3312,9 @@ model ProcurementOrder {
   totalPackagingWeightKg                Decimal                                @default(0) @db.Decimal(14, 3)
   purchaseDate                          DateTime?
   totalYuan                             Decimal                                @default(0) @db.Decimal(14, 2)
-  totalPaidYuan                         Decimal                                @default(0) @db.Decimal(14, 2)
+  totalPaidYuan                         Decimal                                @default(0) @db.Decimal(18, 8)
   totalPaidKgs                          Decimal                                @default(0) @db.Decimal(14, 2)
-  remainingYuan                         Decimal                                @default(0) @db.Decimal(14, 2)
+  remainingYuan                         Decimal                                @default(0) @db.Decimal(18, 8)
   weightedAverageYuanRate               Decimal?                               @db.Decimal(14, 4)
   supplierPaymentStatus                 ProcurementSupplierPaymentLedgerStatus @default(UNPAID)
   totalTransportCostKgs                 Decimal                                @default(0) @db.Decimal(14, 2)
@@ -3480,7 +3480,7 @@ model ProcurementSupplierPayment {
   paymentInfoVersion         ProcurementPaymentInfoVersion?   @relation(fields: [paymentInfoVersionId], references: [id])
   sequenceNumber             Int                              @default(1)
   paymentDate                DateTime
-  amountYuan                 Decimal                          @db.Decimal(14, 2)
+  amountYuan                 Decimal                          @db.Decimal(18, 8)
   exchangeRate               Decimal                          @db.Decimal(14, 4)
   calculatedAmountKgs        Decimal                          @default(0) @db.Decimal(14, 2)
   approvedAmountKgs          Decimal                          @default(0) @db.Decimal(14, 2)
