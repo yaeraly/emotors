@@ -206,6 +206,27 @@ function hqDetailLabel(
   return compact ? t(`branchProductRequest.hqCompact.${compactKey}`) : t(fullKey);
 }
 
+function isReviewedApprovedLineStatus(lineStatus?: string | null) {
+  return lineStatus === 'APPROVED' || lineStatus === 'PARTIALLY_APPROVED';
+}
+
+function isReviewedRejectedLineStatus(lineStatus?: string | null) {
+  return lineStatus === 'REJECTED' || lineStatus === 'REMOVED_BY_HQ_SALES';
+}
+
+/** Persisted backend line status → subtle row background for HQ Sales review table. */
+function hqSalesReviewLineRowClass(lineStatus?: string | null) {
+  if (isReviewedApprovedLineStatus(lineStatus)) return 'bg-green-50';
+  if (isReviewedRejectedLineStatus(lineStatus)) return 'bg-red-50';
+  return '';
+}
+
+function hqSalesReviewLineStickyCellClass(lineStatus?: string | null) {
+  if (isReviewedApprovedLineStatus(lineStatus)) return 'sticky right-0 bg-green-50';
+  if (isReviewedRejectedLineStatus(lineStatus)) return 'sticky right-0 bg-red-50';
+  return 'sticky right-0 bg-white';
+}
+
 export default function BranchPurchaseRequestDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -860,7 +881,7 @@ export default function BranchPurchaseRequestDetailPage() {
                 const hasPolicy = item.pricingPolicyAvailable !== false;
 
                 return (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={hqSalesReviewLineRowClass(item.lineStatus)}>
                     <td className="max-w-[8rem] truncate px-2 py-1.5">
                       <p className="truncate font-semibold text-slate-900" title={item.productName}>{item.productName}</p>
                       <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
@@ -899,7 +920,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     <td className="px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{formatKgs(requestLineTotal(item))}</td>
                     {canActOnRequest && reviewable ? (
-                      <td className="sticky right-0 bg-white px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
+                      <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">
                           <div className="flex flex-wrap gap-0.5">
                             <button

@@ -124,6 +124,15 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /max=\{item\.quantity\}/);
   });
 
+  it('hq sales compact product table highlights approved rows from persisted lineStatus', () => {
+    assert.match(detailPage, /hqSalesReviewLineRowClass\(item\.lineStatus\)/);
+    assert.match(detailPage, /isReviewedApprovedLineStatus/);
+    assert.match(detailPage, /PARTIALLY_APPROVED/);
+    assert.match(detailPage, /bg-green-50/);
+    assert.match(detailPage, /hqSalesReviewLineStickyCellClass\(item\.lineStatus\)/);
+    assert.doesNotMatch(detailPage, /decision\.action === 'APPROVE'[\s\S]*bg-green-50/);
+  });
+
   it('hq sales compact product table omits Доступ and uses required column order', () => {
     const compactTableStart = detailPage.indexOf('hqCompactTable && canSeeHqStock ? (');
     assert.ok(compactTableStart >= 0);
