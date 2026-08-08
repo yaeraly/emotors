@@ -496,7 +496,7 @@ function CustomersPageContent() {
                 <h2 className="text-3xl font-bold text-slate-950">{t('crm.title')}</h2>
               </>
             ) : null}
-            {!branchOwnerView ? (
+            {!branchOwnerView && !branchSalesManagerView ? (
               <p className={`text-slate-500 ${showPageTitle ? 'mt-2' : ''}`}>
                 {t('crm.customerHistory')}
               </p>

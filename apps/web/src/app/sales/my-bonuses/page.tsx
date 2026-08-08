@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type MyBonusesResponse = {
@@ -40,8 +42,14 @@ function money(value: number) {
 
 export default function MyBonusesPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<MyBonusesResponse | null>(null);
   const [error, setError] = useState('');
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     apiFetch<MyBonusesResponse>('/sales-motivation/my-bonuses')
@@ -54,10 +62,12 @@ export default function MyBonusesPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.sales')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('nav.myBonuses')}</h2>
-        </div>
+        {showPageTitle ? (
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.sales')}</p>
+            <h2 className="text-3xl font-bold text-slate-950">{t('nav.myBonuses')}</h2>
+          </div>
+        ) : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {summary ? (
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">

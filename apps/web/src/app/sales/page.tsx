@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale, canDeleteInstallmentDraft, isBranchOwnerUser, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { canCreateSale, canDeleteInstallmentDraft, isBranchOwnerUser, isBranchSalesManagerUser, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
@@ -32,7 +32,7 @@ export default function SalesPage() {
   const hideProfitColumn = shouldHideSaleProfitColumn(user);
   const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
   const showPageTitle = !usesUnifiedNavPageTitle(user);
-  const hideSalesDuplicateTitles = isBranchOwnerUser(user);
+  const hideSalesDuplicateTitles = isBranchOwnerUser(user) || isBranchSalesManagerUser(user);
   const tableColumnCount = (hideProfitColumn ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
 
   const query = useMemo(() => {

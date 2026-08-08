@@ -422,11 +422,11 @@ export function isBranchOwnerProcurementForbiddenPath(pathname: string) {
   return pathname === '/procurement' || pathname.startsWith('/procurement/');
 }
 
-/** Branch CEO tables are scoped to one branch — hide redundant branch column. */
+/** Branch-scoped roles already operate inside one branch — hide redundant branch column. */
 export function shouldShowBranchColumnForBranchScopedTables(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return !isBranchOwnerUser(user) && !isBranchWarehouseOperator(user);
+  return !isBranchOwnerUser(user) && !isBranchWarehouseOperator(user) && !isBranchSalesManagerUser(user);
 }
 
 /** Branch CEO sales list keeps localized payment status only. */
