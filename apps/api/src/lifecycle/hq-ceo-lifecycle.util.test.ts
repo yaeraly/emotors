@@ -1,11 +1,13 @@
 import { ForbiddenException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import {
   canHqCeoManageLifecycle,
   assertCanHqCeoManageLifecycle,
   assessBranchDeleteBlocking,
   assessBranchWarehouseDeleteBlocking,
   formatBranchDeleteBlockMessage,
+  isActiveBranchEmployee,
   isBranchDeleteBlocked,
 } from './hq-ceo-lifecycle.util';
 import { BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE } from './hq-ceo-lifecycle.constants';
@@ -221,8 +223,69 @@ async function run() {
   assert(activeEmployeesBranch.blocked === true, '13. Branch with active employees is blocked');
   assert(activeEmployeesBranch.blockers.activeEmployees === 2, '13b. activeEmployees reported');
   assert(
-    formatBranchDeleteBlockMessage(activeEmployeesBranch.blockers).includes('активные сотрудники'),
-    '13c. Specific employee blocker message',
+    formatBranchDeleteBlockMessage(activeEmployeesBranch.blockers).includes('активные сотрудники (2)'),
+    '13c. Specific employee blocker message with count',
+  );
+
+  assert(
+    isActiveBranchEmployee(
+      {
+        branchId: 'branch-users',
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        role: Role.MANAGER,
+      },
+      'branch-users',
+    ) === true,
+    '13d. Active branch manager counts as active employee',
+  );
+  assert(
+    isActiveBranchEmployee(
+      {
+        branchId: 'branch-users',
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        role: Role.OWNER,
+      },
+      'branch-users',
+    ) === false,
+    '13e. Global OWNER linked to branch is not an active branch employee',
+  );
+  assert(
+    isActiveBranchEmployee(
+      {
+        branchId: 'branch-users',
+        deletedAt: null,
+        status: UserStatus.INACTIVE,
+        role: Role.MANAGER,
+      },
+      'branch-users',
+    ) === false,
+    '13f. Inactive branch employee does not block',
+  );
+  assert(
+    isActiveBranchEmployee(
+      {
+        branchId: 'branch-users',
+        deletedAt: new Date(),
+        status: UserStatus.ACTIVE,
+        role: Role.MANAGER,
+      },
+      'branch-users',
+    ) === false,
+    '13g. Soft-deleted branch employee does not block',
+  );
+  assert(
+    isActiveBranchEmployee(
+      {
+        branchId: null,
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        role: Role.MANAGER,
+      },
+      'branch-users',
+    ) === false,
+    '13h. Removed branch assignment does not block',
   );
 
   const stockedBranch = await assessBranchDeleteBlocking(
@@ -314,6 +377,39 @@ async function run() {
     BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE.includes('Складды'),
     '23. Warehouse blocked message is in Kyrgyz',
   );
+
+  const prisma = new PrismaClient();
+  try {
+    const bishkek = await prisma.branch.findFirst({
+      where: { code: 'BISHKEK' },
+      select: { id: true, name: true },
+    });
+    if (bishkek) {
+      const linkedUsers = await prisma.user.findMany({
+        where: { branchId: bishkek.id },
+        include: { userRoles: { include: { role: true } } },
+      });
+      const activeBranchEmployees = linkedUsers.filter((user) =>
+        isActiveBranchEmployee(user, bishkek.id),
+      );
+      assert(
+        activeBranchEmployees.length === 0,
+        '24. Bishkek Main Branch has zero active branch employees',
+      );
+
+      const assessment = await prisma.$transaction((tx) => assessBranchDeleteBlocking(tx, bishkek.id));
+      assert(
+        assessment.blockers.activeEmployees === 0,
+        '24b. Bishkek employee validation passes in delete guard',
+      );
+      assert(
+        !formatBranchDeleteBlockMessage(assessment.blockers).includes('активные сотрудники'),
+        '24c. Bishkek does not get false employee blocker message',
+      );
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
 
   console.log('hq-ceo-lifecycle.util.test.ts: all assertions passed');
 }

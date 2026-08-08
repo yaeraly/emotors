@@ -15,6 +15,7 @@ import {
   ACTIVE_HQ_STOCK_BOOKING_STATUSES,
   ACTIVE_PICKING_TASK_STATUSES,
   BRANCH_ACTIVE_DISTRIBUTION_STATUSES,
+  BRANCH_ACTIVE_EMPLOYEE_ROLES,
   BRANCH_ACTIVE_FINANCE_TRANSFER_STATUSES,
   BRANCH_ACTIVE_SALE_STATUSES,
   BRANCH_ACTIVE_SERVICE_ORDER_STATUSES,
@@ -217,6 +218,43 @@ export function isMoneyBlocking(value: number): boolean {
   return Math.abs(value) > BRANCH_DELETE_MONEY_TOLERANCE;
 }
 
+type ActiveBranchEmployeeCandidate = {
+  branchId: string | null;
+  deletedAt: Date | null;
+  status: UserStatus;
+  role: Role;
+  userRoles?: Array<{ role: { code: Role } }>;
+};
+
+export function isActiveBranchEmployee(
+  user: ActiveBranchEmployeeCandidate,
+  branchId: string,
+): boolean {
+  if (user.branchId !== branchId) return false;
+  if (user.deletedAt !== null) return false;
+  if (user.status !== UserStatus.ACTIVE) return false;
+
+  const assignedRoles = user.userRoles?.map((row) => row.role.code) ?? [];
+  const effectiveRoles = assignedRoles.length > 0 ? assignedRoles : [user.role];
+  return effectiveRoles.some((role) => BRANCH_ACTIVE_EMPLOYEE_ROLES.includes(role));
+}
+
+export function activeBranchEmployeeWhere(branchId: string): Prisma.UserWhereInput {
+  return {
+    branchId,
+    deletedAt: null,
+    status: UserStatus.ACTIVE,
+    OR: [
+      { role: { in: BRANCH_ACTIVE_EMPLOYEE_ROLES } },
+      { userRoles: { some: { role: { code: { in: BRANCH_ACTIVE_EMPLOYEE_ROLES } } } } },
+    ],
+  };
+}
+
+export async function countActiveBranchEmployees(tx: Tx, branchId: string) {
+  return tx.user.count({ where: activeBranchEmployeeWhere(branchId) });
+}
+
 function formatMoney(value: number): string {
   return new Intl.NumberFormat('ru-RU', {
     minimumFractionDigits: 0,
@@ -263,7 +301,7 @@ export function formatBranchDeleteBlockMessage(blockers: BranchDeleteBlockers): 
     blockers.activeStockBookings === 0 &&
     blockers.otherBlockingRecords.length === 0
   ) {
-    return 'Нельзя удалить филиал: есть активные сотрудники.';
+    return `Нельзя удалить филиал: есть активные сотрудники (${blockers.activeEmployees}).`;
   }
 
   const lines: string[] = ['Филиал не может быть удалён:'];
@@ -375,9 +413,7 @@ export async function assessBranchDeleteBlocking(tx: Tx, branchId: string) {
     openCashShifts,
     saleDebtAggregate,
   ] = await Promise.all([
-    tx.user.count({
-      where: { branchId, deletedAt: null, status: UserStatus.ACTIVE },
-    }),
+    countActiveBranchEmployees(tx, branchId),
     tx.branchDistributionOrder.count({
       where: {
         branchId,

@@ -4,6 +4,7 @@ import {
   HqStockBookingStatus,
   HqWarehousePickingTaskStatus,
   InventoryCountStatus,
+  Role,
   SaleInstallmentApprovalStatus,
   SaleStatus,
 } from '@prisma/client';
@@ -32,6 +33,16 @@ export const BRANCH_ACTIVE_SALE_STATUSES: SaleStatus[] = [
 ];
 
 export const BRANCH_DELETE_MONEY_TOLERANCE = 0.01;
+
+/** Branch operational staff roles — excludes global/HQ roles such as OWNER or CEO. */
+export const BRANCH_ACTIVE_EMPLOYEE_ROLES: Role[] = [
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.MASTER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+  Role.ACCOUNTANT,
+];
 
 export const BRANCH_ACTIVE_SERVICE_ORDER_STATUSES = [
   'NEW',
