@@ -41,6 +41,21 @@ describe('branch sales manager ui cleanup', () => {
     assert.doesNotMatch(detailPage, /branchSalesManagerView && !reviewed/);
     assert.match(detailPage, /!branchSalesManagerView \? \(/);
     assert.match(detailPage, /<tfoot/);
+
+    const bsmTableStart = detailPage.indexOf('{branchSalesManagerView ? (');
+    const bsmTableEnd = detailPage.indexOf(') : executiveCompactView ? (');
+    assert.ok(bsmTableStart >= 0 && bsmTableEnd > bsmTableStart);
+    const bsmTable = detailPage.slice(bsmTableStart, bsmTableEnd);
+    assert.match(bsmTable, /t\('sales\.product'\)/);
+    assert.match(bsmTable, /t\('distribution\.quantity'\)/);
+    assert.match(bsmTable, /t\('branchProductRequest\.branchPurchasePrice'\)/);
+    assert.match(bsmTable, /t\('branchProductRequest\.totalAmount'\)/);
+    assert.doesNotMatch(bsmTable, /inventory\.sku/);
+    assert.doesNotMatch(bsmTable, /item\.sku/);
+    assert.match(bsmTable, /item\.productName/);
+    assert.match(bsmTable, /item\.quantity/);
+    assert.match(bsmTable, /formatLineTotalKgs\(item\)/);
+    assert.match(bsmTable, /formatOrderTotalKgs\(request\.items\)/);
   });
 
   it('hides repeated customer history subtitle for branch sales manager', () => {

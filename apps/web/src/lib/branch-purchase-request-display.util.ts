@@ -1,4 +1,4 @@
-import { formatKgs, formatKgsLocalized, roundMoney } from '@/lib/money';
+import { formatKgsLocalized, roundMoney } from '@/lib/money';
 
 export type BranchPurchaseRequestLinePricing = {
   quantity: number;
