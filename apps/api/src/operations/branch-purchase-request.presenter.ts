@@ -8,6 +8,11 @@ import {
   resolveBranchPurchaseLinePayableAmount,
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
+import {
+  resolveBranchPurchaseBranchLineTotalKgs,
+  resolveBranchPurchaseBranchUnitPriceKgs,
+  sumBranchPurchaseBranchLineTotalsKgs,
+} from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
@@ -360,68 +365,75 @@ export function sanitizeBranchPurchaseRequest<T extends {
       .map((item) => [(item as { id: string }).id, item]),
   );
 
+  const branchItems = request.items.map((item) => {
+    const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
+    const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
+      branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+      resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+    });
+    const lineTotal = resolveBranchPurchaseBranchLineTotalKgs({
+      quantity: item.quantity,
+      branchPurchasePriceKgs: branchUnitPrice,
+      resolvedBranchPriceKgs: branchUnitPrice,
+      totalAmount: fullItem?.totalAmount ?? item.totalAmount,
+    });
+    return {
+      id: item.id,
+      productId: item.productId,
+      sku: item.sku,
+      productName: item.productName,
+      quantity: item.quantity,
+      approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
+      unavailableQuantity: reviewed
+        ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0))
+        : undefined,
+      lineStatus: reviewed ? item.lineStatus : undefined,
+      rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
+      publicComment: reviewed ? item.publicComment : undefined,
+      unit: item.unit,
+      note: item.note,
+      branchPurchasePriceKgs: branchUnitPrice,
+      totalAmount: lineTotal,
+      approvedLineTotalKgs: reviewed
+        ? (fullItem?.approvedLineTotalKgs ??
+          (item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+            ? lineTotal
+            : undefined))
+        : undefined,
+      weightKg: undefined,
+      hqAvailableStock: undefined,
+      missingQty: reviewed
+        ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
+        : undefined,
+      currentBranchStock: undefined,
+      transportExpenseAllocation: undefined,
+      estimatedUnitCost: undefined,
+      estimatedLineProductCostKgs: undefined,
+      wholesalePriceKgs: undefined,
+      hasPricingPolicyAtReview: undefined,
+      hasPricingPolicyAtSubmit: undefined,
+      pricingPolicyVersionId: undefined,
+      pricingProfileId: undefined,
+      appliedRuleType: undefined,
+      appliedRuleId: undefined,
+      appliedAdjustmentMode: undefined,
+      appliedAdjustmentValue: undefined,
+      baseCostKgs: undefined,
+      baseBranchPriceKgs: undefined,
+      priceResolvedAt: undefined,
+      resolvedBranchPriceKgs: undefined,
+    };
+  });
+
+  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems);
+
   return {
     ...full,
     branchDisplayStatus,
     partialFulfillmentMessage,
-    // Keep authoritative header totals for Branch Sales "Сумма".
-    totalEstimatedAmount: full.totalEstimatedAmount,
+    totalEstimatedAmount: branchOrderTotal > 0 ? branchOrderTotal : full.totalEstimatedAmount,
     totalProductCostKgs: undefined,
     authoritativeTransferCostKgs: undefined,
-    items: request.items.map((item) => {
-      const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
-      const branchPrice =
-        item.branchPurchasePriceKgs ??
-        item.resolvedBranchPriceKgs ??
-        item.wholesalePriceKgs ??
-        null;
-      return {
-        id: item.id,
-        productId: item.productId,
-        sku: item.sku,
-        productName: item.productName,
-        quantity: item.quantity,
-        approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
-        unavailableQuantity: reviewed
-          ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0))
-          : undefined,
-        lineStatus: reviewed ? item.lineStatus : undefined,
-        rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
-        publicComment: reviewed ? item.publicComment : undefined,
-        unit: item.unit,
-        note: item.note,
-        branchPurchasePriceKgs: branchPrice,
-        // Prefer authoritative payable total from full FIFO-based response.
-        totalAmount: fullItem?.totalAmount ?? item.totalAmount,
-        approvedLineTotalKgs: reviewed
-          ? (fullItem?.approvedLineTotalKgs ??
-            (item.approvedQuantity != null && Number(item.approvedQuantity) > 0
-              ? fullItem?.totalAmount
-              : undefined))
-          : undefined,
-        weightKg: undefined,
-        hqAvailableStock: undefined,
-        missingQty: reviewed
-          ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
-          : undefined,
-        currentBranchStock: undefined,
-        transportExpenseAllocation: undefined,
-        estimatedUnitCost: undefined,
-        estimatedLineProductCostKgs: undefined,
-        wholesalePriceKgs: undefined,
-        hasPricingPolicyAtReview: undefined,
-        hasPricingPolicyAtSubmit: undefined,
-        pricingPolicyVersionId: undefined,
-        pricingProfileId: undefined,
-        appliedRuleType: undefined,
-        appliedRuleId: undefined,
-        appliedAdjustmentMode: undefined,
-        appliedAdjustmentValue: undefined,
-        baseCostKgs: undefined,
-        baseBranchPriceKgs: undefined,
-        priceResolvedAt: undefined,
-        resolvedBranchPriceKgs: undefined,
-      };
-    }),
+    items: branchItems,
   };
 }

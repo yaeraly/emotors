@@ -126,7 +126,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.match(BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE, /Ориентировочная сумма/);
   });
 
-  it('Branch Sales sanitize keeps Сумма equal to FIFO product cost', () => {
+  it('Branch Sales sanitize keeps Сумма equal to sum of branch price line totals', () => {
     const lines = buildChinaBatchLines();
     const staleEstimated = sumDisplayMoneyTotals(
       lines.map((line) =>
@@ -157,12 +157,12 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       },
       true,
     );
-    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
-    assert.equal(sanitized.totalProductCostKgs, undefined);
     const lineSum = sumDisplayMoneyTotals(
       sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
     );
-    assert.equal(lineSum, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, lineSum);
+    assert.ok(Math.abs(lineSum - CHINA_BATCH_TOTAL) <= 1);
+    assert.equal(sanitized.totalProductCostKgs, undefined);
   });
 
   it('repair of estimated amount is idempotent for already-aligned totals', () => {
