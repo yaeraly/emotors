@@ -31,10 +31,7 @@ export default function BranchCashierInvoicesPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('branchCashier.section')}</p>
-          <h2 className="text-3xl font-bold">{t('branchCashier.invoicesToPay')}</h2>
-        </div>
+        <h2 className="text-3xl font-bold">{t('branchCashier.invoicesToPay')}</h2>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('branchAccountant.searchInvoice')} className="w-full rounded-xl border border-slate-300 px-4 py-3 md:max-w-md" />
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">

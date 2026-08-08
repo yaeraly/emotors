@@ -4,16 +4,20 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { ServiceOrder } from '@/lib/types';
+import { shouldHideBranchCashierDuplicateNavTitle } from '@/lib/unified-nav-page-title';
+import type { ServiceOrder, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
 export default function ServiceCashierPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [error, setError] = useState('');
+  const hideDuplicateTitle = shouldHideBranchCashierDuplicateNavTitle(user);
 
   useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     apiFetch<ServiceOrder[]>('/service-orders?status=READY_FOR_PAYMENT')
       .then(setOrders)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -22,10 +26,14 @@ export default function ServiceCashierPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('service.title')}</p>
+        {hideDuplicateTitle ? (
           <h2 className="text-3xl font-bold text-slate-950">Готово к оплате</h2>
-        </div>
+        ) : (
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('service.title')}</p>
+            <h2 className="text-3xl font-bold text-slate-950">Готово к оплате</h2>
+          </div>
+        )}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">

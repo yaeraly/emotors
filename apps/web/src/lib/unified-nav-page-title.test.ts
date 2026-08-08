@@ -32,6 +32,18 @@ const hqManager = {
 assertEqual(usesUnifiedNavPageTitle(branchSalesManager), true, 'branch sales manager uses unified nav titles');
 assertEqual(usesUnifiedNavPageTitle(hqManager), false, 'hq manager keeps in-page titles');
 
+const branchCashier = {
+  id: 'cashier-1',
+  email: 'cashier@test.com',
+  fullName: 'Branch Cashier',
+  role: 'CASHIER' as const,
+  roles: ['CASHIER' as const],
+  branchId: 'branch-1',
+  permissions: ['payments.manage', 'cashier', 'sales.manage'],
+} satisfies User;
+
+assertEqual(usesUnifiedNavPageTitle(branchCashier), true, 'branch cashier hides duplicate page titles');
+
 const returnsPage = readFileSync(join(__dirname, '../app/returns/page.tsx'), 'utf8');
 const customersPage = readFileSync(join(__dirname, '../app/customers/page.tsx'), 'utf8');
 const branchProductOrdersSection = readFileSync(join(__dirname, '../components/BranchProductOrdersSection.tsx'), 'utf8');

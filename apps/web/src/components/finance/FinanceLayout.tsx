@@ -8,7 +8,7 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import { useTranslation } from '@/i18n/useTranslation';
 import { financeRootHrefForUser, visibleFinanceNavSections } from '@/lib/finance-nav';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
-import { isBranchOwnerUser } from '@/lib/rbac';
+import { isBranchCashierUser, isBranchOwnerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useEffect, useState } from 'react';
 
@@ -44,7 +44,7 @@ export function FinanceLayout({
   const mainNav = visibleFinanceNavSections(user);
   const financeRootHref = financeRootHrefForUser(user);
   const actions = headerActions ?? primaryAction;
-  const hideFinanceDuplicateNav = isBranchOwnerUser(user);
+  const hideFinanceDuplicateNav = isBranchOwnerUser(user) || isBranchCashierUser(user);
 
   return (
     <ProtectedShell>

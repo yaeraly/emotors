@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
-import type { User } from '@/lib/types';
+import type { FinanceAccount, User } from '@/lib/types';
+import { canShowHqCashierAccountTransferMenu } from '@/lib/finance-account-visibility';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchWarehouseOperatorRequestsForbiddenPath, BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT, isBranchMasterUser, isBranchMasterInventoryForbiddenPath, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser, isSysAdminUser } from '@/lib/rbac';
 import { SYSADMIN_NAV_SECTIONS } from '@/lib/sysadmin-nav';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
@@ -95,6 +96,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const [loading, setLoading] = useState(() => !getCachedUser());
   const [forbidden, setForbidden] = useState(false);
   const [forbiddenReason, setForbiddenReason] = useState<'procurement' | null>(null);
+  const [hqCashierTransferMenuVisible, setHqCashierTransferMenuVisible] = useState(false);
 
   // Load session user once per browser session (cached). Never block navigation remounts on /auth/me.
   useEffect(() => {
@@ -160,6 +162,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
       void apiFetch('/audit/branch-sales-manager-menu', { method: 'POST' }).catch(() => null);
     }
   }, [user, pathname, router]);
+
+  useEffect(() => {
+    if (!user || !isHqCashierUser(user)) {
+      setHqCashierTransferMenuVisible(false);
+      return;
+    }
+
+    let cancelled = false;
+    void apiFetch<FinanceAccount[]>('/finance/accounts')
+      .then((accounts) => {
+        if (!cancelled) {
+          setHqCashierTransferMenuVisible(canShowHqCashierAccountTransferMenu(accounts));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHqCashierTransferMenuVisible(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   async function logout() {
     await apiFetch('/auth/logout', { method: 'POST' }).catch(() => null);
@@ -386,6 +410,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               <>
                 <Link href="/finance/cashier-bills" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.cashierBills')}</Link>
                 <Link href="/finance/accounts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.myAccounts')}</Link>
+                {hqCashierTransferMenuVisible ? (
+                  <Link href="/finance/transfers" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    {t('branchCashier.accountTransfers')}
+                  </Link>
+                ) : null}
                 <Link href="/finance/transfers?status=PENDING_CASHIER" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.transfersCashierQueue')}</Link>
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>

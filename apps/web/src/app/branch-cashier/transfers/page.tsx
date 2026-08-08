@@ -133,10 +133,7 @@ export default function BranchCashierTransfersPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('branchCashier.section')}</p>
-          <h2 className="text-3xl font-bold">{t('branchCashier.accountTransfers')}</h2>
-        </div>
+        <h2 className="text-3xl font-bold">{t('branchCashier.accountTransfers')}</h2>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
