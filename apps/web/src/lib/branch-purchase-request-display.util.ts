@@ -64,7 +64,12 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
   return price;
 }
 
-/** Row total for NEW/DRAFT form: prefer authoritative backend total, else quantity × branch price. */
+/**
+ * Row total for NEW/DRAFT form (restore 0007a11 architecture):
+ * Prefer backend FIFO/payable `authoritativeLineTotalKgs` / `lineTotalKgs`.
+ * Only fall back to quantity × displayed branch price when no authoritative total exists
+ * (franchise create flow before prices load). Never rebuild HQ at-cost totals from rounded units.
+ */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
   const authoritative = line.authoritativeLineTotalKgs;
   if (authoritative != null && Number.isFinite(Number(authoritative)) && Number(authoritative) > 0) {
@@ -77,7 +82,7 @@ export function draftFormLineTotal(line: DraftFormLinePricing): number {
   return roundMoney(qty * price);
 }
 
-/** Bottom total for NEW/DRAFT form: sum of all row totals. */
+/** Bottom total for NEW/DRAFT form: sum of authoritative/derived line totals. */
 export function draftFormOrderTotal(lines: DraftFormLinePricing[]): number {
   return roundMoney(lines.reduce((sum, line) => sum + draftFormLineTotal(line), 0));
 }

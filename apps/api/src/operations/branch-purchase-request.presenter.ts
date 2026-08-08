@@ -368,6 +368,75 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const transferAtCost = shouldTransferBranchPurchaseAtCost(
     request.branch?.branchType ?? request.branchType ?? null,
   );
+
+  // HQ_BRANCH at-cost (restore 0007a11): keep FIFO payable totals from `full`.
+  // Never rebuild Сумма as rounded unit × qty (regression from 4330b1f → 914369.08).
+  if (transferAtCost) {
+    return {
+      ...full,
+      branchDisplayStatus,
+      partialFulfillmentMessage,
+      totalEstimatedAmount: full.totalEstimatedAmount,
+      totalProductCostKgs: undefined,
+      authoritativeTransferCostKgs: undefined,
+      items: request.items.map((item) => {
+        const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
+        const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
+          branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+          resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+        });
+        const fifoLineTotal = fullItem?.totalAmount ?? item.totalAmount;
+        return {
+          id: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          quantity: item.quantity,
+          approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
+          unavailableQuantity: reviewed
+            ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0))
+            : undefined,
+          lineStatus: reviewed ? item.lineStatus : undefined,
+          rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
+          publicComment: reviewed ? item.publicComment : undefined,
+          unit: item.unit,
+          note: item.note,
+          branchPurchasePriceKgs: branchUnitPrice,
+          totalAmount: fifoLineTotal,
+          approvedLineTotalKgs: reviewed
+            ? (fullItem?.approvedLineTotalKgs ??
+              (item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+                ? fifoLineTotal
+                : undefined))
+            : undefined,
+          weightKg: undefined,
+          hqAvailableStock: undefined,
+          missingQty: reviewed
+            ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
+            : undefined,
+          currentBranchStock: undefined,
+          transportExpenseAllocation: undefined,
+          estimatedUnitCost: undefined,
+          estimatedLineProductCostKgs: undefined,
+          wholesalePriceKgs: undefined,
+          hasPricingPolicyAtReview: undefined,
+          hasPricingPolicyAtSubmit: undefined,
+          pricingPolicyVersionId: undefined,
+          pricingProfileId: undefined,
+          appliedRuleType: undefined,
+          appliedRuleId: undefined,
+          appliedAdjustmentMode: undefined,
+          appliedAdjustmentValue: undefined,
+          baseCostKgs: undefined,
+          baseBranchPriceKgs: undefined,
+          priceResolvedAt: undefined,
+          resolvedBranchPriceKgs: undefined,
+        };
+      }),
+    };
+  }
+
+  // Franchise/Dealer: CEO branch price × quantity (4330b1f) — repairs stale zero totals.
   const branchItems = request.items.map((item) => {
     const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
@@ -379,7 +448,6 @@ export function sanitizeBranchPurchaseRequest<T extends {
       branchPurchasePriceKgs: branchUnitPrice,
       resolvedBranchPriceKgs: branchUnitPrice,
       totalAmount: fullItem?.totalAmount ?? item.totalAmount,
-      transferAtCost,
     });
     return {
       id: item.id,
@@ -429,7 +497,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
-  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems, { transferAtCost });
+  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems);
 
   return {
     ...full,
