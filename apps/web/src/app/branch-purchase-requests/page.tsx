@@ -39,6 +39,8 @@ import {
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
+import { draftFormLineTotal, draftFormOrderTotal } from '@/lib/branch-purchase-request-display.util';
+import { formatKgsLocalized } from '@/lib/money';
 
 type RequestItem = {
   id?: string;
@@ -107,13 +109,6 @@ type DraftLine = {
   quantity: string;
   note: string;
 };
-
-function lineTotal(line: DraftLine) {
-  if (line.authoritativeLineTotalKgs != null && Number(line.authoritativeLineTotalKgs) > 0) {
-    return Number(line.authoritativeLineTotalKgs);
-  }
-  return 0;
-}
 
 function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
   if (!line.productId) return '—';
@@ -770,7 +765,7 @@ function BranchPurchaseRequestsPageInner() {
       });
   }, [branchOnlyView, draftProductIds, draftQuantities, form.branchId, showForm]);
 
-  const draftTotalAmount = lines.reduce((sum, line) => sum + lineTotal(line), 0);
+  const draftTotalAmount = draftFormOrderTotal(lines);
 
   if (user && !canView) {
     return (
@@ -1103,10 +1098,7 @@ function BranchPurchaseRequestsPageInner() {
                       </td>
                       {branchOnlyView ? (
                         <td className="px-3 py-2 font-semibold text-slate-900">
-                          {lineTotal(line).toLocaleString('ru-RU', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}{' '}
+                          {formatKgsLocalized(draftFormLineTotal(line))}{' '}
                           сом
                         </td>
                       ) : null}
@@ -1138,7 +1130,7 @@ function BranchPurchaseRequestsPageInner() {
             {branchOnlyView ? (
               <div className="flex justify-end rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                 <span className="font-semibold text-slate-700">{t('branchProductRequest.totalAmount')}:</span>
-                <span className="ml-3 text-lg font-bold text-slate-950">{draftTotalAmount.toFixed(2)} KGS</span>
+                <span className="ml-3 text-lg font-bold text-slate-950">{formatKgsLocalized(draftTotalAmount)} KGS</span>
               </div>
             ) : null}
 

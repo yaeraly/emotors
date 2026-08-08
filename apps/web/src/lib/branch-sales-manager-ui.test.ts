@@ -89,7 +89,13 @@ describe('branch sales manager ui cleanup', () => {
     const formTable = listPage.slice(formTableStart, formTableEnd);
     assert.match(formTable, /branchOnlyView && !branchSalesManagerView[\s\S]*productSearch\.sku/);
     assert.match(formTable, /line\.quantity/);
-    assert.match(formTable, /lineTotal\(line\)/);
+    assert.match(formTable, /draftFormLineTotal\(line\)/);
     assert.match(formTable, /formatBranchPrice\(line, t\)/);
+  });
+
+  it('create and draft product table derives totals from quantity times branch price', () => {
+    assert.match(listPage, /draftFormLineTotal\(line\)/);
+    assert.match(listPage, /draftFormOrderTotal\(lines\)/);
+    assert.doesNotMatch(listPage, /authoritativeLineTotalKgs != null && Number\(line\.authoritativeLineTotalKgs\) > 0/);
   });
 });

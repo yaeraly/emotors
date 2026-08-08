@@ -9,6 +9,15 @@ export type BranchPurchaseRequestLinePricing = {
   pricingPolicyAvailable?: boolean;
 };
 
+/** Draft create/edit form line — quantity is edited as string in the UI. */
+export type DraftFormLinePricing = {
+  productId?: string;
+  quantity: string | number;
+  branchPurchasePriceKgs?: number | null;
+  pricingPending?: boolean;
+  priceResolving?: boolean;
+};
+
 /** Quantity shown in Branch Sales Manager order-detail rows. */
 export function getDisplayQuantity(item: BranchPurchaseRequestLinePricing): number {
   return item.quantity;
@@ -35,6 +44,36 @@ export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number
 /** Order total: sum of all row totals. */
 export function requestOrderTotal(items: BranchPurchaseRequestLinePricing[]): number {
   return roundMoney(items.reduce((sum, item) => sum + requestLineTotal(item), 0));
+}
+
+function parseDraftFormQuantity(quantity: string | number): number {
+  const qty = Number(quantity);
+  return Number.isFinite(qty) && qty > 0 ? qty : 0;
+}
+
+/** Branch price shown in the draft form row (matches formatBranchPrice inputs). */
+export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | null {
+  if (!line.productId) return null;
+  if (line.priceResolving || line.pricingPending) return null;
+  const raw = line.branchPurchasePriceKgs;
+  if (raw == null) return null;
+  const price = Number(raw);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return price;
+}
+
+/** Row total for NEW/DRAFT form: displayed quantity × displayed branch price. */
+export function draftFormLineTotal(line: DraftFormLinePricing): number {
+  const price = getDraftFormBranchPrice(line);
+  if (price == null) return 0;
+  const qty = parseDraftFormQuantity(line.quantity);
+  if (qty <= 0) return 0;
+  return roundMoney(qty * price);
+}
+
+/** Bottom total for NEW/DRAFT form: sum of all row totals. */
+export function draftFormOrderTotal(lines: DraftFormLinePricing[]): number {
+  return roundMoney(lines.reduce((sum, line) => sum + draftFormLineTotal(line), 0));
 }
 
 export function formatFrozenBranchPrice(

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  draftFormLineTotal,
+  draftFormOrderTotal,
   getDisplayQuantity,
+  getDraftFormBranchPrice,
   getFrozenBranchPrice,
   requestLineTotal,
   requestOrderTotal,
@@ -93,6 +96,68 @@ describe('branch purchase request display totals', () => {
         { quantity: 5, branchPurchasePriceKgs: 12000 },
         { quantity: 1, branchPurchasePriceKgs: 25000 },
         { quantity: 3, branchPurchasePriceKgs: 5000 },
+      ]),
+      100000,
+    );
+  });
+});
+
+describe('branch purchase request draft form totals', () => {
+  it('calculates draft line total as quantity times branch price', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '4',
+        branchPurchasePriceKgs: 15000,
+      }),
+      60000,
+    );
+  });
+
+  it('updates draft line total when quantity changes', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '5',
+        branchPurchasePriceKgs: 15000,
+      }),
+      75000,
+    );
+  });
+
+  it('does not stay zero when draft totalAmount was missing but branch price exists', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '3',
+        branchPurchasePriceKgs: 4500,
+      }),
+      13500,
+    );
+  });
+
+  it('returns zero while branch price is still resolving', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '2',
+        branchPurchasePriceKgs: 12000,
+        priceResolving: true,
+      }),
+      0,
+    );
+  });
+
+  it('uses branchPurchasePriceKgs as the calculation source', () => {
+    assert.equal(getDraftFormBranchPrice({ productId: 'p1', branchPurchasePriceKgs: 15000 }), 15000);
+  });
+
+  it('sums draft form rows for bottom total', () => {
+    assert.equal(
+      draftFormOrderTotal([
+        { productId: 'p1', quantity: '4', branchPurchasePriceKgs: 15000 },
+        { productId: 'p2', quantity: '1', branchPurchasePriceKgs: 25000 },
+        { productId: 'p3', quantity: '3', branchPurchasePriceKgs: 5000 },
       ]),
       100000,
     );
