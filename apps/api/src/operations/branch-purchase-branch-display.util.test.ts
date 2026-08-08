@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
-import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import {
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+  sumDisplayMoneyTotals,
+} from '../pricing/product-cost-precision.util';
 import {
   resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
@@ -139,7 +143,7 @@ describe('branch purchase branch display totals', () => {
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
   });
 
-  it('sanitized HQ branch draft preserves FIFO line totals instead of unit×qty drift', () => {
+  it('sanitized HQ branch draft repairs 914369.08-style unit×qty totals to FIFO 914369.80', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
     const lineTotals = distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL);
@@ -149,13 +153,17 @@ describe('branch purchase branch display totals', () => {
       totalCostKgs,
       unit: deriveDisplayUnitCost(totalCostKgs, quantity),
     }));
+    const driftedHeader = sumDisplayMoneyTotals(
+      lines.map((line) => roundDisplayMoney(line.unit * line.quantity)),
+    );
+    assert.notEqual(driftedHeader, CHINA_BATCH_TOTAL);
+
     const sanitized = sanitizeBranchPurchaseRequest(
       {
         status: BranchPurchaseRequestStatus.DRAFT,
         reviewedAt: null,
-        totalEstimatedAmount: roundDisplayMoney(
-          lines.reduce((sum, line) => sum + roundDisplayMoney(line.unit * line.quantity), 0),
-        ),
+        // Simulate BPR-1786197962954-style drifted header/line totals.
+        totalEstimatedAmount: driftedHeader,
         transportCostKgs: 0,
         branch: { branchType: 'HQ_BRANCH' },
         items: lines.map((line, index) => ({
@@ -181,5 +189,6 @@ describe('branch purchase branch display totals', () => {
     );
     assert.equal(lineSum, CHINA_BATCH_TOTAL);
     assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.notEqual(sanitized.totalEstimatedAmount, driftedHeader);
   });
 });

@@ -29,8 +29,10 @@ export function resolveBranchPurchaseLinePayableAmount(input: {
   const quantity = Math.max(0, Number(input.quantity ?? 0));
   const fifoLineCost = roundDisplayMoney(Number(input.estimatedLineProductCostKgs ?? 0));
 
-  if (shouldTransferBranchPurchaseAtCost(input.branchType) && fifoLineCost > 0) {
-    return fifoLineCost;
+  // HQ_BRANCH internal transfer: payable is exact FIFO/landed line cost only.
+  // Never reconstruct from rounded display unit × quantity (causes 0.72-style drift).
+  if (shouldTransferBranchPurchaseAtCost(input.branchType)) {
+    return fifoLineCost > 0 ? fifoLineCost : 0;
   }
 
   const unitPrice = Number(input.unitPriceKgs ?? 0);

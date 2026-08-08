@@ -744,10 +744,12 @@ function BranchPurchaseRequestsPageInner() {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
+              // Prefer live API line total; keep prior authoritative total when API omits it
+              // (HQ at-cost must not fall back to rounded unit × qty).
               authoritativeLineTotalKgs:
                 lineTotalFromApi != null && Number.isFinite(lineTotalFromApi) && lineTotalFromApi > 0
                   ? lineTotalFromApi
-                  : null,
+                  : line.authoritativeLineTotalKgs,
               pricingPending: !hasPricing,
               priceResolving: false,
             };

@@ -187,6 +187,28 @@ describe('branch purchase request draft form totals', () => {
       roundedUnitTotal,
     );
   });
+
+  it('order total uses authoritative FIFO lines so 914369.08 unit×qty drift is avoided', () => {
+    const driftedUnitLine = roundMoney(14756.12 * 11);
+    assert.equal(
+      draftFormOrderTotal([
+        {
+          productId: 'p1',
+          quantity: '11',
+          branchPurchasePriceKgs: 14756.12,
+          authoritativeLineTotalKgs: 162317.33,
+        },
+        {
+          productId: 'p2',
+          quantity: '11',
+          branchPurchasePriceKgs: 14756.12,
+          authoritativeLineTotalKgs: 162317.33,
+        },
+      ]),
+      roundMoney(162317.33 + 162317.33),
+    );
+    assert.notEqual(driftedUnitLine, 162317.33);
+  });
 });
 
 describe('branch purchase request display util smoke', () => {

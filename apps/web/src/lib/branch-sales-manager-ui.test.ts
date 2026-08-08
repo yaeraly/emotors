@@ -97,5 +97,6 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(listPage, /draftFormLineTotal\(line\)/);
     assert.match(listPage, /draftFormOrderTotal\(lines\)/);
     assert.match(listPage, /authoritativeLineTotalKgs/);
+    assert.match(listPage, /line\.authoritativeLineTotalKgs/);
   });
 });

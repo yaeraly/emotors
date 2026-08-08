@@ -458,13 +458,17 @@ export class OperationsService {
           if (fifoCost.allocatedQty > 0) {
             estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
           }
-          lineTotalKgs = resolveBranchPurchaseLinePayableAmount({
+          const payable = resolveBranchPurchaseLinePayableAmount({
             branchType: branch?.branchType,
             quantity,
             estimatedLineProductCostKgs,
             unitPriceKgs: pricing.branchPurchasePriceKgs,
             hasPricingPolicy: pricing.hasPricingPolicy,
           });
+          // HQ at-cost: omit lineTotal when FIFO is unavailable so clients keep prior authoritative totals
+          // instead of rebuilding from rounded unit × qty (914369.08-style drift).
+          lineTotalKgs =
+            shouldTransferBranchPurchaseAtCost(branch?.branchType) && payable <= 0 ? null : payable;
         }
         return [
           product.id,

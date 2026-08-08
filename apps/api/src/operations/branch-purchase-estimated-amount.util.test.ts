@@ -52,6 +52,45 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.notEqual(payable, roundDisplayMoney(unit * 11));
   });
 
+  it('HQ at-cost never falls back to unit×qty when FIFO line cost is missing', () => {
+    const unit = 14756.12;
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.HQ_BRANCH,
+      quantity: 11,
+      estimatedLineProductCostKgs: 0,
+      unitPriceKgs: unit,
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, 0);
+    assert.notEqual(payable, roundDisplayMoney(unit * 11));
+  });
+
+  it('China batch unit×qty drift of 0.72 is not used as HQ payable total', () => {
+    const lines = buildChinaBatchLines();
+    const authoritative = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const driftedUnitTimesQty = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const hqPayable = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        resolveBranchPurchaseLinePayableAmount({
+          branchType: BranchType.HQ_BRANCH,
+          quantity: line.quantity,
+          estimatedLineProductCostKgs: line.totalCostKgs,
+          unitPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+          hasPricingPolicy: true,
+        }),
+      ),
+    );
+    assert.equal(authoritative, CHINA_BATCH_TOTAL);
+    assert.equal(hqPayable, CHINA_BATCH_TOTAL);
+    assert.notEqual(driftedUnitTimesQty, CHINA_BATCH_TOTAL);
+    // Observed BPR-1786197962954-style total 914369.08 vs procurement 914369.80 (−0.72).
+    assert.ok(Math.abs(roundDisplayMoney(CHINA_BATCH_TOTAL - driftedUnitTimesQty)) > 0);
+  });
+
   it('franchise line payable uses unit price × quantity', () => {
     const payable = resolveBranchPurchaseLinePayableAmount({
       branchType: BranchType.FRANCHISE,
