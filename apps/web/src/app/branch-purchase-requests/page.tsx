@@ -282,6 +282,19 @@ function BranchPurchaseRequestsPageInner() {
     dateFrom: '',
     dateTo: '',
   };
+  function resolveFormBranchContext(
+    me: User,
+    branchList: Branch[],
+    bwList: Warehouse[],
+  ): { branchId: string; branchWarehouseId: string } {
+    const branchId = isBranchSalesManagerUser(me)
+      ? (me.branchId ?? '')
+      : (me.branchId || branchList[0]?.id || '');
+    const branchWarehouseId =
+      bwList.find((warehouse) => warehouse.branchId === branchId)?.id ?? bwList[0]?.id ?? '';
+    return { branchId, branchWarehouseId };
+  }
+
   async function load() {
     setLoading(true);
     setListError('');
@@ -296,13 +309,13 @@ function BranchPurchaseRequestsPageInner() {
       setUser(me);
       setBranches(branchList);
       setBranchWarehouses(bwList);
-      const branchId = me.branchId || branchList[0]?.id || '';
-      const branchWarehouseId =
-        bwList.find((warehouse) => warehouse.branchId === branchId)?.id ?? bwList[0]?.id ?? '';
+      const { branchId, branchWarehouseId } = resolveFormBranchContext(me, branchList, bwList);
       setForm((current) => ({
         ...current,
-        branchId: current.branchId || branchId,
-        branchWarehouseId: current.branchWarehouseId || branchWarehouseId,
+        branchId: isBranchSalesManagerUser(me) ? branchId : current.branchId || branchId,
+        branchWarehouseId: isBranchSalesManagerUser(me)
+          ? branchWarehouseId
+          : current.branchWarehouseId || branchWarehouseId,
       }));
     } catch (err) {
       setListError(err instanceof Error ? err.message : t('common.error'));
@@ -413,8 +426,12 @@ function BranchPurchaseRequestsPageInner() {
     }
     setEditingDraftId(request.id);
     setForm({
-      branchId: request.branchId,
-      branchWarehouseId: request.branchWarehouseId ?? form.branchWarehouseId,
+      branchId: isBranchSalesManagerUser(user) ? (user?.branchId ?? request.branchId) : request.branchId,
+      branchWarehouseId: isBranchSalesManagerUser(user)
+        ? (branchWarehouses.find((warehouse) => warehouse.branchId === user?.branchId)?.id ??
+          request.branchWarehouseId ??
+          form.branchWarehouseId)
+        : (request.branchWarehouseId ?? form.branchWarehouseId),
       note: request.note ?? '',
     });
     setLines(linesFromRequest(request));
@@ -448,20 +465,32 @@ function BranchPurchaseRequestsPageInner() {
   }
 
   function buildPayload(asDraft: boolean) {
-    return {
-      branchId: form.branchId,
-      branchWarehouseId: form.branchWarehouseId,
+    const payload = {
       note: form.note,
       status: asDraft ? 'DRAFT' : 'SUBMITTED_TO_HQ',
       items: buildItemsPayload(),
     };
+    if (isBranchSalesManagerUser(user)) {
+      return payload;
+    }
+    return {
+      ...payload,
+      branchId: form.branchId,
+      branchWarehouseId: form.branchWarehouseId,
+    };
   }
 
   function buildUpdatePayload() {
-    return {
-      branchWarehouseId: form.branchWarehouseId,
+    const payload = {
       note: form.note,
       items: buildItemsPayload(),
+    };
+    if (isBranchSalesManagerUser(user)) {
+      return payload;
+    }
+    return {
+      ...payload,
+      branchWarehouseId: form.branchWarehouseId,
     };
   }
 
@@ -617,13 +646,21 @@ function BranchPurchaseRequestsPageInner() {
   const ceoInspectorView = isExecutiveBranchOrderInspector(user);
   const detailHref = (requestId: string) => `/branch-purchase-requests/${requestId}`;
   const activeEditingDraftId = branchSalesManagerView ? draftIdFromUrl : editingDraftId;
+  const activeFormBranchId = branchSalesManagerView ? (user?.branchId ?? form.branchId) : form.branchId;
 
   useEffect(() => {
     if (!branchSalesManagerView) return;
     if (isCreateMode) {
       setEditingDraftId(null);
       setLines([emptyLine()]);
-      setForm((current) => ({ ...current, note: '' }));
+      setForm((current) => ({
+        ...current,
+        note: '',
+        branchId: user?.branchId ?? current.branchId,
+        branchWarehouseId:
+          branchWarehouses.find((warehouse) => warehouse.branchId === user?.branchId)?.id ??
+          current.branchWarehouseId,
+      }));
       setFormDirty(false);
       setError('');
       return;
@@ -637,8 +674,12 @@ function BranchPurchaseRequestsPageInner() {
     }
     setEditingDraftId(request.id);
     setForm({
-      branchId: request.branchId,
-      branchWarehouseId: request.branchWarehouseId ?? form.branchWarehouseId,
+      branchId: isBranchSalesManagerUser(user) ? (user?.branchId ?? request.branchId) : request.branchId,
+      branchWarehouseId: isBranchSalesManagerUser(user)
+        ? (branchWarehouses.find((warehouse) => warehouse.branchId === user?.branchId)?.id ??
+          request.branchWarehouseId ??
+          form.branchWarehouseId)
+        : (request.branchWarehouseId ?? form.branchWarehouseId),
       note: request.note ?? '',
     });
     setLines(linesFromRequest(request));
@@ -694,7 +735,7 @@ function BranchPurchaseRequestsPageInner() {
     .join(',');
 
   useEffect(() => {
-    if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
+    if (!showForm || !branchOnlyView || !activeFormBranchId || !draftProductIds) return;
 
     const quantityList = draftQuantities.split(',').map((value) => Number(value) || 0);
 
@@ -713,7 +754,7 @@ function BranchPurchaseRequestsPageInner() {
     };
 
     const params = new URLSearchParams({
-      branchId: form.branchId,
+      branchId: activeFormBranchId,
       productIds: draftProductIds,
       quantities: quantityList.join(','),
     });
@@ -765,7 +806,7 @@ function BranchPurchaseRequestsPageInner() {
           ),
         );
       });
-  }, [branchOnlyView, draftProductIds, draftQuantities, form.branchId, showForm]);
+  }, [branchOnlyView, draftProductIds, draftQuantities, activeFormBranchId, showForm]);
 
   const draftTotalAmount = draftFormOrderTotal(lines);
 
@@ -987,46 +1028,52 @@ function BranchPurchaseRequestsPageInner() {
                 {requests.find((row) => row.id === activeEditingDraftId)?.requestNumber ?? activeEditingDraftId}
               </p>
             ) : null}
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('distribution.branch')}</span>
-                <select
-                  value={form.branchId}
-                  disabled={!!user?.branchId && !canManage}
-                  onChange={(e) => {
-                    const branchId = e.target.value;
-                    const branchWarehouseId =
-                      branchWarehouses.find((warehouse) => warehouse.branchId === branchId)?.id ?? '';
-                    markFormDirty();
-                    setForm({ ...form, branchId, branchWarehouseId });
-                  }}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                >
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>{branch.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.branchWarehouse')}</span>
-                <select
-                  value={form.branchWarehouseId}
-                  onChange={(e) => {
-                    markFormDirty();
-                    setForm({ ...form, branchWarehouseId: e.target.value });
-                  }}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                >
-                  {branchWarehouses
-                    .filter((warehouse) => warehouse.branchId === form.branchId)
-                    .map((warehouse) => (
-                      <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
+            {!branchSalesManagerView ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('distribution.branch')}</span>
+                  <select
+                    value={form.branchId}
+                    disabled={!!user?.branchId && !canManage}
+                    onChange={(e) => {
+                      const branchId = e.target.value;
+                      const branchWarehouseId =
+                        branchWarehouses.find((warehouse) => warehouse.branchId === branchId)?.id ?? '';
+                      markFormDirty();
+                      setForm({ ...form, branchId, branchWarehouseId });
+                    }}
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  >
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
                     ))}
-                </select>
-              </label>
-            </div>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.branchWarehouse')}</span>
+                  <select
+                    value={form.branchWarehouseId}
+                    onChange={(e) => {
+                      markFormDirty();
+                      setForm({ ...form, branchWarehouseId: e.target.value });
+                    }}
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  >
+                    {branchWarehouses
+                      .filter((warehouse) => warehouse.branchId === form.branchId)
+                      .map((warehouse) => (
+                        <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
 
-            <BranchProductSearch inputRef={productSearchRef} branchId={form.branchId} onSelect={addProductFromSearch} />
+            <BranchProductSearch
+              inputRef={productSearchRef}
+              branchId={activeFormBranchId}
+              onSelect={addProductFromSearch}
+            />
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-sm">

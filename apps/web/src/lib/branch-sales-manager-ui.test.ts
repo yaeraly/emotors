@@ -100,4 +100,18 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(listPage, /authoritativeLineTotalKgs/);
     assert.match(listPage, /line\.authoritativeLineTotalKgs/);
   });
+
+  it('create order form hides branch and branch warehouse selectors for branch sales manager', () => {
+    assert.match(listPage, /!branchSalesManagerView \? \(/);
+    assert.match(listPage, /activeFormBranchId/);
+    assert.match(listPage, /resolveFormBranchContext/);
+    assert.match(listPage, /branchId=\{activeFormBranchId\}/);
+    assert.match(listPage, /branchProductRequest\.branchWarehouse/);
+  });
+
+  it('branch sales manager create payload omits user-selected branch fields', () => {
+    assert.match(listPage, /if \(isBranchSalesManagerUser\(user\)\) \{\s*return payload;\s*\}/);
+    assert.match(listPage, /branchId: form\.branchId/);
+    assert.match(listPage, /branchWarehouseId: form\.branchWarehouseId/);
+  });
 });
