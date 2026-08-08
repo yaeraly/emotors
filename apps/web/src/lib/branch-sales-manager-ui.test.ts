@@ -30,9 +30,9 @@ describe('branch sales manager ui cleanup', () => {
   });
 
   it('order detail uses quantity times branch price for line total', () => {
-    assert.match(detailPage, /requestLineTotal\(item\)/);
+    assert.match(detailPage, /formatLineTotalKgs\(item\)/);
     assert.match(detailPage, /formatFrozenBranchPrice\(item, t\)/);
-    assert.match(detailPage, /requestOrderTotal\(request\.items, request\.totalEstimatedAmount\)/);
+    assert.match(detailPage, /formatOrderTotalKgs\(request\.items\)/);
     assert.doesNotMatch(detailPage, /formatKgs\(item\.totalAmount\)/);
   });
 
@@ -40,6 +40,7 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /branchSalesManagerView \? \(/);
     assert.doesNotMatch(detailPage, /branchSalesManagerView && !reviewed/);
     assert.match(detailPage, /!branchSalesManagerView \? \(/);
+    assert.match(detailPage, /<tfoot/);
   });
 
   it('hides repeated customer history subtitle for branch sales manager', () => {

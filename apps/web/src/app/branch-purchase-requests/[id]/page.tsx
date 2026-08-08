@@ -23,6 +23,8 @@ import { translateStatus } from '@/lib/translate-status';
 import { formatKgs, roundMoney } from '@/lib/money';
 import {
   formatFrozenBranchPrice,
+  formatLineTotalKgs,
+  formatOrderTotalKgs,
   requestLineTotal,
   requestOrderTotal,
 } from '@/lib/branch-purchase-request-display.util';
@@ -728,14 +730,14 @@ export default function BranchPurchaseRequestDetailPage() {
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.estimatedAmount')}</p>
               <p className="mt-1 font-semibold text-slate-900">{formatKgs(request.totalEstimatedAmount)} KGS</p>
             </div>
-          ) : (
+          ) : !branchSalesManagerView ? (
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalAmount')}</p>
               <p className="mt-1 font-semibold text-slate-900">
-                {formatKgs(requestOrderTotal(request.items, request.totalEstimatedAmount))} KGS
+                {formatKgs(requestOrderTotal(request.items))} KGS
               </p>
             </div>
-          )}
+          ) : null}
           {request.note ? (
             <div className="md:col-span-3">
               <p className="text-xs font-bold uppercase text-slate-400">{t('crm.notes')}</p>
@@ -760,17 +762,35 @@ export default function BranchPurchaseRequestDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {request.items.map((item) => (
+                {request.items.map((item) => {
+                  const branchPriceLabel = formatFrozenBranchPrice(item, t);
+                  const showKgsSuffix =
+                    branchPriceLabel !== t('branchProductRequest.pricingPending');
+                  return (
                   <tr key={item.id}>
                     <td className="px-4 py-3 font-semibold text-slate-900">{item.productName}</td>
                     <td className="px-4 py-3 tabular-nums">{item.quantity}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{formatFrozenBranchPrice(item, t)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {branchPriceLabel}
+                      {showKgsSuffix ? ' KGS' : null}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                      {formatKgs(requestLineTotal(item))}
+                      {formatLineTotalKgs(item)} KGS
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
+              <tfoot className="border-t border-slate-200 bg-slate-50">
+                <tr>
+                  <td colSpan={3} className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {t('branchProductRequest.totalAmount')}
+                  </td>
+                  <td className="px-4 py-3 text-right text-base font-bold tabular-nums text-slate-900">
+                    {formatOrderTotalKgs(request.items)} KGS
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           ) : executiveCompactView ? (
             <table className="w-full divide-y divide-slate-200 text-sm">
