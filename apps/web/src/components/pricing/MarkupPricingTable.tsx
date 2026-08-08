@@ -130,9 +130,6 @@ export function MarkupPricingTable({
                       <p className="mt-0.5 text-[10px] font-semibold text-amber-600">{t('pricing.unsavedRow')}</p>
                     ) : null}
                   </td>
-                  <td className={markupTable.tdCategory} title={row.categoryName}>
-                    {row.categoryName}
-                  </td>
                   <td className={markupTable.tdMoney}>
                     <div className="flex flex-col items-end gap-0.5">
                       {row.masterBranchPriceKgs != null &&

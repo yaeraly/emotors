@@ -8,14 +8,12 @@ export const markupTable = {
   table: 'w-full table-fixed divide-y divide-slate-200 text-xs',
   thead: 'bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500',
   thBase: 'px-1.5 py-1.5 whitespace-nowrap',
-  thProduct: 'w-[19%] min-w-[108px] px-2 py-1.5 text-left',
-  thCategory: 'w-[7%] min-w-[44px] px-1 py-1.5 text-center',
+  thProduct: 'w-[26%] min-w-[108px] px-2 py-1.5 text-left',
   thPercent: 'w-[5.5%] min-w-[42px] px-1 py-1.5 text-center',
   thMoney: 'w-[5.5%] min-w-[44px] px-1 py-1.5 text-right',
   thUpdated: 'w-[9%] min-w-[68px] px-1 py-1.5 text-center',
   thActions: 'w-[4%] min-w-[36px] px-1 py-1.5 text-center',
   tdProduct: 'px-2 py-1.5 align-middle',
-  tdCategory: 'px-1 py-1.5 align-middle text-center truncate',
   tdPercent: 'px-1 py-1.5 align-middle text-center whitespace-nowrap tabular-nums',
   tdMoney: 'px-1 py-1.5 align-middle text-right whitespace-nowrap tabular-nums',
   tdUpdated: 'px-1 py-1.5 align-middle text-center text-[10px] text-slate-500 whitespace-nowrap',
@@ -69,11 +67,6 @@ export function MarkupTableHeaders() {
         label={t('pricing.colProduct')}
         tooltip={t('pricing.colProduct')}
         className={markupTable.thProduct}
-      />
-      <CompactHeaderCell
-        label={t('pricing.compactCol.category')}
-        tooltip={t('pricing.tooltip.category')}
-        className={markupTable.thCategory}
       />
       <CompactHeaderCell
         label={t('pricing.compactCol.purchase')}

@@ -366,12 +366,11 @@ export default function PricingBranchesPage() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[960px] divide-y divide-slate-200 text-sm">
+        <table className="w-full min-w-[880px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2">{t('pricing.colSku')}</th>
               <th className="px-3 py-2">{t('pricing.colProduct')}</th>
-              <th className="px-3 py-2">{t('pricing.colCategory')}</th>
               <th className="px-3 py-2">{t('pricing.colUnitCost')}</th>
               <th className="px-3 py-2">{t('pricing.colMarkupLabel')}</th>
               <th className="px-3 py-2">{t('pricing.colBranchPrice')}</th>
@@ -381,21 +380,21 @@ export default function PricingBranchesPage() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                   {t('common.loading')}
                 </td>
               </tr>
             ) : null}
             {!loading && !error && filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                   {t('pricing.productsNotFound')}
                 </td>
               </tr>
             ) : null}
             {!loading && error && filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                   {t('common.error')}
                 </td>
               </tr>
@@ -409,7 +408,6 @@ export default function PricingBranchesPage() {
                     <tr key={row.id}>
                       <td className="px-3 py-2 font-mono text-xs text-slate-700">{row.sku}</td>
                       <td className="px-3 py-2 font-semibold text-slate-900">{row.name}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.categoryName}</td>
                       <td
                         className="px-3 py-2 font-medium text-slate-800"
                         title={costOk ? undefined : t('pricing.noCalculatedCost')}
