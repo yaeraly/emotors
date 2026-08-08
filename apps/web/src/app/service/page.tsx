@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { shouldHideBranchCeoDuplicateNavTitle } from '@/lib/unified-nav-page-title';
+import { shouldHideBranchCeoDuplicateNavTitle, shouldHideBranchMasterDuplicateNavTitle } from '@/lib/unified-nav-page-title';
 import type { ServiceOrder, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -14,7 +14,8 @@ export default function ServicePage() {
   const [user, setUser] = useState<User | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [error, setError] = useState('');
-  const hideDuplicateTitle = shouldHideBranchCeoDuplicateNavTitle(user);
+  const hideDuplicateTitle =
+    shouldHideBranchCeoDuplicateNavTitle(user) || shouldHideBranchMasterDuplicateNavTitle(user);
 
   useEffect(() => {
     void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));

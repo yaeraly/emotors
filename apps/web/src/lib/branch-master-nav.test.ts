@@ -85,4 +85,23 @@ assertEqual(canAccessPath(hqWarehouseManager, '/hq-warehouses'), true, 'hq wareh
 assertEqual(shell.includes("redirectTo: '/service'"), true, 'inventory redirect to service exists');
 assertEqual(shell.includes('isBranchMasterInventoryForbiddenPath'), true, 'protected shell checks inventory redirect');
 
+const servicePage = readFileSync(join(__dirname, '../app/service/page.tsx'), 'utf8');
+const serviceKpiPage = readFileSync(join(__dirname, '../app/service/kpi/page.tsx'), 'utf8');
+
+assertEqual(
+  servicePage.includes('shouldHideBranchMasterDuplicateNavTitle'),
+  true,
+  'service page hides duplicate title for branch master',
+);
+assertEqual(
+  serviceKpiPage.includes('shouldHideBranchMasterDuplicateNavTitle'),
+  true,
+  'service kpi page hides duplicate service subtitle for branch master',
+);
+assertEqual(
+  serviceKpiPage.includes('hideServiceSubtitle'),
+  true,
+  'service kpi page guards service subtitle',
+);
+
 console.log('branch-master-nav.test.ts passed');
