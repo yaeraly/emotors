@@ -842,13 +842,12 @@ export default function BranchPurchaseRequestDetailPage() {
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
+                <th className="px-2 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
                 <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.requested')}>{t('branchProductRequest.hqCompact.requested')}</th>
                 <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.hqPhysicalStock')}>{t('branchProductRequest.hqCompact.hqPhysicalStock')}</th>
-                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.available')}>{t('branchProductRequest.hqCompact.available')}</th>
                 <th className="px-2 py-1.5" title={t('branchProductRequest.hqCompact.tooltip.pricingPolicy')}>{t('branchProductRequest.hqCompact.pricingPolicy')}</th>
                 <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.approved')}>{t('branchProductRequest.hqCompact.approved')}</th>
-                <th className="px-2 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
-                <th className="hidden px-2 py-1.5 text-center md:table-cell" title={t('branchProductRequest.hqCompact.tooltip.branchStock')}>{t('branchProductRequest.hqCompact.branchStock')}</th>
+                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.branchStock')}>{t('branchProductRequest.hqCompact.branchStock')}</th>
                 <th className="px-2 py-1.5 text-right" title={t('branchProductRequest.hqCompact.tooltip.requestTotal')}>{t('branchProductRequest.hqCompact.requestTotal')}</th>
                 {canActOnRequest && reviewable ? (
                   <th className="sticky right-0 bg-slate-50 px-2 py-1.5">{t('branchProductRequest.hqCompact.actions')}</th>
@@ -857,8 +856,6 @@ export default function BranchPurchaseRequestDetailPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {request.items.map((item) => {
-                const generalAvailable = hqStockLoaded ? (item.hqAvailableStock ?? 0) : null;
-                const available = availableForLine(item, hqStockLoaded);
                 const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
                 const hasPolicy = item.pricingPolicyAvailable !== false;
 
@@ -868,17 +865,9 @@ export default function BranchPurchaseRequestDetailPage() {
                       <p className="truncate font-semibold text-slate-900" title={item.productName}>{item.productName}</p>
                       <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
                     </td>
+                    <td className="px-2 py-1.5 text-center">{item.unit}</td>
                     <td className="px-2 py-1.5 text-center tabular-nums">{item.quantity}</td>
                     <td className="px-2 py-1.5 text-center tabular-nums">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">
-                      {hqStockLoaded ? (
-                        <span className={(generalAvailable ?? 0) <= 0 ? 'font-semibold text-red-600' : ''}>
-                          {generalAvailable}
-                        </span>
-                      ) : (
-                        formatHqStockCell(null, false, t)
-                      )}
-                    </td>
                     <td className="px-2 py-1.5">
                       {hasPolicy ? (
                         <span className="text-green-700">{t('branchProductRequest.pricingPolicyOk')}</span>
@@ -907,8 +896,7 @@ export default function BranchPurchaseRequestDetailPage() {
                         item.approvedQuantity ?? '-'
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-center">{item.unit}</td>
-                    <td className="hidden px-2 py-1.5 text-center tabular-nums md:table-cell">{item.currentBranchStock ?? '-'}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{formatKgs(requestLineTotal(item))}</td>
                     {canActOnRequest && reviewable ? (
                       <td className="sticky right-0 bg-white px-2 py-1.5" onClick={(event) => event.stopPropagation()}>

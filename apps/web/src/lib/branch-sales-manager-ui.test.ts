@@ -123,4 +123,34 @@ describe('branch sales manager ui cleanup', () => {
     assert.doesNotMatch(detailPage, /actionPartial'\)/);
     assert.match(detailPage, /max=\{item\.quantity\}/);
   });
+
+  it('hq sales compact product table omits Доступ and uses required column order', () => {
+    const compactTableStart = detailPage.indexOf('hqCompactTable && canSeeHqStock ? (');
+    assert.ok(compactTableStart >= 0);
+    const compactTableEnd = detailPage.indexOf(') : (', compactTableStart);
+    assert.ok(compactTableEnd > compactTableStart);
+    const compactTable = detailPage.slice(compactTableStart, compactTableEnd);
+    assert.doesNotMatch(compactTable, /hqCompact\.available/);
+    const headerStart = compactTable.indexOf('<thead');
+    const headerEnd = compactTable.indexOf('</thead>', headerStart);
+    const header = compactTable.slice(headerStart, headerEnd);
+    const columnKeys = [
+      'hqCompact.product',
+      'hqCompact.unit',
+      'hqCompact.requested',
+      'hqCompact.hqPhysicalStock',
+      'hqCompact.pricingPolicy',
+      'hqCompact.approved',
+      'hqCompact.branchStock',
+      'hqCompact.requestTotal',
+      'hqCompact.actions',
+    ];
+    let lastIndex = -1;
+    for (const key of columnKeys) {
+      const index = header.indexOf(key);
+      assert.ok(index >= 0, `missing ${key} in HQ compact table header`);
+      assert.ok(index > lastIndex, `${key} is out of order in HQ compact table header`);
+      lastIndex = index;
+    }
+  });
 });
