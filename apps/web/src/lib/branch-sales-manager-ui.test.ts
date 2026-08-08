@@ -37,7 +37,8 @@ describe('branch sales manager ui cleanup', () => {
   });
 
   it('order detail branch sales manager table has no sku column', () => {
-    assert.match(detailPage, /branchSalesManagerView && !reviewed/);
+    assert.match(detailPage, /branchSalesManagerView \? \(/);
+    assert.doesNotMatch(detailPage, /branchSalesManagerView && !reviewed/);
     assert.match(detailPage, /!branchSalesManagerView \? \(/);
   });
 

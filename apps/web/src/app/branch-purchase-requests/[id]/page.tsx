@@ -749,7 +749,7 @@ export default function BranchPurchaseRequestDetailPage() {
         ) : null}
 
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          {branchSalesManagerView && !reviewed ? (
+          {branchSalesManagerView ? (
             <table className="w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
