@@ -964,8 +964,6 @@ function BranchPurchaseRequestsPageInner() {
                       {showBranchColumn ? (
                         <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.branch')}</th>
                       ) : null}
-                      <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.requester')}</th>
-                      <th className={hqSalesListTableThClass} title={t('operations.hqBranchOrdersTable.hqWarehouseTooltip')}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th>
                       <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.status')}</th>
                       <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.positionsTooltip')}>{t('operations.hqBranchOrdersTable.positions')}</th>
                       <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
@@ -976,11 +974,6 @@ function BranchPurchaseRequestsPageInner() {
                   <tbody className="divide-y divide-slate-100">
                     {visibleRequests.map((request) => {
                       const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
-                      const hqWarehouseName =
-                        request.assignedHqWarehouse?.name ??
-                        request.branch?.assignedHqWarehouse?.name ??
-                        branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
-                        '—';
                       return (
                         <tr
                           key={request.id}
@@ -995,10 +988,6 @@ function BranchPurchaseRequestsPageInner() {
                           {showBranchColumn ? (
                             <td className={`${hqSalesListTableTdClass} max-w-[7rem] truncate`} title={String(branchName)}>{branchName}</td>
                           ) : null}
-                          <td className={`${hqSalesListTableTdClass} max-w-[6rem] truncate`} title={request.createdBy?.fullName ?? undefined}>
-                            {request.createdBy?.fullName ?? '-'}
-                          </td>
-                          <td className={`${hqSalesListTableTdClass} max-w-[6rem] truncate`} title={hqWarehouseName}>{hqWarehouseName}</td>
                           <td className={hqSalesListTableTdClass}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
                           <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{request.items.length}</td>
                           <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{totalRequestedQuantity(request)}</td>

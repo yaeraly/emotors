@@ -77,6 +77,16 @@ assertEqual(receivingsPage.includes('HqSalesListFilterGrid'), false, 'receivings
 const branchPage = readFileSync(join(__dirname, '../app/branch-purchase-requests/page.tsx'), 'utf8');
 assertEqual(branchPage.includes('HqSalesBranchOrdersTabContent'), true, 'branch orders tab uses tab content wrapper');
 assertEqual(branchPage.includes('onClear'), true, 'branch orders tab supports filter clear');
+assertEqual(
+  branchPage.includes("operations.hqBranchOrdersTable.requester"),
+  false,
+  'HQ Sales branch orders table omits requester column',
+);
+assertEqual(
+  branchPage.includes("operations.hqBranchOrdersTable.hqWarehouse"),
+  false,
+  'HQ Sales branch orders table omits HQ warehouse column',
+);
 
 const layout = readFileSync(join(__dirname, '../components/HqSalesListLayout.tsx'), 'utf8');
 assertEqual(layout.includes('HqSalesBranchOrdersTabContent'), true, 'tab content helper exists');
