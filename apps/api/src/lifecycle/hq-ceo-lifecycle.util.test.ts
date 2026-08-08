@@ -5,6 +5,8 @@ import {
   assertCanHqCeoManageLifecycle,
   assessBranchDeleteBlocking,
   assessBranchWarehouseDeleteBlocking,
+  formatBranchDeleteBlockMessage,
+  isBranchDeleteBlocked,
 } from './hq-ceo-lifecycle.util';
 import { BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE } from './hq-ceo-lifecycle.constants';
 
@@ -58,6 +60,77 @@ function createWarehouseBlockingMock(overrides: {
   } as unknown as import('@prisma/client').Prisma.TransactionClient;
 }
 
+function createBranchBlockingMock(overrides: {
+  branchCode?: string;
+  balances?: Array<{ quantity: number; reservedQuantity: number; totalValueKgs?: number }>;
+  activeEmployees?: number;
+  openBranchOrders?: number;
+  openSales?: number;
+  openServiceOrders?: number;
+  openInventorySessions?: number;
+  activeStockBookings?: number;
+  accountBalance?: number;
+  invoiceDebt?: number;
+  openInstallments?: number;
+  openTransfers?: number;
+  openCashShifts?: number;
+  saleDebt?: number;
+}) {
+  const balances = overrides.balances ?? [];
+  return {
+    branch: {
+      findFirst: async () => ({ code: overrides.branchCode ?? 'BR-001' }),
+    },
+    warehouse: {
+      findMany: async () => [{ id: 'wh-branch' }],
+    },
+    inventoryBalance: {
+      findMany: async () => balances,
+      updateMany: async () => ({ count: 0 }),
+    },
+    user: {
+      count: async () => overrides.activeEmployees ?? 0,
+    },
+    branchDistributionOrder: {
+      count: async () => overrides.openBranchOrders ?? 0,
+    },
+    sale: {
+      count: async () => overrides.openSales ?? 0,
+      aggregate: async () => ({ _sum: { debtAmount: overrides.saleDebt ?? 0 } }),
+    },
+    serviceOrder: {
+      count: async () => overrides.openServiceOrders ?? 0,
+    },
+    inventoryCountSession: {
+      count: async () => overrides.openInventorySessions ?? 0,
+    },
+    hqStockBooking: {
+      count: async () => overrides.activeStockBookings ?? 0,
+    },
+    financeAccount: {
+      findMany: async () =>
+        overrides.accountBalance
+          ? [{ currentBalance: overrides.accountBalance }]
+          : [],
+    },
+    branchInvoice: {
+      findMany: async () =>
+        overrides.invoiceDebt
+          ? [{ debtAmount: overrides.invoiceDebt }]
+          : [],
+    },
+    branchOrderInstallment: {
+      count: async () => overrides.openInstallments ?? 0,
+    },
+    financeTransfer: {
+      count: async () => overrides.openTransfers ?? 0,
+    },
+    cashierShift: {
+      count: async () => overrides.openCashShifts ?? 0,
+    },
+  } as unknown as import('@prisma/client').Prisma.TransactionClient;
+}
+
 async function run() {
   const ceo = { role: Role.CEO, roles: [Role.CEO], permissions: [] };
   const scm = { role: Role.SUPPLY_CHAIN_MANAGER, roles: [Role.SUPPLY_CHAIN_MANAGER], permissions: [] };
@@ -102,11 +175,11 @@ async function run() {
   );
   assert(reservedWarehouse.blocked === true, '7. Warehouse with reserved stock is blocked');
 
-  const fifoWarehouse = await assessBranchWarehouseDeleteBlocking(
+  const fifoOnlyWarehouse = await assessBranchWarehouseDeleteBlocking(
     createWarehouseBlockingMock({ fifoRemaining: 3 }),
     'wh-4',
   );
-  assert(fifoWarehouse.blocked === true, '8. Warehouse with FIFO quantity is blocked');
+  assert(fifoOnlyWarehouse.blocked === false, '8. Warehouse with only historical FIFO is not blocked');
 
   const shipmentWarehouse = await assessBranchWarehouseDeleteBlocking(
     createWarehouseBlockingMock({ outgoing: ['order-1'] }),
@@ -126,42 +199,120 @@ async function run() {
   );
   assert(activeOrderWarehouse.blocked === true, '10b. Warehouse with active branch orders is blocked');
 
-  const usersOnBranch = await assessBranchDeleteBlocking(
-    {
-      warehouse: {
-        findMany: async () => [{ id: 'wh-branch' }],
-        count: async () => 1,
-      },
-      inventoryBalance: {
-        findMany: async () => [],
-      },
-      fifoInventoryBatch: {
-        aggregate: async () => ({ _sum: { remainingQuantity: 0 } }),
-      },
-      user: {
-        count: async () => 2,
-      },
-      branchDistributionOrder: {
-        findMany: async () => [],
-      },
-      sale: {
-        findMany: async () => [],
-      },
-      inventoryCountSession: {
-        findMany: async () => [],
-      },
-      hqStockBooking: {
-        findMany: async () => [],
-      },
-    } as unknown as import('@prisma/client').Prisma.TransactionClient,
-    'branch-1',
+  const emptyBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ balances: [] }),
+    'branch-empty',
   );
-  assert(usersOnBranch.blocked === true, '12. Branch with users is blocked from permanent delete');
-  assert(usersOnBranch.reasons.userCount === 2, '12b. User count in blocking reasons');
+  assert(emptyBranch.blocked === false, '11. Empty branch with zero stock can be deleted');
+  assert(emptyBranch.blockers.stockQty === 0, '11b. stockQty is zero');
+
+  const zeroQtyInventoryBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({
+      balances: [{ quantity: 0, reservedQuantity: 0, totalValueKgs: 1500 }],
+    }),
+    'branch-zero-qty',
+  );
+  assert(zeroQtyInventoryBranch.blocked === false, '12. Zero-quantity inventory records do not block');
+
+  const activeEmployeesBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ activeEmployees: 2 }),
+    'branch-users',
+  );
+  assert(activeEmployeesBranch.blocked === true, '13. Branch with active employees is blocked');
+  assert(activeEmployeesBranch.blockers.activeEmployees === 2, '13b. activeEmployees reported');
+  assert(
+    formatBranchDeleteBlockMessage(activeEmployeesBranch.blockers).includes('активные сотрудники'),
+    '13c. Specific employee blocker message',
+  );
+
+  const stockedBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({
+      balances: [{ quantity: 12, reservedQuantity: 0, totalValueKgs: 1000 }],
+    }),
+    'branch-stock',
+  );
+  assert(stockedBranch.blocked === true, '14. Positive stock blocks deletion');
+  assert(
+    formatBranchDeleteBlockMessage(stockedBranch.blockers).includes('Остаток на складе: 12'),
+    '14b. Specific stock blocker message',
+  );
+
+  const reservedBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({
+      balances: [{ quantity: 0, reservedQuantity: 3, totalValueKgs: 0 }],
+    }),
+    'branch-reserved',
+  );
+  assert(reservedBranch.blocked === true, '15. Reserved stock blocks deletion');
+
+  const cashBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ accountBalance: 15000 }),
+    'branch-cash',
+  );
+  assert(cashBranch.blocked === true, '16. Non-zero account balance blocks');
+  assert(
+    formatBranchDeleteBlockMessage(cashBranch.blockers).includes('15'),
+    '16b. Specific cash blocker message',
+  );
+
+  const debtBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ invoiceDebt: 5000, saleDebt: 0 }),
+    'branch-debt',
+  );
+  assert(debtBranch.blocked === true, '17. Outstanding debt blocks');
+
+  const openOrderBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ openBranchOrders: 2 }),
+    'branch-orders',
+  );
+  assert(openOrderBranch.blocked === true, '18. Active branch order blocks');
+
+  const serviceBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ openServiceOrders: 1 }),
+    'branch-service',
+  );
+  assert(serviceBranch.blocked === true, '19. Active service order blocks');
+
+  const transferBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({ openTransfers: 1 }),
+    'branch-transfer',
+  );
+  assert(transferBranch.blocked === true, '20. In-flight transfer blocks');
+
+  const negativeStockBranch = await assessBranchDeleteBlocking(
+    createBranchBlockingMock({
+      balances: [{ quantity: -2, reservedQuantity: 0, totalValueKgs: 0 }],
+    }),
+    'branch-negative',
+  );
+  assert(negativeStockBranch.blocked === true, '21. Negative stock blocks as data inconsistency');
+
+  const allClearBlockers = {
+    branchId: 'branch-1',
+    branchCode: 'BR-001',
+    stockQty: 0,
+    reservedQty: 0,
+    negativeStockQty: 0,
+    inventoryValue: 0,
+    accountBalance: 0,
+    openSales: 0,
+    openServiceOrders: 0,
+    openBranchOrders: 0,
+    openInstallments: 0,
+    unpaidReceivables: 0,
+    unpaidPayables: 0,
+    openTransfers: 0,
+    openInventorySessions: 0,
+    activeEmployees: 0,
+    openCashShifts: 0,
+    activeStockBookings: 0,
+    otherBlockingRecords: [],
+  };
+  assert(isBranchDeleteBlocked(allClearBlockers) === false, '22. All-zero blockers allow deletion');
 
   assert(
     BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE.includes('Складды'),
-    '11. Warehouse blocked message is in Kyrgyz',
+    '23. Warehouse blocked message is in Kyrgyz',
   );
 
   console.log('hq-ceo-lifecycle.util.test.ts: all assertions passed');

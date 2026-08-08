@@ -8,6 +8,7 @@ import {
   SaleStatus,
 } from '@prisma/client';
 
+/** Genuinely open branch distribution orders — excludes completed/received/cancelled history. */
 export const BRANCH_ACTIVE_DISTRIBUTION_STATUSES: BranchDistributionOrderStatus[] = [
   BranchDistributionOrderStatus.DRAFT,
   BranchDistributionOrderStatus.SUBMITTED,
@@ -22,15 +23,33 @@ export const BRANCH_ACTIVE_DISTRIBUTION_STATUSES: BranchDistributionOrderStatus[
   BranchDistributionOrderStatus.SHIPPED,
   BranchDistributionOrderStatus.DELIVERED,
   BranchDistributionOrderStatus.SENT,
-  BranchDistributionOrderStatus.RECEIVED,
-  BranchDistributionOrderStatus.RECEIVED_BY_BRANCH,
-  BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE,
 ];
 
 export const BRANCH_ACTIVE_SALE_STATUSES: SaleStatus[] = [
   SaleStatus.DRAFT,
   SaleStatus.SENT_TO_CUSTOMER,
+  SaleStatus.WAITING_FOR_CASHIER_PAYMENT,
 ];
+
+export const BRANCH_DELETE_MONEY_TOLERANCE = 0.01;
+
+export const BRANCH_ACTIVE_SERVICE_ORDER_STATUSES = [
+  'NEW',
+  'DRAFT',
+  'DIAGNOSIS',
+  'IN_REPAIR',
+  'IN_PROGRESS',
+  'WAITING_PARTS',
+  'READY_FOR_PAYMENT',
+] as const;
+
+export const BRANCH_ACTIVE_FINANCE_TRANSFER_STATUSES = [
+  'DRAFT',
+  'PENDING',
+  'PENDING_CASHIER',
+  'RETURNED',
+  'APPROVED',
+] as const;
 
 export const WAREHOUSE_OUTGOING_SHIPMENT_STATUSES: BranchDistributionOrderStatus[] = [
   BranchDistributionOrderStatus.SENT_TO_WAREHOUSE,
@@ -41,13 +60,11 @@ export const WAREHOUSE_OUTGOING_SHIPMENT_STATUSES: BranchDistributionOrderStatus
   BranchDistributionOrderStatus.SENT,
 ];
 
+/** In-flight incoming shipments — excludes received/completed branch-side history. */
 export const WAREHOUSE_INCOMING_SHIPMENT_STATUSES: BranchDistributionOrderStatus[] = [
   BranchDistributionOrderStatus.SHIPPED,
   BranchDistributionOrderStatus.DELIVERED,
   BranchDistributionOrderStatus.SENT,
-  BranchDistributionOrderStatus.RECEIVED,
-  BranchDistributionOrderStatus.RECEIVED_BY_BRANCH,
-  BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE,
 ];
 
 export const OPEN_INVENTORY_COUNT_STATUSES: InventoryCountStatus[] = [

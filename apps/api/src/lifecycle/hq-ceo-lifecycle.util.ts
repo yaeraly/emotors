@@ -5,6 +5,7 @@ import {
   InventoryCountStatus,
   Prisma,
   Role,
+  SaleStatus,
   UserStatus,
 } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -14,7 +15,10 @@ import {
   ACTIVE_HQ_STOCK_BOOKING_STATUSES,
   ACTIVE_PICKING_TASK_STATUSES,
   BRANCH_ACTIVE_DISTRIBUTION_STATUSES,
+  BRANCH_ACTIVE_FINANCE_TRANSFER_STATUSES,
   BRANCH_ACTIVE_SALE_STATUSES,
+  BRANCH_ACTIVE_SERVICE_ORDER_STATUSES,
+  BRANCH_DELETE_MONEY_TOLERANCE,
   OPEN_INVENTORY_COUNT_STATUSES,
   PENDING_INSTALLMENT_APPROVAL_STATUSES,
   WAREHOUSE_INCOMING_SHIPMENT_STATUSES,
@@ -34,19 +38,30 @@ export function assertCanHqCeoManageLifecycle(user: AuthUser) {
   }
 }
 
-export type BranchDeleteBlockingReasons = {
-  employeeCount: number;
-  userCount: number;
-  warehouseCount: number;
-  availableQuantity: number;
-  reservedQuantity: number;
-  fifoQuantity: number;
-  activeOrderIds: string[];
-  activeShipmentIds: string[];
-  activeSaleIds: string[];
-  openInventoryCountIds: string[];
-  reservationIds: string[];
+export type BranchDeleteBlockers = {
+  branchId: string;
+  branchCode: string | null;
+  stockQty: number;
+  reservedQty: number;
+  negativeStockQty: number;
+  inventoryValue: number;
+  accountBalance: number;
+  openSales: number;
+  openServiceOrders: number;
+  openBranchOrders: number;
+  openInstallments: number;
+  unpaidReceivables: number;
+  unpaidPayables: number;
+  openTransfers: number;
+  openInventorySessions: number;
+  activeEmployees: number;
+  openCashShifts: number;
+  activeStockBookings: number;
+  otherBlockingRecords: string[];
 };
+
+/** @deprecated Use BranchDeleteBlockers — kept for warehouse delete responses. */
+export type BranchDeleteBlockingReasons = BranchDeleteBlockers;
 
 export type WarehouseDeleteBlockingReasons = {
   productCount: number;
@@ -160,9 +175,8 @@ export async function assessBranchWarehouseDeleteBlocking(tx: Tx, warehouseId: s
 
   const blocked =
     productCount > 0 ||
-    availableQuantity > 0 ||
+    totalQuantity > 0 ||
     reservedQuantity > 0 ||
-    fifoQuantity > 0 ||
     activeOrderIds.length > 0 ||
     openInventoryCounts.length > 0 ||
     reservationIds.length > 0;
@@ -199,7 +213,134 @@ export async function branchWarehouseHasDeleteHistory(tx: Tx, warehouseId: strin
   );
 }
 
+export function isMoneyBlocking(value: number): boolean {
+  return Math.abs(value) > BRANCH_DELETE_MONEY_TOLERANCE;
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+export function isBranchDeleteBlocked(blockers: BranchDeleteBlockers): boolean {
+  return (
+    blockers.stockQty > 0 ||
+    blockers.reservedQty > 0 ||
+    blockers.negativeStockQty < 0 ||
+    isMoneyBlocking(blockers.accountBalance) ||
+    isMoneyBlocking(blockers.unpaidReceivables) ||
+    isMoneyBlocking(blockers.unpaidPayables) ||
+    blockers.openBranchOrders > 0 ||
+    blockers.openSales > 0 ||
+    blockers.openServiceOrders > 0 ||
+    blockers.openTransfers > 0 ||
+    blockers.openInventorySessions > 0 ||
+    blockers.activeEmployees > 0 ||
+    blockers.openCashShifts > 0 ||
+    blockers.activeStockBookings > 0 ||
+    blockers.otherBlockingRecords.length > 0
+  );
+}
+
+export function formatBranchDeleteBlockMessage(blockers: BranchDeleteBlockers): string {
+  if (
+    blockers.activeEmployees > 0 &&
+    blockers.stockQty === 0 &&
+    blockers.reservedQty === 0 &&
+    blockers.negativeStockQty >= 0 &&
+    !isMoneyBlocking(blockers.accountBalance) &&
+    blockers.openBranchOrders === 0 &&
+    blockers.openSales === 0 &&
+    blockers.openServiceOrders === 0 &&
+    blockers.openInstallments === 0 &&
+    !isMoneyBlocking(blockers.unpaidReceivables) &&
+    !isMoneyBlocking(blockers.unpaidPayables) &&
+    blockers.openTransfers === 0 &&
+    blockers.openInventorySessions === 0 &&
+    blockers.openCashShifts === 0 &&
+    blockers.activeStockBookings === 0 &&
+    blockers.otherBlockingRecords.length === 0
+  ) {
+    return 'Нельзя удалить филиал: есть активные сотрудники.';
+  }
+
+  const lines: string[] = ['Филиал не может быть удалён:'];
+  if (blockers.negativeStockQty < 0) {
+    lines.push(
+      `- Обнаружен отрицательный остаток на складе: ${Math.abs(blockers.negativeStockQty)} шт. (несогласованность данных).`,
+    );
+  }
+  if (blockers.stockQty > 0) {
+    lines.push(`- Остаток на складе: ${blockers.stockQty} шт.`);
+  }
+  if (blockers.reservedQty > 0) {
+    lines.push(`- Зарезервировано: ${blockers.reservedQty} шт.`);
+  }
+  if (isMoneyBlocking(blockers.accountBalance)) {
+    lines.push(`- Остаток на кассе/счёте: ${formatMoney(blockers.accountBalance)} сом.`);
+  }
+  if (blockers.openBranchOrders > 0) {
+    lines.push(`- Активных заказов: ${blockers.openBranchOrders}.`);
+  }
+  if (blockers.openSales > 0) {
+    lines.push(`- Незавершённых продаж: ${blockers.openSales}.`);
+  }
+  if (blockers.openServiceOrders > 0) {
+    lines.push(`- Активных сервисных заказов: ${blockers.openServiceOrders}.`);
+  }
+  if (blockers.openInstallments > 0 || isMoneyBlocking(blockers.unpaidReceivables)) {
+    const debt = Math.max(blockers.unpaidReceivables, 0);
+    if (debt > 0) {
+      lines.push(`- Непогашенная задолженность: ${formatMoney(debt)} сом.`);
+    } else if (blockers.openInstallments > 0) {
+      lines.push(`- Активных рассрочек: ${blockers.openInstallments}.`);
+    }
+  }
+  if (isMoneyBlocking(blockers.unpaidPayables)) {
+    lines.push(`- Неоплаченные обязательства: ${formatMoney(blockers.unpaidPayables)} сом.`);
+  }
+  if (blockers.openTransfers > 0) {
+    lines.push(`- Переводы в процессе: ${blockers.openTransfers}.`);
+  }
+  if (blockers.openInventorySessions > 0) {
+    lines.push(`- Активных инвентаризаций: ${blockers.openInventorySessions}.`);
+  }
+  if (blockers.activeEmployees > 0) {
+    lines.push(`- Активных сотрудников: ${blockers.activeEmployees}.`);
+  }
+  if (blockers.openCashShifts > 0) {
+    lines.push(`- Открытых кассовых смен: ${blockers.openCashShifts}.`);
+  }
+  if (blockers.activeStockBookings > 0) {
+    lines.push(`- Активных резервирований HQ: ${blockers.activeStockBookings}.`);
+  }
+  for (const record of blockers.otherBlockingRecords) {
+    lines.push(`- ${record}`);
+  }
+  return lines.join('\n');
+}
+
+async function repairStaleBranchInventoryValues(tx: Tx, branchId: string) {
+  await tx.inventoryBalance.updateMany({
+    where: {
+      branchId,
+      quantity: 0,
+      totalValueKgs: { not: 0 },
+    },
+    data: { totalValueKgs: 0 },
+  });
+}
+
 export async function assessBranchDeleteBlocking(tx: Tx, branchId: string) {
+  const branch = await tx.branch.findFirst({
+    where: { id: branchId },
+    select: { code: true },
+  });
+
+  await repairStaleBranchInventoryValues(tx, branchId);
+
   const warehouseIds = (
     await tx.warehouse.findMany({
       where: { branchId, deletedAt: null },
@@ -209,87 +350,140 @@ export async function assessBranchDeleteBlocking(tx: Tx, branchId: string) {
 
   const balances = await tx.inventoryBalance.findMany({
     where: { branchId },
-    select: { quantity: true, reservedQuantity: true },
+    select: { quantity: true, reservedQuantity: true, totalValueKgs: true },
   });
 
-  const totalQuantity = balances.reduce((sum, row) => sum + row.quantity, 0);
-  const reservedQuantity = balances.reduce((sum, row) => sum + row.reservedQuantity, 0);
-  const availableQuantity = Math.max(totalQuantity - reservedQuantity, 0);
+  const stockQty = balances.reduce((sum, row) => sum + Math.max(row.quantity, 0), 0);
+  const reservedQty = balances.reduce((sum, row) => sum + row.reservedQuantity, 0);
+  const negativeStockQty = balances.reduce(
+    (sum, row) => (row.quantity < 0 ? sum + row.quantity : sum),
+    0,
+  );
+  const inventoryValue = balances.reduce((sum, row) => sum + Number(row.totalValueKgs), 0);
 
-  const fifoAggregate = await tx.fifoInventoryBatch.aggregate({
-    where: { warehouseId: { in: warehouseIds } },
-    _sum: { remainingQuantity: true },
-  });
-  const fifoQuantity = fifoAggregate._sum.remainingQuantity ?? 0;
-
-  const [userCount, warehouseCount, activeOrders, activeSales, openCounts, stockBookings] =
-    await Promise.all([
-      tx.user.count({ where: { branchId, deletedAt: null } }),
-      tx.warehouse.count({ where: { branchId, deletedAt: null } }),
-      tx.branchDistributionOrder.findMany({
-        where: {
-          branchId,
+  const [
+    activeEmployees,
+    openBranchOrders,
+    openSales,
+    openServiceOrders,
+    openInventorySessions,
+    activeStockBookings,
+    financeAccounts,
+    branchInvoices,
+    openInstallments,
+    openTransfers,
+    openCashShifts,
+    saleDebtAggregate,
+  ] = await Promise.all([
+    tx.user.count({
+      where: { branchId, deletedAt: null, status: UserStatus.ACTIVE },
+    }),
+    tx.branchDistributionOrder.count({
+      where: {
+        branchId,
+        deletedAt: null,
+        status: { in: BRANCH_ACTIVE_DISTRIBUTION_STATUSES },
+      },
+    }),
+    tx.sale.count({
+      where: {
+        branchId,
+        deletedAt: null,
+        status: { in: BRANCH_ACTIVE_SALE_STATUSES },
+      },
+    }),
+    tx.serviceOrder.count({
+      where: {
+        branchId,
+        deletedAt: null,
+        status: { in: [...BRANCH_ACTIVE_SERVICE_ORDER_STATUSES] },
+      },
+    }),
+    tx.inventoryCountSession.count({
+      where: {
+        warehouseId: { in: warehouseIds },
+        deletedAt: null,
+        status: { in: OPEN_INVENTORY_COUNT_STATUSES },
+      },
+    }),
+    tx.hqStockBooking.count({
+      where: {
+        branchId,
+        status: { in: ACTIVE_HQ_STOCK_BOOKING_STATUSES },
+      },
+    }),
+    tx.financeAccount.findMany({
+      where: { branchId, deletedAt: null, status: 'ACTIVE' },
+      select: { currentBalance: true },
+    }),
+    tx.branchInvoice.findMany({
+      where: {
+        branchId,
+        deletedAt: null,
+        status: { notIn: ['PAID', 'CANCELLED'] },
+        debtAmount: { gt: BRANCH_DELETE_MONEY_TOLERANCE },
+      },
+      select: { debtAmount: true },
+    }),
+    tx.branchOrderInstallment.count({
+      where: {
+        branchId,
+        status: 'APPROVED',
+        invoice: {
           deletedAt: null,
-          status: { in: BRANCH_ACTIVE_DISTRIBUTION_STATUSES },
+          debtAmount: { gt: BRANCH_DELETE_MONEY_TOLERANCE },
         },
-        select: { id: true },
-        take: 50,
-      }),
-      tx.sale.findMany({
-        where: {
-          branchId,
-          deletedAt: null,
-          status: { in: BRANCH_ACTIVE_SALE_STATUSES },
-        },
-        select: { id: true },
-        take: 50,
-      }),
-      tx.inventoryCountSession.findMany({
-        where: {
-          warehouseId: { in: warehouseIds },
-          deletedAt: null,
-          status: { in: OPEN_INVENTORY_COUNT_STATUSES },
-        },
-        select: { id: true },
-        take: 50,
-      }),
-      tx.hqStockBooking.findMany({
-        where: {
-          branchId,
-          status: { in: ACTIVE_HQ_STOCK_BOOKING_STATUSES },
-        },
-        select: { id: true },
-        take: 50,
-      }),
-    ]);
+      },
+    }),
+    tx.financeTransfer.count({
+      where: {
+        branchId,
+        status: { in: [...BRANCH_ACTIVE_FINANCE_TRANSFER_STATUSES] },
+      },
+    }),
+    tx.cashierShift.count({
+      where: { branchId, status: 'OPEN' },
+    }),
+    tx.sale.aggregate({
+      where: {
+        branchId,
+        deletedAt: null,
+        status: { not: SaleStatus.CANCELLED },
+        debtAmount: { gt: BRANCH_DELETE_MONEY_TOLERANCE },
+      },
+      _sum: { debtAmount: true },
+    }),
+  ]);
 
-  const activeShipmentIds = activeOrders.map((row) => row.id);
+  const accountBalance = financeAccounts.reduce((sum, row) => sum + Number(row.currentBalance), 0);
+  const invoiceDebt = branchInvoices.reduce((sum, row) => sum + Number(row.debtAmount), 0);
+  const saleDebt = Number(saleDebtAggregate._sum.debtAmount ?? 0);
+  const unpaidReceivables = invoiceDebt + saleDebt;
 
-  const reasons: BranchDeleteBlockingReasons = {
-    employeeCount: userCount,
-    userCount,
-    warehouseCount,
-    availableQuantity,
-    reservedQuantity,
-    fifoQuantity,
-    activeOrderIds: activeOrders.map((row) => row.id),
-    activeShipmentIds,
-    activeSaleIds: activeSales.map((row) => row.id),
-    openInventoryCountIds: openCounts.map((row) => row.id),
-    reservationIds: stockBookings.map((row) => row.id),
+  const blockers: BranchDeleteBlockers = {
+    branchId,
+    branchCode: branch?.code ?? null,
+    stockQty,
+    reservedQty,
+    negativeStockQty,
+    inventoryValue: stockQty === 0 ? 0 : inventoryValue,
+    accountBalance,
+    openSales,
+    openServiceOrders,
+    openBranchOrders,
+    openInstallments,
+    unpaidReceivables,
+    unpaidPayables: 0,
+    openTransfers,
+    openInventorySessions,
+    activeEmployees,
+    openCashShifts,
+    activeStockBookings,
+    otherBlockingRecords: [],
   };
 
-  const blocked =
-    userCount > 0 ||
-    availableQuantity > 0 ||
-    reservedQuantity > 0 ||
-    fifoQuantity > 0 ||
-    activeOrders.length > 0 ||
-    activeSales.length > 0 ||
-    openCounts.length > 0 ||
-    stockBookings.length > 0;
-
-  return { blocked, reasons };
+  const blocked = isBranchDeleteBlocked(blockers);
+  return { blocked, reasons: blockers, blockers };
 }
 
 export async function branchHasBusinessHistory(tx: Tx, branchId: string) {
