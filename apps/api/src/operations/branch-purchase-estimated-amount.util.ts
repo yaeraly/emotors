@@ -83,3 +83,25 @@ export function compareEstimatedAmountToProductCost(
 export function deriveUnitFromAuthoritativeLineTotal(lineTotalKgs: number, quantity: number) {
   return deriveDisplayUnitCost(lineTotalKgs, quantity);
 }
+
+/**
+ * Permanent HQ Branch transfer invariant:
+ * Σ(FIFO/inventory line costs) = Σ(BPR payable line totals) = order total
+ * when markup = 0%. Difference must be 0.00 KGS.
+ */
+export function reconcileHqBranchTransferCostParity(input: {
+  fifoLineCosts: number[];
+  payableLineTotals: number[];
+  orderTotalKgs: number;
+}): { ok: boolean; expectedKgs: number; actualKgs: number; differenceKgs: number } {
+  const expectedKgs = sumDisplayMoneyTotals(input.fifoLineCosts.map((value) => Number(value ?? 0)));
+  const payableSum = sumDisplayMoneyTotals(input.payableLineTotals.map((value) => Number(value ?? 0)));
+  const actualKgs = roundDisplayMoney(Number(input.orderTotalKgs ?? 0));
+  const differenceKgs = roundDisplayMoney(actualKgs - expectedKgs);
+  return {
+    ok: expectedKgs === payableSum && payableSum === actualKgs && Math.abs(differenceKgs) <= 0,
+    expectedKgs,
+    actualKgs,
+    differenceKgs,
+  };
+}

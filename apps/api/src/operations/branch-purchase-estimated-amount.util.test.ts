@@ -10,6 +10,7 @@ import {
 import {
   BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE,
   compareEstimatedAmountToProductCost,
+  reconcileHqBranchTransferCostParity,
   resolveBranchPurchaseEstimatedAmountKgs,
   resolveBranchPurchaseLinePayableAmount,
   shouldTransferBranchPurchaseAtCost,
@@ -205,6 +206,27 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     // Regression guard: 4330b1f unit×qty path must not recreate 914369.08-style drift.
     assert.notEqual(staleEstimated, CHINA_BATCH_TOTAL);
     assert.notEqual(sanitized.totalEstimatedAmount, staleEstimated);
+  });
+
+  it('reconcileHqBranchTransferCostParity enforces FIFO = payable = order total', () => {
+    const lines = buildChinaBatchLines();
+    const fifo = lines.map((line) => line.totalCostKgs);
+    const payable = fifo.map((cost) =>
+      resolveBranchPurchaseLinePayableAmount({
+        branchType: BranchType.HQ_BRANCH,
+        quantity: 11,
+        estimatedLineProductCostKgs: cost,
+        unitPriceKgs: deriveDisplayUnitCost(cost, 11),
+      }),
+    );
+    const parity = reconcileHqBranchTransferCostParity({
+      fifoLineCosts: fifo,
+      payableLineTotals: payable,
+      orderTotalKgs: sumDisplayMoneyTotals(payable),
+    });
+    assert.equal(parity.ok, true);
+    assert.equal(parity.expectedKgs, CHINA_BATCH_TOTAL);
+    assert.equal(parity.differenceKgs, 0);
   });
 
   it('repair of estimated amount is idempotent for already-aligned totals', () => {

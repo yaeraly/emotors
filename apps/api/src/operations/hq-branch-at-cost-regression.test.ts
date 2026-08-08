@@ -2,22 +2,25 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BranchPurchaseRequestStatus, BranchType } from '@prisma/client';
 import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
+import { buildFifoAllocationLines } from '../pricing/pricing-fifo-allocation.util';
 import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
 import {
+  reconcileHqBranchTransferCostParity,
   resolveBranchPurchaseLinePayableAmount,
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import { sanitizeBranchPurchaseRequest } from './branch-purchase-request.presenter';
 
 /**
- * Regression: BPR-1786197962954 showed 914369.08 instead of procurement 914369.80 (−0.72).
+ * Permanent HQ Office → HQ Branch transfer costing.
  *
- * Historical fix: 0007a11 / 83f92f7 — Branch Sales Сумма uses authoritative FIFO totals.
- * Regression: 4330b1f / e00b597 — rebuilt totals as rounded unit × qty for all branches.
+ * Regression: BPR-1786197962954 showed 914369.08 instead of 914369.80 (−0.72).
+ * Historical fix: 0007a11 / 83f92f7 — authoritative FIFO totals, markup 0%.
+ * Regression source: 4330b1f / e00b597 — rebuilt totals as rounded unit × qty.
  */
 const HQ_INVENTORY_TOTAL = 914369.8;
 
@@ -32,13 +35,10 @@ function buildExactBatchLines() {
   }));
 }
 
-describe('HQ Branch at-cost regression — 914369.80 must not become 914369.08', () => {
-  it('detects HQ Branch by BranchType.HQ_BRANCH with 0% markup', () => {
+describe('HQ Branch at-cost permanent invariant', () => {
+  it('Case 1 — exact first-batch: HQ source 914369.80 → BPR 914369.80 (diff 0.00)', () => {
     assert.equal(shouldTransferBranchPurchaseAtCost(BranchType.HQ_BRANCH), true);
-    assert.equal(shouldTransferBranchPurchaseAtCost(BranchType.FRANCHISE), false);
-  });
 
-  it('Given HQ inventory total 914369.80, HQ Branch BPR total is 914369.80 (diff 0.00)', () => {
     const lines = buildExactBatchLines();
     const hqSource = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
     assert.equal(hqSource, HQ_INVENTORY_TOTAL);
@@ -71,17 +71,21 @@ describe('HQ Branch at-cost regression — 914369.80 must not become 914369.08',
       true,
     );
 
-    const bprLineSum = sumDisplayMoneyTotals(
-      sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
+    const payableTotals = sanitized.items.map((item) =>
+      Number((item as { totalAmount?: number }).totalAmount ?? 0),
     );
-    assert.equal(bprLineSum, HQ_INVENTORY_TOTAL);
-    assert.equal(sanitized.totalEstimatedAmount, HQ_INVENTORY_TOTAL);
-    assert.equal(roundDisplayMoney(hqSource - Number(sanitized.totalEstimatedAmount)), 0);
+    const parity = reconcileHqBranchTransferCostParity({
+      fifoLineCosts: lines.map((line) => line.totalCostKgs),
+      payableLineTotals: payableTotals,
+      orderTotalKgs: Number(sanitized.totalEstimatedAmount ?? 0),
+    });
+    assert.equal(parity.ok, true);
+    assert.equal(parity.expectedKgs, HQ_INVENTORY_TOTAL);
+    assert.equal(parity.actualKgs, HQ_INVENTORY_TOTAL);
+    assert.equal(parity.differenceKgs, 0);
   });
 
-  it('raw per-unit costs with >2 decimal places do not drift when using FIFO line cost', () => {
-    // 100.005 × 3 = 300.015 → authoritative line 300.02 after money round;
-    // rounded unit 100.01 × 3 = 300.03 (different) — payable must use line cost.
+  it('Case 2 — fractional unit cost: display rounding must not alter authoritative line total', () => {
     const rawLineCost = 300.015;
     const qty = 3;
     const displayUnit = deriveDisplayUnitCost(rawLineCost, qty);
@@ -97,7 +101,59 @@ describe('HQ Branch at-cost regression — 914369.80 must not become 914369.08',
     assert.notEqual(payable, unitTimesQty);
   });
 
-  it('franchise branches still use unit × CEO branch price', () => {
+  it('Case 3 — two procurement batches: BPR cost = sum of consumed FIFO layer costs', () => {
+    // Same product: Batch1 remaining 10 @ layer 1234.567, Batch2 remaining 10 @ layer 987.654
+    // HQ Branch requests 15 → consumes 10 from Batch1 + 5 from Batch2.
+    const batch1Total = 12345.67;
+    const batch2Total = 9876.54;
+    const allocation = buildFifoAllocationLines(
+      [
+        {
+          batchId: 'batch-1',
+          remainingQuantity: 10,
+          unitCostKgs: deriveDisplayUnitCost(batch1Total, 10),
+          layerTotalCostKgs: batch1Total,
+          layerBaseQuantity: 10,
+        },
+        {
+          batchId: 'batch-2',
+          remainingQuantity: 10,
+          unitCostKgs: deriveDisplayUnitCost(batch2Total, 10),
+          layerTotalCostKgs: batch2Total,
+          layerBaseQuantity: 10,
+        },
+      ],
+      15,
+      { markupPercent: 0, branchType: 'HQ_BRANCH', subtractReserved: false },
+    );
+
+    assert.equal(allocation.allocatedQty, 15);
+    assert.equal(allocation.lines.length, 2);
+    assert.equal(allocation.lines[0]?.quantity, 10);
+    assert.equal(allocation.lines[1]?.quantity, 5);
+    // HQ markup 0%: transfer price equals FIFO cost for consumed layers.
+    assert.equal(allocation.totalPriceKgs, allocation.totalCostKgs);
+
+    const expected =
+      allocation.lines[0]!.totalCostKgs + allocation.lines[1]!.totalCostKgs;
+    assert.equal(allocation.totalCostKgs, roundDisplayMoney(expected));
+
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.HQ_BRANCH,
+      quantity: 15,
+      estimatedLineProductCostKgs: allocation.totalCostKgs,
+      unitPriceKgs: deriveDisplayUnitCost(allocation.totalCostKgs, 15),
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, allocation.totalCostKgs);
+    assert.notEqual(
+      payable,
+      roundDisplayMoney(deriveDisplayUnitCost(allocation.totalCostKgs, 15) * 15),
+    );
+  });
+
+  it('Case 4 — normal franchise branch still uses CEO Продажа филиалам price', () => {
+    assert.equal(shouldTransferBranchPurchaseAtCost(BranchType.FRANCHISE), false);
     const payable = resolveBranchPurchaseLinePayableAmount({
       branchType: BranchType.FRANCHISE,
       quantity: 11,
@@ -106,5 +162,24 @@ describe('HQ Branch at-cost regression — 914369.80 must not become 914369.08',
       hasPricingPolicy: true,
     });
     assert.equal(payable, 1375);
+    assert.notEqual(payable, 1000);
+  });
+
+  it('Case 5 — allocation remainder reconciles exactly to procurement total', () => {
+    const rawShares = Array.from({ length: 62 }, (_, index) => 14756.123456 + (index % 17) * 0.314159);
+    const allocated = distributeRoundedAmounts(rawShares, HQ_INVENTORY_TOTAL);
+    assert.equal(sumDisplayMoneyTotals(allocated), HQ_INVENTORY_TOTAL);
+    assert.equal(roundDisplayMoney(HQ_INVENTORY_TOTAL - sumDisplayMoneyTotals(allocated)), 0);
+  });
+
+  it('HQ Branch markup is always 0% (never unit×qty fallback when FIFO missing)', () => {
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.HQ_BRANCH,
+      quantity: 11,
+      estimatedLineProductCostKgs: 0,
+      unitPriceKgs: 14756.12,
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, 0);
   });
 });

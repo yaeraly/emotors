@@ -32,11 +32,22 @@ describe('branch purchase request display totals', () => {
     assert.equal(total, 13500);
   });
 
-  it('does not use stale totalAmount when it disagrees with displayed qty times price', () => {
+  it('prefers authoritative backend totalAmount over rounded unit × qty (HQ at-cost)', () => {
+    // FIFO line 162317.33 vs display unit 14756.12 × 11 = 162317.32
+    const total = requestLineTotal({
+      quantity: 11,
+      branchPurchasePriceKgs: 14756.12,
+      totalAmount: 162317.33,
+    });
+    assert.equal(total, 162317.33);
+    assert.notEqual(total, roundMoney(14756.12 * 11));
+  });
+
+  it('falls back to qty × branch price only when totalAmount is missing/zero', () => {
     const total = requestLineTotal({
       quantity: 5,
       branchPurchasePriceKgs: 12000,
-      totalAmount: 1,
+      totalAmount: 0,
     });
     assert.equal(total, 60000);
   });

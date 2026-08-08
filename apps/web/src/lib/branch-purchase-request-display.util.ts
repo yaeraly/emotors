@@ -36,14 +36,25 @@ export function getFrozenBranchPrice(item: BranchPurchaseRequestLinePricing): nu
   return price;
 }
 
-/** Row total: displayed quantity × displayed branch price. */
+/**
+ * Row total: prefer backend authoritative `totalAmount` (FIFO/payable for HQ_BRANCH,
+ * or repaired qty×price for franchise). Never rebuild HQ at-cost totals from rounded
+ * display unit × quantity — that recreates 914369.08-style drift.
+ */
 export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number {
+  const authoritative =
+    item.totalAmount != null && Number.isFinite(Number(item.totalAmount))
+      ? Number(item.totalAmount)
+      : null;
+  if (authoritative != null && authoritative > 0) {
+    return roundMoney(authoritative);
+  }
   const price = getFrozenBranchPrice(item);
   if (price == null) return 0;
   return roundMoney(getDisplayQuantity(item) * price);
 }
 
-/** Order total: sum of all row totals. */
+/** Order total: sum of authoritative/derived row totals. */
 export function requestOrderTotal(items: BranchPurchaseRequestLinePricing[]): number {
   return roundMoney(items.reduce((sum, item) => sum + requestLineTotal(item), 0));
 }

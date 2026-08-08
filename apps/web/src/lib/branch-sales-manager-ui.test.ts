@@ -29,10 +29,11 @@ describe('branch sales manager ui cleanup', () => {
     assert.equal(shouldShowBranchColumnForBranchScopedTables(branchSalesManager), false);
   });
 
-  it('order detail uses quantity times branch price for line total', () => {
+  it('order detail uses authoritative formatLineTotalKgs helpers', () => {
     assert.match(detailPage, /formatLineTotalKgs\(item\)/);
     assert.match(detailPage, /formatFrozenBranchPrice\(item, t\)/);
     assert.match(detailPage, /formatOrderTotalKgs\(request\.items\)/);
+    // Totals come from formatLineTotalKgs (prefers backend totalAmount), not raw formatKgs.
     assert.doesNotMatch(detailPage, /formatKgs\(item\.totalAmount\)/);
   });
 
