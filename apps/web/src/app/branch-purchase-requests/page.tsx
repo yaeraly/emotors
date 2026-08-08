@@ -957,23 +957,35 @@ function BranchPurchaseRequestsPageInner() {
               ) : visibleRequests.length === 0 ? (
                 <HqSalesListEmptyState message={t('operations.hqBranchOrdersEmpty')} />
               ) : (
-                <table className={hqSalesListTableClass}>
+                <table className={`${hqSalesListTableClass} w-full table-fixed`}>
+                  <colgroup>
+                    <col className="w-[6.75rem]" />
+                    {showBranchColumn ? <col /> : null}
+                    <col className="w-[8.25rem]" />
+                    <col className="w-[3.25rem]" />
+                    <col className="w-[4.25rem]" />
+                    <col className="w-[5.5rem]" />
+                    <col className="w-[5.75rem]" />
+                    <col className="w-[5.75rem]" />
+                  </colgroup>
                   <thead className={hqSalesListTableHeadClass}>
                     <tr>
-                      <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.number')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2`}>{t('operations.hqBranchOrdersTable.number')}</th>
                       {showBranchColumn ? (
-                        <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.branch')}</th>
+                        <th className={`${hqSalesListTableThClass} px-2 py-2`}>{t('operations.hqBranchOrdersTable.branch')}</th>
                       ) : null}
-                      <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.status')}</th>
-                      <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.positionsTooltip')}>{t('operations.hqBranchOrdersTable.positions')}</th>
-                      <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
-                      <th className={`${hqSalesListTableThClass} text-right`} title={t('operations.hqBranchOrdersTable.amountTooltip')}>{t('operations.hqBranchOrdersTable.amount')}</th>
-                      <th className={hqSalesListTableThClass} title={t('operations.hqBranchOrdersTable.dateTooltip')}>{t('operations.hqBranchOrdersTable.date')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2`}>{t('operations.hqBranchOrdersTable.status')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2 text-center`} title={t('operations.hqBranchOrdersTable.positionsTooltip')}>{t('operations.hqBranchOrdersTable.positions')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2 text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2 text-right`} title={t('operations.hqBranchOrdersTable.amountTooltip')}>{t('operations.hqBranchOrdersTable.amount')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2`} title={t('operations.hqBranchOrdersTable.dateTooltip')}>{t('operations.hqBranchOrdersTable.date')}</th>
+                      <th className={`${hqSalesListTableThClass} px-2 py-2 text-center`}>{t('operations.hqBranchOrdersTable.actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visibleRequests.map((request) => {
                       const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
+                      const statusLabel = resolveRequestStatusLabel(t, request, branchOnlyView);
                       return (
                         <tr
                           key={request.id}
@@ -984,15 +996,23 @@ function BranchPurchaseRequestsPageInner() {
                           title={hqOrderRowHint(t, request.status)}
                           className="cursor-pointer hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
                         >
-                          <td className={`${hqSalesListTableTdClass} font-bold text-blue-700`}>{request.requestNumber}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 font-bold text-blue-700 whitespace-nowrap`}>{request.requestNumber}</td>
                           {showBranchColumn ? (
-                            <td className={`${hqSalesListTableTdClass} max-w-[7rem] truncate`} title={String(branchName)}>{branchName}</td>
+                            <td className={`${hqSalesListTableTdClass} px-2 py-2 min-w-0 truncate`} title={String(branchName)}>{branchName}</td>
                           ) : null}
-                          <td className={hqSalesListTableTdClass}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
-                          <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{request.items.length}</td>
-                          <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{totalRequestedQuantity(request)}</td>
-                          <td className={`${hqSalesListTableTdClass} text-right tabular-nums`}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
-                          <td className={`${hqSalesListTableTdClass} whitespace-nowrap`}>{new Date(request.createdAt).toLocaleDateString()}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 whitespace-nowrap truncate`} title={statusLabel}>{statusLabel}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 text-center tabular-nums whitespace-nowrap`}>{request.items.length}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 text-center tabular-nums whitespace-nowrap`}>{totalRequestedQuantity(request)}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 text-right tabular-nums whitespace-nowrap`}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 whitespace-nowrap`}>{new Date(request.createdAt).toLocaleDateString()}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 text-center whitespace-nowrap`} onClick={(event) => event.stopPropagation()}>
+                            <Link
+                              href={detailHref(request.id)}
+                              className="inline-flex rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {t('common.open')}
+                            </Link>
+                          </td>
                         </tr>
                       );
                     })}

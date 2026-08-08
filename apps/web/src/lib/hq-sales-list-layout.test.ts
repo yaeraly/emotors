@@ -87,6 +87,14 @@ assertEqual(
   false,
   'HQ Sales branch orders table omits HQ warehouse column',
 );
+assertEqual(
+  branchPage.includes("operations.hqBranchOrdersTable.actions"),
+  true,
+  'HQ Sales branch orders table includes actions column',
+);
+assert.match(branchPage, /table-fixed/);
+assert.match(branchPage, /detailHref\(request\.id\)/);
+assert.match(branchPage, /common\.open/);
 
 const layout = readFileSync(join(__dirname, '../components/HqSalesListLayout.tsx'), 'utf8');
 assertEqual(layout.includes('HqSalesBranchOrdersTabContent'), true, 'tab content helper exists');
