@@ -43,7 +43,22 @@ describe('HQ cashier transfer menu visibility', () => {
     assert.equal(
       canShowHqCashierAccountTransferMenu([
         { status: 'ACTIVE' },
+        { status: 'ACTIVE' },
+        { status: 'ACTIVE' },
+      ]),
+      true,
+    );
+    assert.equal(
+      canShowHqCashierAccountTransferMenu([
+        { status: 'ACTIVE' },
         { status: 'ARCHIVED' },
+      ]),
+      false,
+    );
+    assert.equal(
+      canShowHqCashierAccountTransferMenu([
+        { id: 'acc-1', status: 'ACTIVE' },
+        { id: 'acc-1', status: 'ACTIVE' },
       ]),
       false,
     );
@@ -55,7 +70,9 @@ describe('HQ cashier transfer menu visibility', () => {
 
     assert.match(shell, /canShowHqCashierAccountTransferMenu/);
     assert.match(shell, /apiFetch<FinanceAccount\[]>\('\/finance\/accounts'\)/);
-    assert.match(hqSidebar, /hqCashierTransferMenuVisible/);
+    assert.match(shell, /const \[hqCashierTransferMenuVisible, setHqCashierTransferMenuVisible\] = useState\(false\)/);
+    assert.match(shell, /setHqCashierTransferMenuVisible\(canShowHqCashierAccountTransferMenu\(accounts\)\)/);
+    assert.match(hqSidebar, /hqCashierTransferMenuVisible \? \(/);
     assert.match(hqSidebar, /href="\/finance\/transfers"/);
     assert.match(hqSidebar, /branchCashier\.accountTransfers/);
     assert.match(hqSidebar, /finance\.transfersCashierQueue/);

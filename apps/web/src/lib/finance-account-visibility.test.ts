@@ -24,6 +24,17 @@ describe('finance account visibility', () => {
     );
   });
 
+  it('does not count duplicate account ids twice', () => {
+    assert.equal(
+      countActiveUsableFinanceAccounts([
+        { id: 'acc-1', status: 'ACTIVE' },
+        { id: 'acc-1', status: 'ACTIVE' },
+        { id: 'acc-2', status: 'ACTIVE' },
+      ]),
+      2,
+    );
+  });
+
   it('shows HQ cashier transfer menu only with two or more usable accounts', () => {
     assert.equal(canShowHqCashierAccountTransferMenu([]), false);
     assert.equal(canShowHqCashierAccountTransferMenu([{ status: 'ACTIVE' }]), false);
@@ -43,6 +54,13 @@ describe('finance account visibility', () => {
       canShowHqCashierAccountTransferMenu([
         { status: 'ACTIVE' },
         { status: 'INACTIVE' },
+      ]),
+      false,
+    );
+    assert.equal(
+      canShowHqCashierAccountTransferMenu([
+        { id: 'acc-1', status: 'ACTIVE' },
+        { id: 'acc-2', status: 'ARCHIVED' },
       ]),
       false,
     );
