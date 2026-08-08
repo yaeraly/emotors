@@ -114,4 +114,13 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(listPage, /branchId: form\.branchId/);
     assert.match(listPage, /branchWarehouseId: form\.branchWarehouseId/);
   });
+
+  it('hq sales order detail uses quantity-driven approve without partial button', () => {
+    assert.match(detailPage, /validateApprovedQuantityForApprove/);
+    assert.match(detailPage, /action: 'APPROVE'/);
+    assert.doesNotMatch(detailPage, /setLineAction\(item, 'PARTIAL'\)/);
+    assert.doesNotMatch(detailPage, /actionPartialShort/);
+    assert.doesNotMatch(detailPage, /actionPartial'\)/);
+    assert.match(detailPage, /max=\{item\.quantity\}/);
+  });
 });

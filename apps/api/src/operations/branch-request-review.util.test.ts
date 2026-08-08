@@ -52,6 +52,52 @@ describe('resolveLineReview booking availability', () => {
     assert.equal(result.notifyCeoOutOfStock, true);
   });
 
+  it('supports partial approval via APPROVE with explicit approved quantity', () => {
+    const result = resolveLineReview(
+      { id: 'line-1', action: 'APPROVE', approvedQuantity: 6 },
+      {
+        requestedQuantity: 10,
+        availableQuantity: 10,
+        bookedQuantity: 0,
+        hasPricingPolicy: true,
+      },
+    );
+
+    assert.equal(result.lineStatus, BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED);
+    assert.equal(result.approvedQuantity, 6);
+    assert.equal(result.unavailableQuantity, 4);
+  });
+
+  it('supports full approval via APPROVE with explicit approved quantity', () => {
+    const result = resolveLineReview(
+      { id: 'line-1', action: 'APPROVE', approvedQuantity: 10 },
+      {
+        requestedQuantity: 10,
+        availableQuantity: 10,
+        bookedQuantity: 0,
+        hasPricingPolicy: true,
+      },
+    );
+
+    assert.equal(result.lineStatus, BranchPurchaseRequestLineStatus.APPROVED);
+    assert.equal(result.approvedQuantity, 10);
+  });
+
+  it('blocks APPROVE with zero explicit approved quantity', () => {
+    assert.throws(
+      () =>
+        resolveLineReview(
+          { id: 'line-1', action: 'APPROVE', approvedQuantity: 0 },
+          {
+            requestedQuantity: 10,
+            availableQuantity: 10,
+            hasPricingPolicy: true,
+          },
+        ),
+      /APPROVED_QUANTITY_REQUIRED/,
+    );
+  });
+
   it('rejects approval above requested quantity', () => {
     assert.throws(
       () =>

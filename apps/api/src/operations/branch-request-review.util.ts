@@ -101,12 +101,15 @@ export function resolveLineReview(
     };
   }
 
-  const rawApproved =
-    input.action === 'PARTIAL'
-      ? Number(input.approvedQuantity ?? 0)
+  const isQuantityDrivenApproval = input.action === 'APPROVE' || input.action === 'PARTIAL';
+  const hasExplicitApprovedQuantity = input.approvedQuantity !== undefined;
+  const rawApproved = isQuantityDrivenApproval
+    ? hasExplicitApprovedQuantity
+      ? Number(input.approvedQuantity)
       : input.action === 'APPROVE'
         ? requested
-        : 0;
+        : Number.NaN
+    : 0;
 
   if (!Number.isFinite(rawApproved)) {
     throw new Error('INVALID_APPROVED_QUANTITY');
@@ -119,6 +122,10 @@ export function resolveLineReview(
   }
 
   const hasStockShortage = requested > available;
+
+  if (isQuantityDrivenApproval && hasExplicitApprovedQuantity && requestedApproved <= 0) {
+    throw new Error('APPROVED_QUANTITY_REQUIRED');
+  }
 
   if (requestedApproved <= 0) {
     return {

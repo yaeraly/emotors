@@ -1276,8 +1276,11 @@ export class OperationsService {
         }
         if (error.message === 'APPROVED_QUANTITY_EXCEEDS_REQUESTED') {
           throw new BadRequestException(
-            `Утверждённое количество не может превышать запрошенное (${item.sku})`,
+            `Утверждаемое количество не может превышать запрошенное (${item.sku})`,
           );
+        }
+        if (error.message === 'APPROVED_QUANTITY_REQUIRED') {
+          throw new BadRequestException('Укажите количество для утверждения.');
         }
         if (error.message === 'INVALID_APPROVED_QUANTITY') {
           throw new BadRequestException('Утверждённое количество должно быть числом');

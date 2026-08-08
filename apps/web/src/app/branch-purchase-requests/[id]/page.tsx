@@ -172,10 +172,21 @@ function defaultLineDecision(item: RequestItem, hqStockLoaded: boolean): LineDec
   if (!hasPolicy || available <= 0) {
     return { action: 'REJECT', approvedQuantity: 0, publicComment: '' };
   }
-  if (available >= item.quantity) {
-    return { action: 'APPROVE', approvedQuantity: item.quantity, publicComment: '' };
+  return { action: 'APPROVE', approvedQuantity: item.quantity, publicComment: '' };
+}
+
+function validateApprovedQuantityForApprove(
+  t: (key: string) => string,
+  item: RequestItem,
+  approvedQuantity: number,
+): string | null {
+  if (!Number.isFinite(approvedQuantity) || approvedQuantity <= 0) {
+    return t('branchProductRequest.approvedQuantityRequired');
   }
-  return { action: 'PARTIAL', approvedQuantity: available, publicComment: '' };
+  if (approvedQuantity > item.quantity) {
+    return t('branchProductRequest.approvedQuantityExceedsRequested');
+  }
+  return null;
 }
 
 function hqDetailThClass(compact: boolean) {
@@ -216,6 +227,12 @@ export default function BranchPurchaseRequestDetailPage() {
     if (message.includes('INACTIVE_HQ_WAREHOUSE')) return t('branchHqRouting.inactiveWarehouse');
     if (message.includes('NO_HQ_WAREHOUSE_MANAGER_ASSIGNED')) return t('branchHqRouting.noWarehouseManager');
     if (message.includes('public comment is required')) return t('branchProductRequest.commentRequired');
+    if (message.includes('Укажите количество для утверждения')) {
+      return t('branchProductRequest.approvedQuantityRequired');
+    }
+    if (message.includes('Утверждаемое количество не может превышать запрошенное')) {
+      return t('branchProductRequest.approvedQuantityExceedsRequested');
+    }
     if (message.includes('не настроена цена для филиала')) return message;
     if (message.includes('Данные заказа изменились')) return message;
     return message;
@@ -294,11 +311,9 @@ export default function BranchPurchaseRequestDetailPage() {
       const next = { ...previous, ...patch };
       if (patch.approvedQuantity !== undefined && request) {
         const item = request.items.find((row) => row.id === itemId);
-        if (item) {
+        if (item && next.action !== 'REJECT' && next.action !== 'REMOVE') {
           const qty = Number(patch.approvedQuantity);
-          if (Number.isFinite(qty) && qty > 0 && qty < item.quantity) {
-            next.action = 'PARTIAL';
-          } else if (Number.isFinite(qty) && qty >= item.quantity) {
+          if (Number.isFinite(qty) && qty > 0) {
             next.action = 'APPROVE';
           }
         }
@@ -307,17 +322,17 @@ export default function BranchPurchaseRequestDetailPage() {
     });
   }
 
-  function buildLineReviewPayload(item: RequestItem, decision: LineDecision, stockLoaded = true) {
-    const available = availableForLine(item, stockLoaded);
-    const approvedQuantity =
-      decision.action === 'APPROVE'
-        ? Math.min(item.quantity, available)
-        : decision.action === 'PARTIAL'
-          ? decision.approvedQuantity
-          : 0;
+  function buildLineReviewPayload(item: RequestItem, decision: LineDecision) {
+    if (decision.action === 'REJECT' || decision.action === 'REMOVE') {
+      return {
+        action: decision.action,
+        approvedQuantity: 0,
+        publicComment: decision.publicComment.trim() || undefined,
+      };
+    }
     return {
-      action: decision.action,
-      approvedQuantity,
+      action: 'APPROVE',
+      approvedQuantity: decision.approvedQuantity,
       publicComment: decision.publicComment.trim() || undefined,
     };
   }
@@ -332,21 +347,26 @@ export default function BranchPurchaseRequestDetailPage() {
     const stockLoaded = request.hqStockStatus !== 'unavailable';
     const decision = lineDecisions[item.id] ?? defaultLineDecision(item, stockLoaded);
     const finalAction = action ?? decision.action;
-    const available = availableForLine(item, stockLoaded);
     const resolvedDecision: LineDecision =
       finalAction === 'APPROVE'
-        ? { action: 'APPROVE', approvedQuantity: Math.min(item.quantity, available), publicComment: '' }
-        : finalAction === 'PARTIAL'
-          ? {
-              action: 'PARTIAL',
-              approvedQuantity: overrideApprovedQuantity ?? decision.approvedQuantity,
-              publicComment: overridePublicComment ?? decision.publicComment,
-            }
-          : {
-              action: finalAction,
-              approvedQuantity: 0,
-              publicComment: overridePublicComment ?? decision.publicComment,
-            };
+        ? {
+            action: 'APPROVE',
+            approvedQuantity: overrideApprovedQuantity ?? decision.approvedQuantity,
+            publicComment: overridePublicComment ?? decision.publicComment,
+          }
+        : {
+            action: finalAction,
+            approvedQuantity: 0,
+            publicComment: overridePublicComment ?? decision.publicComment,
+          };
+
+    if (resolvedDecision.action === 'APPROVE') {
+      const validationError = validateApprovedQuantityForApprove(t, item, resolvedDecision.approvedQuantity);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    }
 
     if (
       (resolvedDecision.action === 'REJECT' || resolvedDecision.action === 'REMOVE') &&
@@ -376,13 +396,11 @@ export default function BranchPurchaseRequestDetailPage() {
               ? defaultLineDecision(row, detail.hqStockStatus !== 'unavailable')
               : {
                   action:
-                    row.lineStatus === 'APPROVED'
+                    row.lineStatus === 'APPROVED' || row.lineStatus === 'PARTIALLY_APPROVED'
                       ? 'APPROVE'
-                      : row.lineStatus === 'PARTIALLY_APPROVED'
-                        ? 'PARTIAL'
-                        : row.lineStatus === 'REMOVED_BY_HQ_SALES'
-                          ? 'REMOVE'
-                          : 'REJECT',
+                      : row.lineStatus === 'REMOVED_BY_HQ_SALES'
+                        ? 'REMOVE'
+                        : 'REJECT',
                   approvedQuantity: row.approvedQuantity ?? 0,
                   publicComment: row.publicComment ?? '',
                 },
@@ -398,25 +416,19 @@ export default function BranchPurchaseRequestDetailPage() {
   }
 
   function setLineAction(item: RequestItem, action: LineReviewAction) {
-    const stockLoaded = request?.hqStockStatus !== 'unavailable';
-    const available = availableForLine(item, stockLoaded);
     if (action === 'APPROVE') {
-      updateLineDecision(item.id, { action, approvedQuantity: Math.min(item.quantity, available), publicComment: '' });
-      void submitLineReview(item, action);
-      return;
-    }
-    if (action === 'PARTIAL') {
-      const current = lineDecisions[item.id]?.approvedQuantity;
-      const partialQty =
-        current != null && current > 0 && current < item.quantity
-          ? current
-          : Math.min(available, item.quantity - 1) || available;
+      const decision = lineDecisions[item.id] ?? defaultLineDecision(item, request?.hqStockStatus !== 'unavailable');
+      const validationError = validateApprovedQuantityForApprove(t, item, decision.approvedQuantity);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
       updateLineDecision(item.id, {
-        action,
-        approvedQuantity: partialQty,
-        publicComment: lineDecisions[item.id]?.publicComment ?? '',
+        action: 'APPROVE',
+        approvedQuantity: decision.approvedQuantity,
+        publicComment: decision.publicComment,
       });
-      void submitLineReview(item, action, partialQty);
+      void submitLineReview(item, 'APPROVE', decision.approvedQuantity);
       return;
     }
     const comment = lineDecisions[item.id]?.publicComment ?? '';
@@ -480,7 +492,7 @@ export default function BranchPurchaseRequestDetailPage() {
           const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
           return {
             id: item.id,
-            ...buildLineReviewPayload(item, decision, hqStockLoaded),
+            ...buildLineReviewPayload(item, decision),
           };
         }),
       };
@@ -849,8 +861,6 @@ export default function BranchPurchaseRequestDetailPage() {
                 const available = availableForLine(item, hqStockLoaded);
                 const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
                 const hasPolicy = item.pricingPolicyAvailable !== false;
-                const canApproveFull = hasPolicy && available >= item.quantity;
-                const canPartial = hasPolicy && available > 0 && available < item.quantity;
 
                 return (
                   <tr key={item.id}>
@@ -878,11 +888,13 @@ export default function BranchPurchaseRequestDetailPage() {
                     </td>
                     <td className="px-2 py-1.5 text-center tabular-nums">
                       {canActOnRequest && reviewable ? (
-                        decision.action === 'PARTIAL' || decision.action === 'APPROVE' ? (
+                        decision.action === 'REJECT' || decision.action === 'REMOVE' ? (
+                          '0'
+                        ) : (
                           <input
                             type="number"
-                            min="0"
-                            max={available}
+                            min="1"
+                            max={item.quantity}
                             value={decision.approvedQuantity}
                             onChange={(event) =>
                               updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
@@ -890,8 +902,6 @@ export default function BranchPurchaseRequestDetailPage() {
                             onClick={(event) => event.stopPropagation()}
                             className="w-14 rounded border border-slate-300 px-1 py-0.5 text-xs"
                           />
-                        ) : (
-                          '0'
                         )
                       ) : (
                         item.approvedQuantity ?? '-'
@@ -906,19 +916,11 @@ export default function BranchPurchaseRequestDetailPage() {
                           <div className="flex flex-wrap gap-0.5">
                             <button
                               type="button"
-                              disabled={!canApproveFull || submittingLineId === item.id || submitting}
+                              disabled={!hasPolicy || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'APPROVE')}
                               className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
                               {t('branchProductRequest.hqCompact.actionApproveShort')}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!canPartial || submittingLineId === item.id || submitting}
-                              onClick={() => setLineAction(item, 'PARTIAL')}
-                              className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
-                            >
-                              {t('branchProductRequest.hqCompact.actionPartialShort')}
                             </button>
                             <button
                               type="button"
@@ -929,7 +931,7 @@ export default function BranchPurchaseRequestDetailPage() {
                               {t('branchProductRequest.hqCompact.actionRejectShort')}
                             </button>
                           </div>
-                          {(decision.action === 'REJECT' || decision.action === 'REMOVE' || decision.action === 'PARTIAL') ? (
+                          {decision.action === 'REJECT' || decision.action === 'REMOVE' ? (
                             <textarea
                               value={decision.publicComment}
                               onChange={(event) => updateLineDecision(item.id, { publicComment: event.target.value })}
@@ -1015,8 +1017,6 @@ export default function BranchPurchaseRequestDetailPage() {
                 const missing = reviewed || !reviewable
                   ? (item.unavailableQuantity ?? Math.max(item.quantity - approvedValue, 0))
                   : Math.max(item.quantity - approvedValue, 0);
-                const canApproveFull = hasPolicy && available >= item.quantity;
-                const canPartial = hasPolicy && available > 0 && available < item.quantity;
 
                 return (
                   <tr key={item.id}>
@@ -1058,19 +1058,19 @@ export default function BranchPurchaseRequestDetailPage() {
                         </td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>
                           {canActOnRequest && reviewable ? (
-                            decision.action === 'PARTIAL' || decision.action === 'APPROVE' ? (
+                            decision.action === 'REJECT' || decision.action === 'REMOVE' ? (
+                              '0'
+                            ) : (
                               <input
                                 type="number"
-                                min="0"
-                                max={available}
+                                min="1"
+                                max={item.quantity}
                                 value={decision.approvedQuantity}
                                 onChange={(event) =>
                                   updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
                                 }
                                 className={`rounded-lg border border-slate-300 ${hqCompactTable ? 'w-14 px-1 py-0.5 text-xs' : 'w-24 px-2 py-1'}`}
                               />
-                            ) : (
-                              '0'
                             )
                           ) : (
                             item.approvedQuantity ?? '-'
@@ -1101,19 +1101,11 @@ export default function BranchPurchaseRequestDetailPage() {
                           <div className="flex flex-wrap gap-0.5">
                             <button
                               type="button"
-                              disabled={!canApproveFull || submittingLineId === item.id || submitting}
+                              disabled={!hasPolicy || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'APPROVE')}
                               className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
                               {t('branchProductRequest.actionApprove')}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!canPartial || submittingLineId === item.id || submitting}
-                              onClick={() => setLineAction(item, 'PARTIAL')}
-                              className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
-                            >
-                              {t('branchProductRequest.actionPartial')}
                             </button>
                             <button
                               type="button"
@@ -1131,7 +1123,7 @@ export default function BranchPurchaseRequestDetailPage() {
                               {t('branchProductRequest.actionRemove')}
                             </button>
                           </div>
-                          {(decision.action === 'REJECT' || decision.action === 'REMOVE' || decision.action === 'PARTIAL') ? (
+                          {decision.action === 'REJECT' || decision.action === 'REMOVE' ? (
                             <textarea
                               value={decision.publicComment}
                               onChange={(event) => updateLineDecision(item.id, { publicComment: event.target.value })}
