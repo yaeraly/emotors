@@ -1,5 +1,5 @@
 import type { User } from './types';
-import { isBranchCashierUser, isBranchOwnerUser } from './rbac';
+import { isBranchAccountantUser, isBranchCashierUser, isBranchOwnerUser } from './rbac';
 import { usesUnifiedNav } from './unified-nav';
 
 /** Branch Sales pages rely on unified module tabs for the primary page title. */
@@ -10,6 +10,11 @@ export function usesUnifiedNavPageTitle(user: User | null | undefined) {
 /** Branch Cashier sidebar already labels pages such as service payment and returns. */
 export function shouldHideBranchCashierDuplicateNavTitle(user: User | null | undefined) {
   return isBranchCashierUser(user);
+}
+
+/** Branch Accountant sidebar already labels finance and payroll pages. */
+export function shouldHideBranchAccountantDuplicateNavTitle(user: User | null | undefined) {
+  return isBranchAccountantUser(user);
 }
 
 /** Branch CEO pages should hide in-page titles that duplicate unified module tabs. */

@@ -4,7 +4,10 @@ import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { shouldHideBranchCeoDuplicateNavTitle } from '@/lib/unified-nav-page-title';
+import {
+  shouldHideBranchAccountantDuplicateNavTitle,
+  shouldHideBranchCeoDuplicateNavTitle,
+} from '@/lib/unified-nav-page-title';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -64,6 +67,8 @@ export function Phase2DataPage({
   }, [endpoint]);
 
   const hideDuplicateTitle = shouldHideBranchCeoDuplicateNavTitle(user);
+  const hidePlatformSubtitle =
+    hideDuplicateTitle || shouldHideBranchAccountantDuplicateNavTitle(user);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,9 +90,11 @@ export function Phase2DataPage({
         {embedded || hideDuplicateTitle ? null : (
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('phase2.title')}
-            </p>
+            {!hidePlatformSubtitle ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('phase2.title')}
+              </p>
+            ) : null}
             <h2 className="text-3xl font-bold text-slate-950">{t(titleKey)}</h2>
             {descriptionKey ? (
               <p className="mt-2 text-slate-500">{t(descriptionKey)}</p>
