@@ -871,30 +871,19 @@ export default function BranchPurchaseRequestDetailPage() {
               </tbody>
             </table>
           ) : hqCompactTable && canSeeHqStock ? (
-          <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
-            <colgroup>
-              <col className="w-auto min-w-[16.25rem]" />
-              <col className="w-[2.5rem]" />
-              <col className="w-[2.75rem]" />
-              <col className="w-[3.25rem]" />
-              <col className="w-[3.75rem]" />
-              <col className="w-[2.75rem]" />
-              <col className="w-[3.25rem]" />
-              <col className="w-[3.75rem]" />
-              {canActOnRequest && reviewable ? <col className="w-[5.25rem]" /> : null}
-            </colgroup>
+          <table className="w-full table-auto divide-y divide-slate-200 text-xs">
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="min-w-[260px] px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
-                <th className="px-2 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
-                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.requested')}>{t('branchProductRequest.hqCompact.requested')}</th>
-                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.hqPhysicalStock')}>{t('branchProductRequest.hqCompact.hqPhysicalStock')}</th>
-                <th className="px-2 py-1.5" title={t('branchProductRequest.hqCompact.tooltip.pricingPolicy')}>{t('branchProductRequest.hqCompact.pricingPolicy')}</th>
-                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.approved')}>{t('branchProductRequest.hqCompact.approved')}</th>
-                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.branchStock')}>{t('branchProductRequest.hqCompact.branchStock')}</th>
-                <th className="px-2 py-1.5 text-right" title={t('branchProductRequest.hqCompact.tooltip.requestTotal')}>{t('branchProductRequest.hqCompact.requestTotal')}</th>
+                <th className="min-w-[6rem] w-auto px-2 py-1.5 align-top">{t('branchProductRequest.hqCompact.product')}</th>
+                <th className="w-0 whitespace-nowrap px-1 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.requested')}>{t('branchProductRequest.hqCompact.requested')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.hqPhysicalStock')}>{t('branchProductRequest.hqCompact.hqPhysicalStock')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5" title={t('branchProductRequest.hqCompact.tooltip.pricingPolicy')}>{t('branchProductRequest.hqCompact.pricingPolicy')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.approved')}>{t('branchProductRequest.hqCompact.approved')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.branchStock')}>{t('branchProductRequest.hqCompact.branchStock')}</th>
+                <th className="w-0 whitespace-nowrap px-2 py-1.5 text-right" title={t('branchProductRequest.hqCompact.tooltip.requestTotal')}>{t('branchProductRequest.hqCompact.requestTotal')}</th>
                 {canActOnRequest && reviewable ? (
-                  <th className="sticky right-0 bg-slate-50 px-2 py-1.5">{t('branchProductRequest.hqCompact.actions')}</th>
+                  <th className="sticky right-0 w-0 whitespace-nowrap bg-slate-50 px-2 py-1.5">{t('branchProductRequest.hqCompact.actions')}</th>
                 ) : null}
               </tr>
             </thead>
@@ -905,21 +894,21 @@ export default function BranchPurchaseRequestDetailPage() {
 
                 return (
                   <tr key={item.id} className={hqSalesReviewLineRowClass(item.lineStatus)}>
-                    <td className="min-w-[260px] w-auto px-2 py-1.5 align-top">
-                      <p className="whitespace-normal break-normal [overflow-wrap:anywhere] font-semibold leading-snug text-slate-900">{item.productName}</p>
+                    <td className="min-w-[6rem] w-auto px-2 py-1.5 align-top">
+                      <p className="whitespace-normal break-normal break-words font-semibold leading-snug text-slate-900">{item.productName}</p>
                       <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
                     </td>
-                    <td className="px-1 py-1.5 text-center whitespace-nowrap">{formatProductUnit(item.unit, language, t)}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">{item.quantity}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
-                    <td className="px-2 py-1.5">
+                    <td className="w-0 whitespace-nowrap px-1 py-1.5 text-center">{formatProductUnit(item.unit, language, t)}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{item.quantity}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5">
                       {hasPolicy ? (
                         <span className="text-green-700">{t('branchProductRequest.pricingPolicyOk')}</span>
                       ) : (
                         <span className="font-semibold text-amber-700">{t('branchProductRequest.pricingPolicyMissing')}</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">
                       {canActOnRequest && reviewable ? (
                         <input
                           type="number"
@@ -936,10 +925,10 @@ export default function BranchPurchaseRequestDetailPage() {
                         item.approvedQuantity ?? '-'
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{formatKgs(requestLineTotal(item))}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(requestLineTotal(item))}</td>
                     {canActOnRequest && reviewable ? (
-                      <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
+                      <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} w-0 whitespace-nowrap px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">
                           <div className="flex flex-wrap gap-0.5">
                             <button

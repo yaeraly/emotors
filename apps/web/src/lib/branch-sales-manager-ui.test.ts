@@ -140,9 +140,11 @@ describe('branch sales manager ui cleanup', () => {
     assert.ok(compactTableEnd > compactTableStart);
     const compactTable = detailPage.slice(compactTableStart, compactTableEnd);
     assert.doesNotMatch(compactTable, /hqCompact\.available/);
-    assert.match(compactTable, /table-fixed/);
-    assert.match(compactTable, /min-w-\[260px\]/);
-    assert.match(compactTable, /whitespace-normal break-normal \[overflow-wrap:anywhere\]/);
+    assert.match(compactTable, /table-auto/);
+    assert.match(compactTable, /min-w-\[6rem\] w-auto/);
+    assert.match(compactTable, /whitespace-normal break-normal break-words/);
+    assert.doesNotMatch(compactTable, /min-w-\[260px\]/);
+    assert.doesNotMatch(compactTable, /table-fixed/);
     assert.match(compactTable, /formatProductUnit\(item\.unit, language, t\)/);
     assert.doesNotMatch(compactTable, /line-clamp/);
     assert.doesNotMatch(compactTable, /max-w-\[8rem\] truncate/);
@@ -185,8 +187,9 @@ describe('branch sales manager ui cleanup', () => {
       compactTable.lastIndexOf('<p className="whitespace-normal', productCellStart),
       productCellStart + 1,
     );
-    assert.match(productCell, /min-w-\[260px\]/);
+    assert.match(productCell, /min-w-\[6rem\] w-auto/);
     assert.doesNotMatch(productNameLine, /line-clamp|text-ellipsis|truncate/);
+    assert.match(productNameLine, /break-words/);
     const longestSampleName =
       'Аккумуляторная батарея LiFePO4 высокой ёмкости для электромобиля EMOTORS Pro Max Extended Range';
     assert.ok(longestSampleName.length >= 80, 'sample catalog-length product name');
