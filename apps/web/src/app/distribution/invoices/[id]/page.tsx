@@ -11,7 +11,7 @@ import {
   canSendInvoiceToCashier,
   canSubmitBranchInvoicePayment,
 } from '@/lib/rbac';
-import type { BranchInvoice, BranchPayment, BranchPaymentMethod, User } from '@/lib/types';
+import type { BranchInvoice, BranchPayment, BranchPaymentMethod, BranchType, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
@@ -206,6 +206,10 @@ export default function BranchInvoiceDetailPage() {
               <Info label={t('distribution.status')} value={getStatusLabel({ module: 'invoice', status: invoice.status, t })} />
               <Info label={t('distribution.dueDate')} value={new Date(invoice.dueDate).toLocaleDateString()} />
               <Info label={t('distribution.issuedAt')} value={new Date(invoice.issuedAt).toLocaleDateString()} />
+              <Info
+                label={t('branches.branchType')}
+                value={branchTypeLabel(invoice.branch?.branchType, t)}
+              />
             </section>
 
             {canHandoffToCashier && waitingForCashier ? (
@@ -363,6 +367,21 @@ export default function BranchInvoiceDetailPage() {
       </section>
     </ProtectedShell>
   );
+}
+
+function branchTypeLabel(branchType: BranchType | undefined, t: (key: string) => string) {
+  switch (branchType) {
+    case 'HQ_BRANCH':
+      return t('branches.branchTypeHq');
+    case 'FRANCHISE':
+      return t('branches.branchTypeFranchise');
+    case 'DEALER':
+      return t('branches.branchTypeDealer');
+    case 'DISTRIBUTOR':
+      return t('branches.branchTypeDistributor');
+    default:
+      return '—';
+  }
 }
 
 function Info({ label, value }: { label: string; value: string }) {
