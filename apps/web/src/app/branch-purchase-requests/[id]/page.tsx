@@ -873,19 +873,19 @@ export default function BranchPurchaseRequestDetailPage() {
           ) : hqCompactTable && canSeeHqStock ? (
           <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
             <colgroup>
-              <col />
+              <col className="w-auto min-w-[16.25rem]" />
+              <col className="w-[2.5rem]" />
               <col className="w-[2.75rem]" />
-              <col className="w-[3rem]" />
-              <col className="w-[3.5rem]" />
-              <col className="w-[4.25rem]" />
-              <col className="w-[3rem]" />
+              <col className="w-[3.25rem]" />
               <col className="w-[3.75rem]" />
-              <col className="w-[4.25rem]" />
-              {canActOnRequest && reviewable ? <col className="w-[5.5rem]" /> : null}
+              <col className="w-[2.75rem]" />
+              <col className="w-[3.25rem]" />
+              <col className="w-[3.75rem]" />
+              {canActOnRequest && reviewable ? <col className="w-[5.25rem]" /> : null}
             </colgroup>
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
+                <th className="min-w-[260px] px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
                 <th className="px-2 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
                 <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.requested')}>{t('branchProductRequest.hqCompact.requested')}</th>
                 <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.hqPhysicalStock')}>{t('branchProductRequest.hqCompact.hqPhysicalStock')}</th>
@@ -905,8 +905,8 @@ export default function BranchPurchaseRequestDetailPage() {
 
                 return (
                   <tr key={item.id} className={hqSalesReviewLineRowClass(item.lineStatus)}>
-                    <td className="min-w-0 px-2 py-1.5 align-top">
-                      <p className="line-clamp-2 break-words font-semibold leading-snug text-slate-900" title={item.productName}>{item.productName}</p>
+                    <td className="min-w-[260px] w-auto px-2 py-1.5 align-top">
+                      <p className="whitespace-normal break-normal [overflow-wrap:anywhere] font-semibold leading-snug text-slate-900">{item.productName}</p>
                       <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
                     </td>
                     <td className="px-1 py-1.5 text-center whitespace-nowrap">{formatProductUnit(item.unit, language, t)}</td>

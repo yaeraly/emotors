@@ -141,8 +141,10 @@ describe('branch sales manager ui cleanup', () => {
     const compactTable = detailPage.slice(compactTableStart, compactTableEnd);
     assert.doesNotMatch(compactTable, /hqCompact\.available/);
     assert.match(compactTable, /table-fixed/);
-    assert.match(compactTable, /line-clamp-2 break-words/);
+    assert.match(compactTable, /min-w-\[260px\]/);
+    assert.match(compactTable, /whitespace-normal break-normal \[overflow-wrap:anywhere\]/);
     assert.match(compactTable, /formatProductUnit\(item\.unit, language, t\)/);
+    assert.doesNotMatch(compactTable, /line-clamp/);
     assert.doesNotMatch(compactTable, /max-w-\[8rem\] truncate/);
     const headerStart = compactTable.indexOf('<thead');
     const headerEnd = compactTable.indexOf('</thead>', headerStart);
@@ -171,6 +173,23 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /!hqSalesView \? \([\s\S]*distribution\.branch/);
     assert.match(detailPage, /hqSalesView \? t\('branchProductRequest\.orderAmount'\)/);
     assert.match(detailPage, /formatKgs\(request\.totalEstimatedAmount\)/);
+  });
+
+  it('hq sales compact product table keeps full product names readable without truncation', () => {
+    const compactTableStart = detailPage.indexOf('hqCompactTable && canSeeHqStock ? (');
+    const compactTableEnd = detailPage.indexOf(') : (', compactTableStart);
+    const compactTable = detailPage.slice(compactTableStart, compactTableEnd);
+    const productCellStart = compactTable.indexOf('{item.productName}');
+    const productCell = compactTable.slice(Math.max(0, productCellStart - 220), productCellStart + 20);
+    const productNameLine = compactTable.slice(
+      compactTable.lastIndexOf('<p className="whitespace-normal', productCellStart),
+      productCellStart + 1,
+    );
+    assert.match(productCell, /min-w-\[260px\]/);
+    assert.doesNotMatch(productNameLine, /line-clamp|text-ellipsis|truncate/);
+    const longestSampleName =
+      'Аккумуляторная батарея LiFePO4 высокой ёмкости для электромобиля EMOTORS Pro Max Extended Range';
+    assert.ok(longestSampleName.length >= 80, 'sample catalog-length product name');
   });
 
   it('hq sales order detail keeps reviewed line decisions editable for re-approval', () => {
