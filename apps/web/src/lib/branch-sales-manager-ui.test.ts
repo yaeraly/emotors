@@ -140,6 +140,10 @@ describe('branch sales manager ui cleanup', () => {
     assert.ok(compactTableEnd > compactTableStart);
     const compactTable = detailPage.slice(compactTableStart, compactTableEnd);
     assert.doesNotMatch(compactTable, /hqCompact\.available/);
+    assert.match(compactTable, /table-fixed/);
+    assert.match(compactTable, /line-clamp-2 break-words/);
+    assert.match(compactTable, /formatProductUnit\(item\.unit, language, t\)/);
+    assert.doesNotMatch(compactTable, /max-w-\[8rem\] truncate/);
     const headerStart = compactTable.indexOf('<thead');
     const headerEnd = compactTable.indexOf('</thead>', headerStart);
     const header = compactTable.slice(headerStart, headerEnd);
@@ -161,5 +165,11 @@ describe('branch sales manager ui cleanup', () => {
       assert.ok(index > lastIndex, `${key} is out of order in HQ compact table header`);
       lastIndex = index;
     }
+  });
+
+  it('hq sales order detail uses order amount label and hides branch info', () => {
+    assert.match(detailPage, /!hqSalesView \? \([\s\S]*distribution\.branch/);
+    assert.match(detailPage, /hqSalesView \? t\('branchProductRequest\.orderAmount'\)/);
+    assert.match(detailPage, /formatKgs\(request\.totalEstimatedAmount\)/);
   });
 });

@@ -21,6 +21,7 @@ import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 import { formatKgs, roundMoney } from '@/lib/money';
+import { formatProductUnit } from '@/lib/product-unit';
 import {
   formatFrozenBranchPrice,
   formatLineTotalKgs,
@@ -228,7 +229,7 @@ function hqSalesReviewLineStickyCellClass(lineStatus?: string | null) {
 }
 
 export default function BranchPurchaseRequestDetailPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const params = useParams<{ id: string }>();
   const [request, setRequest] = useState<RequestDetail | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -722,10 +723,12 @@ export default function BranchPurchaseRequestDetailPage() {
         ) : null}
 
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
-          <div>
-            <p className="text-xs font-bold uppercase text-slate-400">{t('distribution.branch')}</p>
-            <p className="mt-1 font-semibold text-slate-900">{branchName}</p>
-          </div>
+          {!hqSalesView ? (
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-400">{t('distribution.branch')}</p>
+              <p className="mt-1 font-semibold text-slate-900">{branchName}</p>
+            </div>
+          ) : null}
           <div>
             <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.branchWarehouse')}</p>
             <p className="mt-1 font-semibold text-slate-900">{branchWarehouseName}</p>
@@ -760,7 +763,9 @@ export default function BranchPurchaseRequestDetailPage() {
           ) : null}
           {!branchOnlyView ? (
             <div>
-              <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.estimatedAmount')}</p>
+              <p className="text-xs font-bold uppercase text-slate-400">
+                {hqSalesView ? t('branchProductRequest.orderAmount') : t('branchProductRequest.estimatedAmount')}
+              </p>
               <p className="mt-1 font-semibold text-slate-900">{formatKgs(request.totalEstimatedAmount)} KGS</p>
             </div>
           ) : !branchSalesManagerView ? (
@@ -859,7 +864,18 @@ export default function BranchPurchaseRequestDetailPage() {
               </tbody>
             </table>
           ) : hqCompactTable && canSeeHqStock ? (
-          <table className="w-full divide-y divide-slate-200 text-xs">
+          <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+            <colgroup>
+              <col />
+              <col className="w-[2.75rem]" />
+              <col className="w-[3rem]" />
+              <col className="w-[3.5rem]" />
+              <col className="w-[4.25rem]" />
+              <col className="w-[3rem]" />
+              <col className="w-[3.75rem]" />
+              <col className="w-[4.25rem]" />
+              {canActOnRequest && reviewable ? <col className="w-[5.5rem]" /> : null}
+            </colgroup>
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
@@ -882,11 +898,11 @@ export default function BranchPurchaseRequestDetailPage() {
 
                 return (
                   <tr key={item.id} className={hqSalesReviewLineRowClass(item.lineStatus)}>
-                    <td className="max-w-[8rem] truncate px-2 py-1.5">
-                      <p className="truncate font-semibold text-slate-900" title={item.productName}>{item.productName}</p>
+                    <td className="min-w-0 px-2 py-1.5 align-top">
+                      <p className="line-clamp-2 break-words font-semibold leading-snug text-slate-900" title={item.productName}>{item.productName}</p>
                       <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
                     </td>
-                    <td className="px-2 py-1.5 text-center">{item.unit}</td>
+                    <td className="px-1 py-1.5 text-center whitespace-nowrap">{formatProductUnit(item.unit, language, t)}</td>
                     <td className="px-2 py-1.5 text-center tabular-nums">{item.quantity}</td>
                     <td className="px-2 py-1.5 text-center tabular-nums">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
                     <td className="px-2 py-1.5">
