@@ -176,6 +176,35 @@ function defaultLineDecision(item: RequestItem, hqStockLoaded: boolean): LineDec
   return { action: 'APPROVE', approvedQuantity: item.quantity, publicComment: '' };
 }
 
+function lineDecisionFromItem(item: RequestItem, hqStockLoaded: boolean): LineDecision {
+  if (!item.lineStatus || item.lineStatus === 'PENDING_REVIEW') {
+    return defaultLineDecision(item, hqStockLoaded);
+  }
+  if (item.lineStatus === 'APPROVED' || item.lineStatus === 'PARTIALLY_APPROVED') {
+    return {
+      action: 'APPROVE',
+      approvedQuantity: item.approvedQuantity ?? item.quantity,
+      publicComment: item.publicComment ?? '',
+    };
+  }
+  if (item.lineStatus === 'REMOVED_BY_HQ_SALES') {
+    return {
+      action: 'REMOVE',
+      approvedQuantity: 0,
+      publicComment: item.publicComment ?? '',
+    };
+  }
+  return {
+    action: 'REJECT',
+    approvedQuantity: 0,
+    publicComment: item.publicComment ?? '',
+  };
+}
+
+function buildLineDecisionsFromItems(items: RequestItem[], hqStockLoaded: boolean) {
+  return Object.fromEntries(items.map((item) => [item.id, lineDecisionFromItem(item, hqStockLoaded)]));
+}
+
 function validateApprovedQuantityForApprove(
   t: (key: string) => string,
   item: RequestItem,
@@ -255,6 +284,9 @@ export default function BranchPurchaseRequestDetailPage() {
     if (message.includes('Утверждаемое количество не может превышать запрошенное')) {
       return t('branchProductRequest.approvedQuantityExceedsRequested');
     }
+    if (message.includes('Нельзя изменить решение: заказ уже передан на следующий необратимый этап.')) {
+      return t('branchProductRequest.lineReviewLockedDownstream');
+    }
     if (message.includes('не настроена цена для филиала')) return message;
     if (message.includes('Данные заказа изменились')) return message;
     return message;
@@ -296,14 +328,7 @@ export default function BranchPurchaseRequestDetailPage() {
       ]);
       setRequest(detail);
       setUser(me);
-      setLineDecisions(
-        Object.fromEntries(
-          detail.items.map((item) => [
-            item.id,
-            defaultLineDecision(item, detail.hqStockStatus !== 'unavailable'),
-          ]),
-        ),
-      );
+      setLineDecisions(buildLineDecisionsFromItems(detail.items, detail.hqStockStatus !== 'unavailable'));
 
       void Promise.all([
         apiFetch<Branch[]>('/branches'),
@@ -410,25 +435,7 @@ export default function BranchPurchaseRequestDetailPage() {
         },
       );
       setRequest(detail);
-      setLineDecisions(
-        Object.fromEntries(
-          detail.items.map((row) => [
-            row.id,
-            row.lineStatus === 'PENDING_REVIEW'
-              ? defaultLineDecision(row, detail.hqStockStatus !== 'unavailable')
-              : {
-                  action:
-                    row.lineStatus === 'APPROVED' || row.lineStatus === 'PARTIALLY_APPROVED'
-                      ? 'APPROVE'
-                      : row.lineStatus === 'REMOVED_BY_HQ_SALES'
-                        ? 'REMOVE'
-                        : 'REJECT',
-                  approvedQuantity: row.approvedQuantity ?? 0,
-                  publicComment: row.publicComment ?? '',
-                },
-          ]),
-        ),
-      );
+      setLineDecisions(buildLineDecisionsFromItems(detail.items, detail.hqStockStatus !== 'unavailable'));
       setSuccess(t('branchProductRequest.lineReviewSaved'));
     } catch (err) {
       setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
@@ -914,21 +921,17 @@ export default function BranchPurchaseRequestDetailPage() {
                     </td>
                     <td className="px-2 py-1.5 text-center tabular-nums">
                       {canActOnRequest && reviewable ? (
-                        decision.action === 'REJECT' || decision.action === 'REMOVE' ? (
-                          '0'
-                        ) : (
-                          <input
-                            type="number"
-                            min="1"
-                            max={item.quantity}
-                            value={decision.approvedQuantity}
-                            onChange={(event) =>
-                              updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
-                            }
-                            onClick={(event) => event.stopPropagation()}
-                            className="w-14 rounded border border-slate-300 px-1 py-0.5 text-xs"
-                          />
-                        )
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.quantity}
+                          value={decision.approvedQuantity}
+                          onChange={(event) =>
+                            updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          className="w-14 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                        />
                       ) : (
                         item.approvedQuantity ?? '-'
                       )}

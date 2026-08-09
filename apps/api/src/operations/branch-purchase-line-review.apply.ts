@@ -20,6 +20,7 @@ import {
   deriveRequestStatusFromLines,
   resolveLineReview,
   type LineReviewInput,
+  type ResolvedLineReview,
 } from './branch-request-review.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -59,6 +60,7 @@ export type AppliedBranchPurchaseLineReview = {
   notifyCeoOutOfStock: boolean;
   generalAvailable: number;
   bookedQuantity: number;
+  unchanged?: boolean;
 };
 
 type ApplyLineReviewDeps = {
@@ -92,15 +94,127 @@ export function mapBranchPurchaseLineReviewAuditAction(lineStatus: BranchPurchas
   }
 }
 
+export function resolveBranchPurchaseLineReviewAuditAction(params: {
+  previousLineStatus?: BranchPurchaseRequestLineStatus | null;
+  previousApprovedQuantity?: number | null;
+  nextLineStatus: BranchPurchaseRequestLineStatus;
+  nextApprovedQuantity: number;
+}) {
+  const previousStatus = params.previousLineStatus ?? BranchPurchaseRequestLineStatus.PENDING_REVIEW;
+  const previousQty = Math.max(Number(params.previousApprovedQuantity ?? 0), 0);
+  const nextQty = Math.max(Number(params.nextApprovedQuantity ?? 0), 0);
+  const nextStatus = params.nextLineStatus;
+  const wasReviewed = previousStatus !== BranchPurchaseRequestLineStatus.PENDING_REVIEW;
+  const nextRejected =
+    nextStatus === BranchPurchaseRequestLineStatus.REJECTED ||
+    nextStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES;
+  const previousRejected =
+    previousStatus === BranchPurchaseRequestLineStatus.REJECTED ||
+    previousStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES;
+
+  if (!wasReviewed) {
+    return mapBranchPurchaseLineReviewAuditAction(nextStatus);
+  }
+
+  if (previousRejected && nextQty > 0) {
+    return 'BRANCH_ORDER_ITEM_REAPPROVED';
+  }
+
+  if (
+    previousQty === nextQty &&
+    previousStatus === nextStatus &&
+    (previousRejected === nextRejected || (!previousRejected && !nextRejected))
+  ) {
+    return mapBranchPurchaseLineReviewAuditAction(nextStatus);
+  }
+
+  if (nextRejected && previousQty > 0) {
+    return 'BRANCH_ORDER_ITEM_REJECTED';
+  }
+
+  if (previousQty !== nextQty || previousStatus !== nextStatus) {
+    return 'BRANCH_ORDER_ITEM_APPROVAL_CHANGED';
+  }
+
+  return mapBranchPurchaseLineReviewAuditAction(nextStatus);
+}
+
+export function branchPurchaseLineReviewDecisionUnchanged(
+  item: {
+    lineStatus: BranchPurchaseRequestLineStatus;
+    approvedQuantity: number | null;
+    unavailableQuantity: number | null;
+    rejectionReasonCode: BranchRequestLineRejectionReason | null;
+    publicComment: string | null;
+  },
+  resolved: ResolvedLineReview,
+) {
+  return (
+    item.lineStatus === resolved.lineStatus &&
+    Math.max(item.approvedQuantity ?? 0, 0) === resolved.approvedQuantity &&
+    Math.max(item.unavailableQuantity ?? 0, 0) === resolved.unavailableQuantity &&
+    (item.rejectionReasonCode ?? null) === (resolved.rejectionReasonCode ?? null) &&
+    (item.publicComment?.trim() || null) === (resolved.publicComment?.trim() || null)
+  );
+}
+
+export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
+  tx: PrismaTx,
+  requestId: string,
+  branchId: string,
+) {
+  const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
+    where: { requestId },
+    select: {
+      approvedQuantity: true,
+      quantity: true,
+      estimatedLineProductCostKgs: true,
+      totalAmount: true,
+    },
+  });
+  const reviewedProductCostKgs = sumDisplayMoneyTotals(
+    refreshedItems.map((row) => {
+      const qty = row.approvedQuantity ?? 0;
+      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
+    }),
+  );
+  const reviewBranch = await tx.branch.findFirst({
+    where: { id: branchId, deletedAt: null },
+    select: { branchType: true },
+  });
+  const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
+    branchType: reviewBranch?.branchType,
+    totalProductCostKgs: reviewedProductCostKgs,
+    storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+      refreshedItems.map((row) => (Number(row.approvedQuantity ?? 0) > 0 ? Number(row.totalAmount ?? 0) : 0)),
+    ),
+  });
+
+  await tx.branchPurchaseRequest.update({
+    where: { id: requestId },
+    data: {
+      totalEstimatedAmount: reviewedEstimatedAmountKgs,
+    },
+  });
+
+  return reviewedEstimatedAmountKgs;
+}
+
 export async function applyBranchPurchaseLineReviewInTx(
   tx: PrismaTx,
   user: AuthUser,
   deps: ApplyLineReviewDeps,
-  item: BranchPurchaseRequestItemRow,
+  item: BranchPurchaseRequestItemRow & {
+    lineStatus: BranchPurchaseRequestLineStatus;
+    approvedQuantity: number | null;
+    unavailableQuantity: number | null;
+    rejectionReasonCode: BranchRequestLineRejectionReason | null;
+    publicComment: string | null;
+  },
   input: LineReviewInput,
   context: BranchPurchaseLineReviewContext,
   reviewBranch: { branchType: BranchType | null; hqToBranchMarkupPercent: Prisma.Decimal | number | null } | null,
-): Promise<AppliedBranchPurchaseLineReview> {
+): Promise<AppliedBranchPurchaseLineReview & { unchanged?: boolean }> {
   const generalAvailable = context.stockMap.get(item.productId) ?? 0;
   const bookedQuantity = context.bookedMap.get(item.id) ?? item.bookedQuantity ?? 0;
   const hasPricingPolicy = context.pricingAvailability.get(item.id) ?? false;
@@ -126,6 +240,16 @@ export async function applyBranchPurchaseLineReviewInTx(
     !resolved.publicComment?.trim()
   ) {
     throw new Error(`PUBLIC_COMMENT_REQUIRED:${item.sku}`);
+  }
+
+  if (branchPurchaseLineReviewDecisionUnchanged(item, resolved)) {
+    return {
+      itemId: item.id,
+      ...resolved,
+      generalAvailable,
+      bookedQuantity,
+      unchanged: true,
+    };
   }
 
   let estimatedLineProductCostKgs = 0;

@@ -172,4 +172,10 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /hqSalesView \? t\('branchProductRequest\.orderAmount'\)/);
     assert.match(detailPage, /formatKgs\(request\.totalEstimatedAmount\)/);
   });
+
+  it('hq sales order detail keeps reviewed line decisions editable for re-approval', () => {
+    assert.match(detailPage, /lineDecisionFromItem/);
+    assert.match(detailPage, /buildLineDecisionsFromItems/);
+    assert.match(detailPage, /min="0"/);
+  });
 });

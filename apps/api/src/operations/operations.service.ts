@@ -137,10 +137,12 @@ import {
 import {
   applyBranchPurchaseLineReviewInTx,
   completeBranchPurchaseRequestReviewInTx,
-  mapBranchPurchaseLineReviewAuditAction,
+  recalculateBranchPurchaseRequestReviewTotalsInTx,
+  resolveBranchPurchaseLineReviewAuditAction,
   type AppliedBranchPurchaseLineReview,
   type BranchPurchaseLineReviewContext,
 } from './branch-purchase-line-review.apply';
+import { assertBranchPurchaseLineReviewEditable } from './branch-purchase-line-review-editable.util';
 import {
   deriveRequestStatusFromLines,
   type LineReviewAction,
@@ -1097,8 +1099,12 @@ export class OperationsService {
     });
     if (!existing) throw new NotFoundException('Branch purchase request not found');
     await this.assertBranchPurchaseRequestAccess(user, existing);
-    if (!isSubmittedBranchPurchaseStatus(existing.status)) {
-      throw new ConflictException('Only submitted requests can be reviewed');
+    try {
+      assertBranchPurchaseLineReviewEditable(existing);
+    } catch {
+      throw new ConflictException(
+        'Нельзя изменить решение: заказ уже передан на следующий необратимый этап.',
+      );
     }
 
     const item = existing.items.find((row) => row.id === itemId);
@@ -1190,7 +1196,21 @@ export class OperationsService {
         lineReviewDeps,
       );
 
-      await this.recordBranchPurchaseLineReviewAudits(tx, user, existing, item, line, assignedHqWarehouseId);
+      if (!line.unchanged) {
+        await this.recordBranchPurchaseLineReviewAudits(
+          tx,
+          user,
+          existing,
+          item,
+          line,
+          assignedHqWarehouseId,
+          {
+            previousLineStatus: item.lineStatus,
+            previousApprovedQuantity: item.approvedQuantity,
+          },
+        );
+        await recalculateBranchPurchaseRequestReviewTotalsInTx(tx, existing.id, existing.branchId);
+      }
 
       return tx.branchPurchaseRequest.findFirstOrThrow({
         where: { id: requestId },
@@ -1227,6 +1247,11 @@ export class OperationsService {
       hqPhysicalStock: number | null;
       estimatedUnitCost: Prisma.Decimal | number | null;
       resolvedBranchPriceKgs: Prisma.Decimal | number | null;
+      lineStatus: BranchPurchaseRequestLineStatus;
+      approvedQuantity: number | null;
+      unavailableQuantity: number | null;
+      rejectionReasonCode: BranchRequestLineRejectionReason | null;
+      publicComment: string | null;
     },
     input: LineReviewInput,
     context: BranchPurchaseLineReviewContext,
@@ -1308,6 +1333,10 @@ export class OperationsService {
     item: { id: string; productId: string; quantity: number; productName: string; sku: string },
     line: AppliedBranchPurchaseLineReview,
     assignedHqWarehouseId: string,
+    previous?: {
+      previousLineStatus?: BranchPurchaseRequestLineStatus | null;
+      previousApprovedQuantity?: number | null;
+    },
   ) {
     const request = await tx.branchPurchaseRequest.findFirst({
       where: { id: existing.id },
@@ -1374,19 +1403,31 @@ export class OperationsService {
       });
     }
 
-    const auditAction = mapBranchPurchaseLineReviewAuditAction(line.lineStatus);
+    const auditAction = resolveBranchPurchaseLineReviewAuditAction({
+      previousLineStatus: previous?.previousLineStatus,
+      previousApprovedQuantity: previous?.previousApprovedQuantity,
+      nextLineStatus: line.lineStatus,
+      nextApprovedQuantity: line.approvedQuantity,
+    });
     await this.auditInTx(tx, user, existing.branchId, auditAction, 'BranchPurchaseRequestItem', item.id, {
+      orderId: existing.id,
       requestId: existing.id,
       requestLineId: item.id,
+      itemId: item.id,
       branchId: existing.branchId,
       productId: item.productId,
       requestedQuantity: item.quantity,
       bookedQuantity: line.bookedQuantity,
       availableQuantity: line.generalAvailable + line.bookedQuantity,
+      oldApprovedQty: previous?.previousApprovedQuantity ?? 0,
+      newApprovedQty: line.approvedQuantity,
+      oldStatus: previous?.previousLineStatus ?? BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+      newStatus: line.lineStatus,
       approvedQuantity: line.approvedQuantity,
       unavailableQuantity: line.unavailableQuantity,
       reasonCode: line.rejectionReasonCode,
       publicComment: line.publicComment,
+      actorUserId: user.id,
       createdById: user.id,
       timestamp: new Date().toISOString(),
     });
