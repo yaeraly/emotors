@@ -45,11 +45,19 @@ export function isReviewedBranchPurchaseLine(item: Pick<BranchPurchaseRequestLin
 }
 
 /**
- * HQ Sales review table/header amount for one line.
- * Reviewed lines use latest approved quantity; pending lines keep request estimate.
+ * HQ Sales review table amount for one line.
+ * Reviewed lines use latest approved quantity; pending lines show 0 once any line is reviewed.
  */
-export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
+export function hqReviewLineAmount(
+  item: BranchPurchaseRequestLinePricing,
+  orderItems?: BranchPurchaseRequestLinePricing[],
+): number {
+  const orderHasReviewedLines = (orderItems ?? [item]).some(isReviewedBranchPurchaseLine);
+
   if (!isReviewedBranchPurchaseLine(item)) {
+    if (orderHasReviewedLines) {
+      return 0;
+    }
     return requestLineTotal(item);
   }
 
@@ -74,27 +82,13 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
   return roundMoney(price * approvedQuantity);
 }
 
-/** HQ Sales order amount: sum of all reviewed line amounts (pending lines contribute 0). */
-export function hqReviewOrderAmount(
-  items: BranchPurchaseRequestLinePricing[],
-  headerTotalEstimatedAmount?: number | null,
-): number {
+/** HQ Sales order amount: always the sum of displayed row amounts. */
+export function hqReviewOrderAmount(items: BranchPurchaseRequestLinePricing[]): number {
   if (!items.some(isReviewedBranchPurchaseLine)) {
     return requestOrderTotal(items);
   }
 
-  const reviewedSum = roundMoney(
-    items.reduce(
-      (sum, item) => (isReviewedBranchPurchaseLine(item) ? sum + hqReviewLineAmount(item) : sum),
-      0,
-    ),
-  );
-
-  if (headerTotalEstimatedAmount != null && Number.isFinite(Number(headerTotalEstimatedAmount))) {
-    return roundMoney(Number(headerTotalEstimatedAmount));
-  }
-
-  return reviewedSum;
+  return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item, items), 0));
 }
 
 /**

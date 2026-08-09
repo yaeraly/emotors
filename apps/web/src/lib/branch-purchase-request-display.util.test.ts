@@ -131,38 +131,79 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('hq review order amount prefers authoritative header total after any line review', () => {
-    assert.equal(
-      hqReviewOrderAmount(
-        [
-          {
-            quantity: 10,
-            branchPurchasePriceKgs: 1000,
-            totalAmount: 10000,
-            lineStatus: 'PARTIALLY_APPROVED',
-            approvedQuantity: 6,
-            approvedLineTotalKgs: 6000,
-          },
-          {
-            quantity: 5,
-            branchPurchasePriceKgs: 2000,
-            totalAmount: 10000,
-            lineStatus: 'APPROVED',
-            approvedQuantity: 5,
-            approvedLineTotalKgs: 10000,
-          },
-          {
-            quantity: 3,
-            branchPurchasePriceKgs: 5000,
-            totalAmount: 15000,
-            lineStatus: 'PENDING_REVIEW',
-            approvedQuantity: null,
-          },
-        ],
-        16000,
-      ),
-      16000,
-    );
+  it('hq review order amount equals sum of displayed row amounts', () => {
+    const items = [
+      {
+        quantity: 10,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 100000,
+        lineStatus: 'PARTIALLY_APPROVED',
+        approvedQuantity: 6,
+        approvedLineTotalKgs: 60000,
+      },
+      {
+        quantity: 5,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 50000,
+        lineStatus: 'PENDING_REVIEW',
+      },
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 20000,
+        lineStatus: 'APPROVED',
+        approvedQuantity: 2,
+        approvedLineTotalKgs: 20000,
+      },
+    ];
+    const orderTotal = hqReviewOrderAmount(items);
+    const rowSum = roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item, items), 0));
+    assert.equal(orderTotal, rowSum);
+    assert.equal(orderTotal, 80000);
+  });
+
+  it('hq review order total follows approve, change, and reject sequence', () => {
+    const baseItems = [
+      {
+        quantity: 10,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 100000,
+        lineStatus: 'APPROVED',
+        approvedQuantity: 10,
+        approvedLineTotalKgs: 100000,
+      },
+      {
+        quantity: 5,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 50000,
+        lineStatus: 'APPROVED',
+        approvedQuantity: 5,
+        approvedLineTotalKgs: 50000,
+      },
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 20000,
+        lineStatus: 'APPROVED',
+        approvedQuantity: 2,
+        approvedLineTotalKgs: 20000,
+      },
+    ];
+    assert.equal(hqReviewOrderAmount(baseItems), 170000);
+
+    const afterChangeA = [
+      { ...baseItems[0], lineStatus: 'PARTIALLY_APPROVED', approvedQuantity: 6, approvedLineTotalKgs: 60000, totalAmount: 60000 },
+      baseItems[1],
+      baseItems[2],
+    ];
+    assert.equal(hqReviewOrderAmount(afterChangeA), 130000);
+
+    const afterRejectB = [
+      afterChangeA[0],
+      { ...baseItems[1], lineStatus: 'REJECTED', approvedQuantity: 0, approvedLineTotalKgs: 0, totalAmount: 0 },
+      baseItems[2],
+    ];
+    assert.equal(hqReviewOrderAmount(afterRejectB), 80000);
   });
 
   it('hq review order amount sums only reviewed lines when header total is absent', () => {

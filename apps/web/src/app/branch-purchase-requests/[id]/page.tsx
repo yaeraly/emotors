@@ -776,7 +776,7 @@ export default function BranchPurchaseRequestDetailPage() {
                 {hqSalesView ? t('branchProductRequest.orderAmount') : t('branchProductRequest.estimatedAmount')}
               </p>
               <p className="mt-1 font-semibold text-slate-900">
-                {formatKgs(hqSalesView ? hqReviewOrderAmount(request.items, request.totalEstimatedAmount) : request.totalEstimatedAmount)} KGS
+                {formatKgs(hqSalesView ? hqReviewOrderAmount(request.items) : request.totalEstimatedAmount)} KGS
               </p>
             </div>
           ) : !branchSalesManagerView ? (
@@ -930,7 +930,7 @@ export default function BranchPurchaseRequestDetailPage() {
                       )}
                     </td>
                     <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
-                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(hqReviewLineAmount(item))}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(hqReviewLineAmount(item, request.items))}</td>
                     {canActOnRequest && reviewable ? (
                       <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} w-0 whitespace-nowrap px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">
