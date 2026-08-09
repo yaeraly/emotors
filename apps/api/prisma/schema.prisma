@@ -5235,6 +5235,7 @@ model BranchPurchaseRequestItem {
   id                         String                            @id @default(cuid())
   requestId                  String
   request                    BranchPurchaseRequest             @relation(fields: [requestId], references: [id])
+  position                   Int                               @default(0)
   productId                  String
   sku                        String
   productName                String
@@ -5276,6 +5277,7 @@ model BranchPurchaseRequestItem {
   updatedAt                  DateTime                          @updatedAt
 
   @@index([requestId])
+  @@index([requestId, position])
   @@index([productId])
   @@index([lineStatus])
   @@index([pricingPolicyVersionId])

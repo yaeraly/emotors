@@ -80,4 +80,23 @@ describe('branch-purchase-request.presenter', () => {
     });
     assert.equal(response.totalProductCostKgs, 914369.8);
   });
+
+  it('returns items in authoritative position order', () => {
+    const response = toBranchPurchaseRequestResponse({
+      status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
+      totalEstimatedAmount: 0,
+      transportCostKgs: 0,
+      items: [
+        { id: 'line-d', position: 4, productName: 'D', quantity: 1, lineStatus: 'PENDING_REVIEW' },
+        { id: 'line-b', position: 2, productName: 'B', quantity: 1, lineStatus: 'APPROVED', approvedQuantity: 1 },
+        { id: 'line-a', position: 1, productName: 'A', quantity: 1, lineStatus: 'REJECTED', approvedQuantity: 0 },
+        { id: 'line-c', position: 3, productName: 'C', quantity: 1, lineStatus: 'PENDING_REVIEW' },
+      ],
+    });
+
+    assert.deepEqual(
+      response.items.map((item) => (item as { productName?: string }).productName),
+      ['A', 'B', 'C', 'D'],
+    );
+  });
 });

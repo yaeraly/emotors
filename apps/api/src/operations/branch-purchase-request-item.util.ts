@@ -29,8 +29,10 @@ export type ResolvedBranchPurchaseItem = {
 
 export function toBranchPurchaseRequestItemCreate(
   item: ResolvedBranchPurchaseItem,
+  position: number,
 ): Prisma.BranchPurchaseRequestItemCreateWithoutRequestInput {
   return {
+    position,
     productId: item.productId,
     sku: item.sku,
     productName: item.productName,

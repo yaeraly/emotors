@@ -14,6 +14,7 @@ import {
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 import { computeBranchPurchaseHqReviewLineAmountKgs } from './branch-purchase-review-totals.util';
+import { sortBranchPurchaseRequestItems } from './branch-purchase-request-items-order.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
   return canViewAll;
@@ -119,7 +120,8 @@ export function toBranchPurchaseRequestResponse<T extends {
 }>(request: T) {
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
   const transferAtCost = shouldTransferBranchPurchaseAtCost(branchType);
-  const items = request.items.map((rawItem) => {
+  const orderedItems = sortBranchPurchaseRequestItems(request.items);
+  const items = orderedItems.map((rawItem) => {
     const item = toBranchPurchaseRequestItemResponse(
       rawItem as Parameters<typeof toBranchPurchaseRequestItemResponse>[0],
     );
@@ -353,6 +355,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
   // Authoritative totals must be computed from full FIFO line data before stripping.
   const full = toBranchPurchaseRequestResponse({
     ...request,
+    items: sortBranchPurchaseRequestItems(request.items),
     branchDisplayStatus: resolveBranchDisplayStatus(request.status, request.items),
     partialFulfillmentMessage: null,
   });

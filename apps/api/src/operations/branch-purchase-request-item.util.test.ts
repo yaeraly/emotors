@@ -8,7 +8,8 @@ import {
 
 describe('toBranchPurchaseRequestItemCreate', () => {
   it('maps resolved line fields to Prisma create input', () => {
-    const input = toBranchPurchaseRequestItemCreate({
+    const input = toBranchPurchaseRequestItemCreate(
+      {
       productId: 'prod-1',
       sku: 'SKU-1',
       productName: 'Motor',
@@ -33,9 +34,12 @@ describe('toBranchPurchaseRequestItemCreate', () => {
       estimatedLineProductCostKgs: 270,
       totalAmount: 360,
       note: 'test',
-    });
+    },
+      2,
+    );
 
     assert.equal(input.productId, 'prod-1');
+    assert.equal(input.position, 2);
     assert.equal(input.quantity, 3);
     assert.equal(input.estimatedLineProductCostKgs, 270);
     assert.equal(input.note, 'test');

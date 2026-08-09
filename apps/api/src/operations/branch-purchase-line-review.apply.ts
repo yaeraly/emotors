@@ -17,6 +17,10 @@ import {
 } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseFifoLineCost } from './branch-purchase-fifo-cost.util';
 import {
+  branchPurchaseRequestItemsInclude,
+  branchPurchaseRequestItemsOrderBy,
+} from './branch-purchase-request-items-order.util';
+import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
   sumBranchPurchaseHqReviewLineAmountsKgs,
@@ -176,6 +180,7 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
 
   const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
     where: { requestId },
+    orderBy: branchPurchaseRequestItemsOrderBy,
     select: {
       id: true,
       approvedQuantity: true,
@@ -446,6 +451,7 @@ export async function completeBranchPurchaseRequestReviewInTx(
 
   const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
     where: { requestId },
+    orderBy: branchPurchaseRequestItemsOrderBy,
     select: {
       approvedQuantity: true,
       quantity: true,
@@ -487,7 +493,7 @@ export async function completeBranchPurchaseRequestReviewInTx(
           : null,
     },
     include: {
-      items: true,
+      items: branchPurchaseRequestItemsInclude,
       createdBy: { select: { id: true, fullName: true, role: true } },
       branch: { select: { id: true, name: true } },
       assignedHqWarehouse: { select: { id: true, name: true } },

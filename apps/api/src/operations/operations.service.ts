@@ -92,6 +92,7 @@ import {
   resolveBranchPurchasePriceKgs,
 } from './branch-product-request.util';
 import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
+import { branchPurchaseRequestItemsInclude } from './branch-purchase-request-items-order.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
 import {
   resolveBranchPurchaseFifoLineCost,
@@ -196,7 +197,7 @@ export class OperationsService {
         ...visibilityWhere,
       },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         createdBy: { select: { id: true, fullName: true, role: true } },
         assignedHqWarehouse: { select: { id: true, name: true, code: true, city: true, isActive: true } },
         branch: {
@@ -236,7 +237,7 @@ export class OperationsService {
         ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         createdBy: { select: { id: true, fullName: true, role: true } },
         assignedHqWarehouse: { select: { id: true, name: true, code: true, city: true, isActive: true } },
         branch: {
@@ -532,7 +533,9 @@ export class OperationsService {
     this.assertBranchPurchaseRequestItems(dto.items);
     const branchWarehouseId = dto.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(branchId));
     const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? []);
-    const itemCreates = resolvedItems.map((item) => toBranchPurchaseRequestItemCreate(item));
+    const itemCreates = resolvedItems.map((item, index) =>
+      toBranchPurchaseRequestItemCreate(item, index + 1),
+    );
     const status =
       dto.status === BranchPurchaseRequestStatus.DRAFT
         ? BranchPurchaseRequestStatus.DRAFT
@@ -578,7 +581,7 @@ export class OperationsService {
           totalEstimatedAmount,
           items: { create: itemCreates },
         },
-        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
       });
 
       if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ && assignedHqWarehouseId) {
@@ -609,7 +612,7 @@ export class OperationsService {
 
         return tx.branchPurchaseRequest.findFirstOrThrow({
           where: { id: created.id },
-          include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+          include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
         });
       }
 
@@ -682,7 +685,7 @@ export class OperationsService {
         deletedAt: null,
         ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
-      include: { items: true },
+      include: { items: branchPurchaseRequestItemsInclude },
     });
 
     if (!existing) {
@@ -697,7 +700,9 @@ export class OperationsService {
     const resolvedItems = dto.items
       ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items)
       : undefined;
-    const itemCreates = resolvedItems?.map((item) => toBranchPurchaseRequestItemCreate(item));
+    const itemCreates = resolvedItems?.map((item, index) =>
+      toBranchPurchaseRequestItemCreate(item, index + 1),
+    );
     const totalQuantity = resolvedItems?.reduce((sum, item) => sum + item.quantity, 0);
     const updateBranch = await this.prisma.branch.findFirst({
       where: { id: existing.branchId, deletedAt: null },
@@ -737,7 +742,7 @@ export class OperationsService {
             }
           : {}),
       },
-      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
@@ -776,7 +781,7 @@ export class OperationsService {
 
       const requestWithItems = await tx.branchPurchaseRequest.findFirstOrThrow({
         where: { id },
-        include: { items: true },
+        include: { items: branchPurchaseRequestItemsInclude },
       });
 
       const bookingResults = await this.hqStockBookingService.createBookingsForRequestSubmit(tx, user, {
@@ -800,7 +805,7 @@ export class OperationsService {
           assignedHqWarehouseId,
           bookingExpiresAt,
         },
-        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
       });
 
       for (const result of bookingResults) {
@@ -861,7 +866,7 @@ export class OperationsService {
       return tx.branchPurchaseRequest.update({
         where: { id },
         data: { status: BranchPurchaseRequestStatus.CANCELLED },
-        include: { items: true },
+        include: { items: branchPurchaseRequestItemsInclude },
       });
     });
 
@@ -886,7 +891,7 @@ export class OperationsService {
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id, deletedAt: null },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
         createdBy: { select: { id: true, fullName: true, role: true } },
       },
@@ -922,7 +927,7 @@ export class OperationsService {
         return tx.branchPurchaseRequest.update({
           where: { id },
           data: { status, reviewedById: user.id, reviewedAt: new Date(), bookingExpiresAt: null },
-          include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+          include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
         });
       });
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id);
@@ -940,7 +945,7 @@ export class OperationsService {
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id, deletedAt: null },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
         createdBy: { select: { id: true, fullName: true, role: true } },
       },
@@ -1093,7 +1098,7 @@ export class OperationsService {
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id: requestId, deletedAt: null },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
         createdBy: { select: { id: true, fullName: true, role: true } },
       },
@@ -1252,7 +1257,7 @@ export class OperationsService {
       return tx.branchPurchaseRequest.findFirstOrThrow({
         where: { id: requestId },
         include: {
-          items: true,
+          items: branchPurchaseRequestItemsInclude,
           createdBy: { select: { id: true, fullName: true, role: true } },
           branch: { select: { id: true, name: true } },
           assignedHqWarehouse: { select: { id: true, name: true } },
@@ -1486,7 +1491,7 @@ export class OperationsService {
         ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
       },
     });
@@ -1726,7 +1731,7 @@ export class OperationsService {
           convertedOrderId: createdOrder.id,
         },
         include: {
-          items: true,
+          items: branchPurchaseRequestItemsInclude,
           createdBy: { select: { id: true, fullName: true, role: true } },
           branch: { select: { id: true, name: true } },
         },
@@ -1775,7 +1780,7 @@ export class OperationsService {
         deletedAt: null,
         ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
-      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
     if (!existing) throw new NotFoundException('Branch purchase request not found');
     if (existing.status !== BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
@@ -1797,7 +1802,7 @@ export class OperationsService {
           bookingExpiresAt: null,
           note: dto?.publicComment?.trim() || existing.note,
         },
-        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        include: { items: branchPurchaseRequestItemsInclude, createdBy: { select: { id: true, fullName: true, role: true } } },
       });
     });
 
@@ -1980,7 +1985,7 @@ export class OperationsService {
     const request = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id, deletedAt: null },
       include: {
-        items: true,
+        items: branchPurchaseRequestItemsInclude,
         branch: { select: { assignedHqWarehouseId: true } },
       },
     });
