@@ -74,19 +74,27 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
   return roundMoney(price * approvedQuantity);
 }
 
-/** HQ Sales order amount: authoritative header total after review, else sum of line amounts. */
+/** HQ Sales order amount: sum of all reviewed line amounts (pending lines contribute 0). */
 export function hqReviewOrderAmount(
   items: BranchPurchaseRequestLinePricing[],
   headerTotalEstimatedAmount?: number | null,
 ): number {
-  if (items.some(isReviewedBranchPurchaseLine)) {
-    if (headerTotalEstimatedAmount != null && Number.isFinite(Number(headerTotalEstimatedAmount))) {
-      return roundMoney(Number(headerTotalEstimatedAmount));
-    }
-    return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item), 0));
+  if (!items.some(isReviewedBranchPurchaseLine)) {
+    return requestOrderTotal(items);
   }
 
-  return requestOrderTotal(items);
+  const reviewedSum = roundMoney(
+    items.reduce(
+      (sum, item) => (isReviewedBranchPurchaseLine(item) ? sum + hqReviewLineAmount(item) : sum),
+      0,
+    ),
+  );
+
+  if (headerTotalEstimatedAmount != null && Number.isFinite(Number(headerTotalEstimatedAmount))) {
+    return roundMoney(Number(headerTotalEstimatedAmount));
+  }
+
+  return reviewedSum;
 }
 
 /**

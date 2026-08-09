@@ -17,6 +17,10 @@ import {
 } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseFifoLineCost } from './branch-purchase-fifo-cost.util';
 import {
+  computeBranchPurchaseReviewedLineAmountKgs,
+  sumBranchPurchaseReviewedLineAmountsKgs,
+} from './branch-purchase-review-totals.util';
+import {
   deriveRequestStatusFromLines,
   resolveLineReview,
   type LineReviewInput,
@@ -163,31 +167,58 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
   requestId: string,
   branchId: string,
 ) {
+  const reviewBranch = await tx.branch.findFirst({
+    where: { id: branchId, deletedAt: null },
+    select: { branchType: true },
+  });
+  const branchType = reviewBranch?.branchType ?? null;
+
   const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
     where: { requestId },
     select: {
+      id: true,
       approvedQuantity: true,
       quantity: true,
+      lineStatus: true,
       estimatedLineProductCostKgs: true,
-      totalAmount: true,
+      resolvedBranchPriceKgs: true,
+      hasPricingPolicyAtReview: true,
     },
   });
+
+  const reviewedLineInputs = refreshedItems
+    .filter((row) => row.lineStatus !== BranchPurchaseRequestLineStatus.PENDING_REVIEW)
+    .map((row) => ({
+      id: row.id,
+      approvedQuantity: row.approvedQuantity,
+      resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+      estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
+      hasPricingPolicyAtReview: row.hasPricingPolicyAtReview,
+      branchType,
+    }));
+
+  for (const row of reviewedLineInputs) {
+    const lineAmount = computeBranchPurchaseReviewedLineAmountKgs(row);
+    await tx.branchPurchaseRequestItem.update({
+      where: { id: row.id },
+      data: {
+        totalAmount: lineAmount,
+        approvedLineTotalKgs: lineAmount > 0 ? lineAmount : null,
+      },
+    });
+  }
+
+  const approvedOrderTotalKgs = sumBranchPurchaseReviewedLineAmountsKgs(reviewedLineInputs);
   const reviewedProductCostKgs = sumDisplayMoneyTotals(
     refreshedItems.map((row) => {
       const qty = row.approvedQuantity ?? 0;
       return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
     }),
   );
-  const reviewBranch = await tx.branch.findFirst({
-    where: { id: branchId, deletedAt: null },
-    select: { branchType: true },
-  });
   const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType: reviewBranch?.branchType,
+    branchType,
     totalProductCostKgs: reviewedProductCostKgs,
-    storedEstimatedAmountKgs: sumDisplayMoneyTotals(
-      refreshedItems.map((row) => (Number(row.approvedQuantity ?? 0) > 0 ? Number(row.totalAmount ?? 0) : 0)),
-    ),
+    storedEstimatedAmountKgs: approvedOrderTotalKgs,
   });
 
   await tx.branchPurchaseRequest.update({

@@ -151,10 +151,39 @@ describe('branch purchase request display totals', () => {
             approvedQuantity: 5,
             approvedLineTotalKgs: 10000,
           },
+          {
+            quantity: 3,
+            branchPurchasePriceKgs: 5000,
+            totalAmount: 15000,
+            lineStatus: 'PENDING_REVIEW',
+            approvedQuantity: null,
+          },
         ],
         16000,
       ),
       16000,
+    );
+  });
+
+  it('hq review order amount sums only reviewed lines when header total is absent', () => {
+    assert.equal(
+      hqReviewOrderAmount([
+        {
+          quantity: 10,
+          branchPurchasePriceKgs: 1000,
+          totalAmount: 10000,
+          lineStatus: 'PARTIALLY_APPROVED',
+          approvedQuantity: 6,
+          approvedLineTotalKgs: 6000,
+        },
+        {
+          quantity: 5,
+          branchPurchasePriceKgs: 2000,
+          totalAmount: 10000,
+          lineStatus: 'PENDING_REVIEW',
+        },
+      ]),
+      6000,
     );
   });
 
