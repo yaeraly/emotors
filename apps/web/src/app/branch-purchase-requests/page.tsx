@@ -961,7 +961,7 @@ function BranchPurchaseRequestsPageInner() {
                   <colgroup>
                     <col className="w-[10.5rem]" />
                     {showBranchColumn ? <col /> : null}
-                    <col className="w-[7.75rem]" />
+                    <col className="w-[12.5rem]" />
                     <col className="w-[3rem]" />
                     <col className="w-[3.75rem]" />
                     <col className="w-[5.25rem]" />
@@ -1000,7 +1000,7 @@ function BranchPurchaseRequestsPageInner() {
                           {showBranchColumn ? (
                             <td className={`${hqSalesListTableTdClass} px-2 py-2 min-w-0 truncate`} title={String(branchName)}>{branchName}</td>
                           ) : null}
-                          <td className={`${hqSalesListTableTdClass} px-2 py-2 whitespace-nowrap truncate`} title={statusLabel}>{statusLabel}</td>
+                          <td className={`${hqSalesListTableTdClass} px-2 py-2 min-w-0 leading-snug break-words`} title={statusLabel}>{statusLabel}</td>
                           <td className={`${hqSalesListTableTdClass} px-2 py-2 text-center tabular-nums whitespace-nowrap`}>{request.items.length}</td>
                           <td className={`${hqSalesListTableTdClass} px-2 py-2 text-center tabular-nums whitespace-nowrap`}>{totalRequestedQuantity(request)}</td>
                           <td className={`${hqSalesListTableTdClass} px-2 py-2 text-right tabular-nums whitespace-nowrap`}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>

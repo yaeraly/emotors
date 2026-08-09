@@ -96,7 +96,13 @@ assert.match(branchPage, /table-fixed/);
 assert.match(branchPage, /detailHref\(request\.id\)/);
 assert.match(branchPage, /common\.open/);
 assert.match(branchPage, /<col className="w-\[10\.5rem\]" \/>/);
+assert.match(branchPage, /<col className="w-\[12\.5rem\]" \/>/);
 assert.match(branchPage, /request\.requestNumber[\s\S]*whitespace-nowrap/);
+assert.match(branchPage, /statusLabel[\s\S]*min-w-0 leading-snug break-words/);
+assert.doesNotMatch(
+  branchPage.slice(branchPage.indexOf('hqSalesView && !showForm')),
+  /statusLabel[\s\S]{0,120}truncate/,
+);
 
 const layout = readFileSync(join(__dirname, '../components/HqSalesListLayout.tsx'), 'utf8');
 assertEqual(layout.includes('HqSalesBranchOrdersTabContent'), true, 'tab content helper exists');
