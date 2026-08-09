@@ -13,6 +13,7 @@ import {
   PAYMENT_BOOKING_HOURS,
   POST_PAYMENT_BOOKING_HOURS,
 } from './hq-stock-booking.constants';
+import { resolveBookingQuantityDelta } from './hq-stock-booking-line-review.util';
 import { InventoryService } from './inventory.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -227,6 +228,112 @@ export class HqStockBookingService {
     };
   }
 
+  async createBookingForLineReviewInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    params: {
+      requestId: string;
+      branchId: string;
+      warehouseId: string;
+      requestLineId: string;
+      productId: string;
+      sku: string;
+      requestedQuantity: number;
+      expiresAt: Date;
+    },
+  ): Promise<BookingLineResult> {
+    return this.createBookingForLineInTx(tx, user, params);
+  }
+
+  private async reserveAdditionalBookingQuantityInTx(
+    tx: PrismaTx,
+    booking: {
+      id: string;
+      warehouseId: string;
+      productId: string;
+      requestLineId: string;
+      bookedQuantity: number;
+    },
+    additionalQuantity: number,
+  ) {
+    if (additionalQuantity <= 0) return;
+
+    const inventoryProduct = await this.inventoryService.resolveWarehouseInventoryProductInTx(
+      tx,
+      booking.warehouseId,
+      booking.productId,
+    );
+
+    const locked = await this.lockInventoryBalance(
+      tx,
+      inventoryProduct.branchId,
+      booking.warehouseId,
+      inventoryProduct.productId,
+    );
+    const physicalQuantity = locked.quantity ?? 0;
+    const reservedQuantity = locked.reservedQuantity ?? 0;
+    const availableQuantity = Math.max(physicalQuantity - reservedQuantity, 0);
+    if (additionalQuantity > availableQuantity) {
+      throw new BadRequestException(
+        'На складе HQ недостаточно товара для утверждения указанного количества.',
+      );
+    }
+
+    const balance = await tx.inventoryBalance.findUnique({
+      where: {
+        branchId_warehouseId_productId: {
+          branchId: inventoryProduct.branchId,
+          warehouseId: booking.warehouseId,
+          productId: inventoryProduct.productId,
+        },
+      },
+    });
+
+    if (balance) {
+      await tx.inventoryBalance.update({
+        where: {
+          branchId_warehouseId_productId: {
+            branchId: inventoryProduct.branchId,
+            warehouseId: booking.warehouseId,
+            productId: inventoryProduct.productId,
+          },
+        },
+        data: { reservedQuantity: { increment: additionalQuantity } },
+      });
+    } else {
+      await tx.inventoryBalance.create({
+        data: {
+          branchId: inventoryProduct.branchId,
+          warehouseId: booking.warehouseId,
+          productId: inventoryProduct.productId,
+          quantity: 0,
+          reservedQuantity: additionalQuantity,
+        },
+      });
+    }
+
+    const updated = await this.lockInventoryBalance(
+      tx,
+      inventoryProduct.branchId,
+      booking.warehouseId,
+      inventoryProduct.productId,
+    );
+    if ((updated.reservedQuantity ?? 0) > (updated.quantity ?? 0)) {
+      throw new BadRequestException(
+        'Количество товара изменилось. Обновите заявку и повторите проверку.',
+      );
+    }
+
+    await tx.hqStockBooking.update({
+      where: { id: booking.id },
+      data: { bookedQuantity: booking.bookedQuantity + additionalQuantity },
+    });
+    await tx.branchPurchaseRequestItem.update({
+      where: { id: booking.requestLineId },
+      data: { bookedQuantity: booking.bookedQuantity + additionalQuantity },
+    });
+  }
+
   async confirmBookingInTx(
     tx: PrismaTx,
     user: AuthUser,
@@ -242,15 +349,22 @@ export class HqStockBookingService {
     ) {
       throw new BadRequestException('Бронь товара истекла. Требуется повторная проверка остатков.');
     }
-    if (confirmedQuantity > booking.bookedQuantity) {
-      throw new BadRequestException(
-        'На складе HQ недостаточно товара для утверждения указанного количества.',
-      );
-    }
 
-    const excess = booking.bookedQuantity - confirmedQuantity;
-    if (excess > 0) {
-      await this.releaseQuantityInTx(tx, user, booking, excess, HqStockBookingReleaseReason.PARTIAL_APPROVAL_EXCESS);
+    const { reserveAdditional, releaseExcess } = resolveBookingQuantityDelta(
+      booking.bookedQuantity,
+      confirmedQuantity,
+    );
+
+    if (reserveAdditional > 0) {
+      await this.reserveAdditionalBookingQuantityInTx(tx, booking, reserveAdditional);
+    } else if (releaseExcess > 0) {
+      await this.releaseQuantityInTx(
+        tx,
+        user,
+        booking,
+        releaseExcess,
+        HqStockBookingReleaseReason.PARTIAL_APPROVAL_EXCESS,
+      );
     }
 
     const updated = await tx.hqStockBooking.update({

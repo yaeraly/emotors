@@ -299,33 +299,48 @@ export async function applyBranchPurchaseLineReviewInTx(
     },
   });
 
-  const bookingId = context.bookingIdByLine.get(item.id);
-  if (bookingId) {
-    if (resolved.approvedQuantity > 0) {
+  const bookingId = context.bookingIdByLine.get(item.id) ?? null;
+  if (resolved.approvedQuantity > 0) {
+    let effectiveBookingId = bookingId;
+    if (!effectiveBookingId) {
+      const created = await deps.hqStockBookingService.createBookingForLineReviewInTx(tx, user, {
+        requestId: context.requestId,
+        branchId: context.branchId,
+        warehouseId: context.assignedHqWarehouseId,
+        requestLineId: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        requestedQuantity: resolved.approvedQuantity,
+        expiresAt: context.branchConfirmationExpiresAt,
+      });
+      effectiveBookingId = created.bookingId;
+    }
+
+    if (effectiveBookingId) {
       await deps.hqStockBookingService.confirmBookingInTx(
         tx,
         user,
-        bookingId,
+        effectiveBookingId,
         resolved.approvedQuantity,
         context.branchConfirmationExpiresAt,
       );
-      await deps.auditInTx(tx, user, context.branchId, 'HQ_STOCK_BOOKING_CONFIRMED', 'HqStockBooking', bookingId, {
+      await deps.auditInTx(tx, user, context.branchId, 'HQ_STOCK_BOOKING_CONFIRMED', 'HqStockBooking', effectiveBookingId, {
         requestId: context.requestId,
         requestLineId: item.id,
         approvedQuantity: resolved.approvedQuantity,
       });
-    } else {
-      const releaseReason =
-        resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
-          ? HqStockBookingReleaseReason.HQ_SALES_REMOVED
-          : HqStockBookingReleaseReason.HQ_SALES_REJECTED;
-      await deps.hqStockBookingService.releaseBookingInTx(tx, user, bookingId, releaseReason);
-      await deps.auditInTx(tx, user, context.branchId, 'HQ_STOCK_BOOKING_RELEASED', 'HqStockBooking', bookingId, {
-        requestId: context.requestId,
-        requestLineId: item.id,
-        reason: releaseReason,
-      });
     }
+  } else if (bookingId) {
+    const releaseReason =
+      resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
+        ? HqStockBookingReleaseReason.HQ_SALES_REMOVED
+        : HqStockBookingReleaseReason.HQ_SALES_REJECTED;
+    await deps.hqStockBookingService.releaseBookingInTx(tx, user, bookingId, releaseReason);
+    await deps.auditInTx(tx, user, context.branchId, 'HQ_STOCK_BOOKING_RELEASED', 'HqStockBooking', bookingId, {
+      requestId: context.requestId,
+      requestLineId: item.id,
+      reason: releaseReason,
+    });
   }
 
   if (resolved.unavailableQuantity > 0 || resolved.approvedQuantity < item.quantity) {
@@ -368,7 +383,7 @@ export async function applyBranchPurchaseLineReviewInTx(
     itemId: item.id,
     ...resolved,
     generalAvailable,
-    bookedQuantity,
+    bookedQuantity: resolved.approvedQuantity > 0 ? resolved.approvedQuantity : 0,
   };
 }
 

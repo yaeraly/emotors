@@ -1313,11 +1313,7 @@ export class OperationsService {
       }
       if (error instanceof BadRequestException) {
         const message = error.message ?? '';
-        if (
-          message.includes('изменилось') ||
-          message.includes('истекла') ||
-          message.includes('недостаточно товара')
-        ) {
+        if (message.includes('изменилось') || message.includes('истекла')) {
           throw new ConflictException('Данные заказа изменились. Обновите страницу и повторите проверку.');
         }
         throw error;
