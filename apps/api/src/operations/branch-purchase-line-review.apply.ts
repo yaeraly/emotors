@@ -17,8 +17,9 @@ import {
 } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseFifoLineCost } from './branch-purchase-fifo-cost.util';
 import {
-  computeBranchPurchaseReviewedLineAmountKgs,
-  sumBranchPurchaseReviewedLineAmountsKgs,
+  computeBranchPurchaseHqReviewLineAmountKgs,
+  resolveBranchPurchaseHqReviewEffectiveQuantity,
+  sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 import {
   deriveRequestStatusFromLines,
@@ -183,42 +184,45 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
       estimatedLineProductCostKgs: true,
       resolvedBranchPriceKgs: true,
       hasPricingPolicyAtReview: true,
+      hasPricingPolicyAtSubmit: true,
     },
   });
 
-  const reviewedLineInputs = refreshedItems
-    .filter((row) => row.lineStatus !== BranchPurchaseRequestLineStatus.PENDING_REVIEW)
-    .map((row) => ({
-      id: row.id,
-      approvedQuantity: row.approvedQuantity,
-      resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
-      estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
-      hasPricingPolicyAtReview: row.hasPricingPolicyAtReview,
-      branchType,
-    }));
+  const lineInputs = refreshedItems.map((row) => ({
+    id: row.id,
+    quantity: row.quantity,
+    approvedQuantity: row.approvedQuantity,
+    lineStatus: row.lineStatus,
+    resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+    estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
+    hasPricingPolicyAtReview: row.hasPricingPolicyAtReview ?? row.hasPricingPolicyAtSubmit,
+    branchType,
+  }));
 
-  for (const row of reviewedLineInputs) {
-    const lineAmount = computeBranchPurchaseReviewedLineAmountKgs(row);
+  for (const row of lineInputs) {
+    const lineAmount = computeBranchPurchaseHqReviewLineAmountKgs(row);
+    const reviewed =
+      row.lineStatus !== BranchPurchaseRequestLineStatus.PENDING_REVIEW && row.lineStatus != null;
     await tx.branchPurchaseRequestItem.update({
       where: { id: row.id },
       data: {
         totalAmount: lineAmount,
-        approvedLineTotalKgs: lineAmount > 0 ? lineAmount : null,
+        approvedLineTotalKgs: reviewed && lineAmount > 0 ? lineAmount : null,
       },
     });
   }
 
-  const approvedOrderTotalKgs = sumBranchPurchaseReviewedLineAmountsKgs(reviewedLineInputs);
+  const orderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(lineInputs);
   const reviewedProductCostKgs = sumDisplayMoneyTotals(
     refreshedItems.map((row) => {
-      const qty = row.approvedQuantity ?? 0;
+      const qty = resolveBranchPurchaseHqReviewEffectiveQuantity(row);
       return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
     }),
   );
   const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
     branchType,
     totalProductCostKgs: reviewedProductCostKgs,
-    storedEstimatedAmountKgs: approvedOrderTotalKgs,
+    storedEstimatedAmountKgs: orderTotalKgs,
   });
 
   await tx.branchPurchaseRequest.update({

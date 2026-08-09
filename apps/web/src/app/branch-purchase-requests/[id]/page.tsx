@@ -930,7 +930,7 @@ export default function BranchPurchaseRequestDetailPage() {
                       )}
                     </td>
                     <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
-                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(hqReviewLineAmount(item, request.items))}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(hqReviewLineAmount(item))}</td>
                     {canActOnRequest && reviewable ? (
                       <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} w-0 whitespace-nowrap px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">

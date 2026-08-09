@@ -5,7 +5,6 @@ import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.uti
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import {
   resolveBranchPurchaseEstimatedAmountKgs,
-  resolveBranchPurchaseLinePayableAmount,
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import {
@@ -14,6 +13,7 @@ import {
   sumBranchPurchaseBranchLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
+import { computeBranchPurchaseHqReviewLineAmountKgs } from './branch-purchase-review-totals.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
   return canViewAll;
@@ -123,39 +123,29 @@ export function toBranchPurchaseRequestResponse<T extends {
     const item = toBranchPurchaseRequestItemResponse(
       rawItem as Parameters<typeof toBranchPurchaseRequestItemResponse>[0],
     );
-    if (!transferAtCost) return item;
-    const lineQuantity =
-      item.approvedQuantity != null && Number(item.approvedQuantity) > 0
-        ? Number(item.approvedQuantity)
-        : Number(item.quantity ?? 0);
-    const payable = resolveBranchPurchaseLinePayableAmount({
-      branchType,
-      quantity: lineQuantity,
+    const lineAmount = computeBranchPurchaseHqReviewLineAmountKgs({
+      quantity: Number(item.quantity ?? 0),
+      approvedQuantity: item.approvedQuantity as number | null | undefined,
+      lineStatus: (item as { lineStatus?: string | null }).lineStatus,
+      resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+      branchPurchasePriceKgs: (item as { branchPurchasePriceKgs?: unknown }).branchPurchasePriceKgs,
       estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
-      unitPriceKgs: item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs,
-      hasPricingPolicy: true,
+      hasPricingPolicyAtReview:
+        (item as { hasPricingPolicyAtReview?: boolean | null }).hasPricingPolicyAtReview ??
+        (item as { hasPricingPolicyAtSubmit?: boolean | null }).hasPricingPolicyAtSubmit,
+      branchType,
     });
-    if (payable <= 0 && !(transferAtCost && Number(item.estimatedLineProductCostKgs ?? 0) > 0)) {
-      return item;
-    }
-    const linePayable =
-      payable > 0
-        ? payable
-        : transferAtCost
-          ? resolveBranchPurchaseLinePayableAmount({
-              branchType,
-              quantity: lineQuantity,
-              estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
-              unitPriceKgs: null,
-              hasPricingPolicy: true,
-            })
-          : payable;
+    const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
+    const resolvedTotal = lineAmount > 0 ? lineAmount : storedTotal;
+    const approvedQty = Math.max(Number(item.approvedQuantity ?? 0), 0);
     return {
       ...item,
-      totalAmount: linePayable,
+      totalAmount: resolvedTotal,
       approvedLineTotalKgs:
-        item.approvedQuantity != null && Number(item.approvedQuantity) > 0
-          ? linePayable
+        approvedQty > 0
+          ? resolvedTotal > 0
+            ? resolvedTotal
+            : item.approvedLineTotalKgs
           : item.approvedLineTotalKgs,
     };
   });
@@ -174,11 +164,13 @@ export function toBranchPurchaseRequestResponse<T extends {
           : 0;
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
+  const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
   const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
     branchType,
-    totalProductCostKgs,
+    totalProductCostKgs: transferAtCost ? totalProductCostKgs : computedOrderTotal,
     lineProductCosts: items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
-    storedEstimatedAmountKgs: toApiMoneyKgs(request.totalEstimatedAmount),
+    storedEstimatedAmountKgs:
+      computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount),
   });
 
   return {

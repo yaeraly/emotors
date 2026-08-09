@@ -190,7 +190,7 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(productCell, /min-w-\[6rem\] w-auto/);
     assert.doesNotMatch(productNameLine, /line-clamp|text-ellipsis|truncate/);
     assert.match(productNameLine, /break-words/);
-    assert.match(detailPage, /hqReviewLineAmount\(item, request\.items\)/);
+    assert.match(detailPage, /hqReviewLineAmount\(item\)/);
     const longestSampleName =
       'Аккумуляторная батарея LiFePO4 высокой ёмкости для электромобиля EMOTORS Pro Max Extended Range';
     assert.ok(longestSampleName.length >= 80, 'sample catalog-length product name');

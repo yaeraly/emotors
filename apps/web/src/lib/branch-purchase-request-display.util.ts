@@ -45,32 +45,40 @@ export function isReviewedBranchPurchaseLine(item: Pick<BranchPurchaseRequestLin
 }
 
 /**
- * HQ Sales review table amount for one line.
- * Reviewed lines use latest approved quantity; pending lines show 0 once any line is reviewed.
+ * Effective quantity for HQ Sales row/order amounts:
+ * pending → requested; approved/partial → approved; rejected → 0.
  */
-export function hqReviewLineAmount(
-  item: BranchPurchaseRequestLinePricing,
-  orderItems?: BranchPurchaseRequestLinePricing[],
-): number {
-  const orderHasReviewedLines = (orderItems ?? [item]).some(isReviewedBranchPurchaseLine);
+export function hqReviewEffectiveQuantity(item: BranchPurchaseRequestLinePricing): number {
+  const requested = Math.max(Number(item.quantity ?? 0), 0);
+  const status = item.lineStatus ?? 'PENDING_REVIEW';
 
-  if (!isReviewedBranchPurchaseLine(item)) {
-    if (orderHasReviewedLines) {
-      return 0;
-    }
-    return requestLineTotal(item);
+  if (status === 'REJECTED' || status === 'REMOVED_BY_HQ_SALES') {
+    return 0;
   }
+  if (status === 'APPROVED' || status === 'PARTIALLY_APPROVED') {
+    return Math.max(Number(item.approvedQuantity ?? 0), 0);
+  }
+  return requested;
+}
 
-  const approvedQuantity = Math.max(Number(item.approvedQuantity ?? 0), 0);
-  if (approvedQuantity <= 0) {
+/**
+ * HQ Sales review table amount for one line.
+ * Pending: Запрос × цена; reviewed: Утв. × цена; rejected: 0.
+ */
+export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
+  const effectiveQuantity = hqReviewEffectiveQuantity(item);
+  if (effectiveQuantity <= 0) {
     return 0;
   }
 
-  if (item.approvedLineTotalKgs != null && Number.isFinite(Number(item.approvedLineTotalKgs))) {
-    return roundMoney(Number(item.approvedLineTotalKgs));
-  }
-
-  if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+  if (isReviewedBranchPurchaseLine(item)) {
+    if (item.approvedLineTotalKgs != null && Number.isFinite(Number(item.approvedLineTotalKgs))) {
+      return roundMoney(Number(item.approvedLineTotalKgs));
+    }
+    if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+      return roundMoney(Number(item.totalAmount));
+    }
+  } else if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
     return roundMoney(Number(item.totalAmount));
   }
 
@@ -79,16 +87,12 @@ export function hqReviewLineAmount(
     return 0;
   }
 
-  return roundMoney(price * approvedQuantity);
+  return roundMoney(price * effectiveQuantity);
 }
 
-/** HQ Sales order amount: always the sum of displayed row amounts. */
+/** HQ Sales order amount: always the sum of all displayed row amounts. */
 export function hqReviewOrderAmount(items: BranchPurchaseRequestLinePricing[]): number {
-  if (!items.some(isReviewedBranchPurchaseLine)) {
-    return requestOrderTotal(items);
-  }
-
-  return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item, items), 0));
+  return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item), 0));
 }
 
 /**

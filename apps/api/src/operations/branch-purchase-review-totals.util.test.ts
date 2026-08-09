@@ -1,66 +1,170 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import {
-  computeBranchPurchaseReviewedLineAmountKgs,
+  computeBranchPurchaseHqReviewLineAmountKgs,
+  resolveBranchPurchaseHqReviewEffectiveQuantity,
   resolveBranchPurchaseReviewedLineAmountKgs,
-  sumBranchPurchaseReviewedLineAmountsKgs,
+  sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 
-describe('computeBranchPurchaseReviewedLineAmountKgs', () => {
-  it('uses approved quantity times branch price for reviewed franchise lines', () => {
+describe('resolveBranchPurchaseHqReviewEffectiveQuantity', () => {
+  it('uses requested quantity before review', () => {
     assert.equal(
-      computeBranchPurchaseReviewedLineAmountKgs({
-        approvedQuantity: 6,
-        resolvedBranchPriceKgs: 10000,
-        branchType: 'FRANCHISE',
-        hasPricingPolicyAtReview: true,
+      resolveBranchPurchaseHqReviewEffectiveQuantity({
+        quantity: 10,
+        approvedQuantity: null,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
       }),
-      60000,
+      10,
     );
   });
 
-  it('returns zero for rejected lines', () => {
+  it('uses approved quantity after approval', () => {
     assert.equal(
-      computeBranchPurchaseReviewedLineAmountKgs({
+      resolveBranchPurchaseHqReviewEffectiveQuantity({
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+      }),
+      6,
+    );
+  });
+
+  it('uses zero after rejection', () => {
+    assert.equal(
+      resolveBranchPurchaseHqReviewEffectiveQuantity({
+        quantity: 10,
         approvedQuantity: 0,
-        resolvedBranchPriceKgs: 10000,
+        lineStatus: BranchPurchaseRequestLineStatus.REJECTED,
       }),
       0,
     );
   });
 });
 
-describe('sumBranchPurchaseReviewedLineAmountsKgs', () => {
-  it('sums all reviewed line amounts for the full order total', () => {
-    const total = sumBranchPurchaseReviewedLineAmountsKgs([
-      { approvedQuantity: 10, resolvedBranchPriceKgs: 1000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 5, resolvedBranchPriceKgs: 2000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 3, resolvedBranchPriceKgs: 5000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
+describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
+  it('initial order total uses requested amounts before any review', () => {
+    const total = sumBranchPurchaseHqReviewLineAmountsKgs([
+      {
+        quantity: 10,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 1000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 5,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 2000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 3,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 5000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
     ]);
     assert.equal(total, 35000);
   });
 
-  it('recalculates full order total after one line changes and another is rejected', () => {
-    const afterChangeA = sumBranchPurchaseReviewedLineAmountsKgs([
-      { approvedQuantity: 6, resolvedBranchPriceKgs: 1000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 5, resolvedBranchPriceKgs: 2000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 3, resolvedBranchPriceKgs: 5000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
+  it('keeps unreviewed rows in order total after partial approval and rejection', () => {
+    const afterPartialA = sumBranchPurchaseHqReviewLineAmountsKgs([
+      {
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+        resolvedBranchPriceKgs: 1000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 5,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 2000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 3,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 5000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
     ]);
-    assert.equal(afterChangeA, 31000);
+    assert.equal(afterPartialA, 31000);
 
-    const afterRejectB = sumBranchPurchaseReviewedLineAmountsKgs([
-      { approvedQuantity: 6, resolvedBranchPriceKgs: 1000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 0, resolvedBranchPriceKgs: 2000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 3, resolvedBranchPriceKgs: 5000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
+    const afterRejectB = sumBranchPurchaseHqReviewLineAmountsKgs([
+      {
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+        resolvedBranchPriceKgs: 1000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 5,
+        approvedQuantity: 0,
+        lineStatus: BranchPurchaseRequestLineStatus.REJECTED,
+        resolvedBranchPriceKgs: 2000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 3,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 5000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
     ]);
     assert.equal(afterRejectB, 21000);
 
-    const afterReapproveB = sumBranchPurchaseReviewedLineAmountsKgs([
-      { approvedQuantity: 6, resolvedBranchPriceKgs: 1000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 4, resolvedBranchPriceKgs: 2000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
-      { approvedQuantity: 3, resolvedBranchPriceKgs: 5000, branchType: 'FRANCHISE', hasPricingPolicyAtReview: true },
+    const afterApproveC = sumBranchPurchaseHqReviewLineAmountsKgs([
+      {
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+        resolvedBranchPriceKgs: 1000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 5,
+        approvedQuantity: 0,
+        lineStatus: BranchPurchaseRequestLineStatus.REJECTED,
+        resolvedBranchPriceKgs: 2000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
+      {
+        quantity: 3,
+        approvedQuantity: 2,
+        lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+        resolvedBranchPriceKgs: 5000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      },
     ]);
-    assert.equal(afterReapproveB, 29000);
+    assert.equal(afterApproveC, 16000);
+  });
+
+  it('computes pending line amount as requested quantity times price', () => {
+    assert.equal(
+      computeBranchPurchaseHqReviewLineAmountKgs({
+        quantity: 10,
+        lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW,
+        resolvedBranchPriceKgs: 5000,
+        branchType: 'FRANCHISE',
+        hasPricingPolicyAtReview: true,
+      }),
+      50000,
+    );
   });
 });
 
