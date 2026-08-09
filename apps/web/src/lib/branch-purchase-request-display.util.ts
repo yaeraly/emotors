@@ -7,6 +7,9 @@ export type BranchPurchaseRequestLinePricing = {
   branchPurchasePriceKgs?: number;
   hasPricingPolicyAtSubmit?: boolean;
   pricingPolicyAvailable?: boolean;
+  lineStatus?: string | null;
+  approvedQuantity?: number | null;
+  approvedLineTotalKgs?: number | null;
 };
 
 /** Draft create/edit form line — quantity is edited as string in the UI. */
@@ -34,6 +37,56 @@ export function getFrozenBranchPrice(item: BranchPurchaseRequestLinePricing): nu
   if (price === 0 && item.hasPricingPolicyAtSubmit === false) return null;
   if (price === 0 && item.pricingPolicyAvailable === false) return null;
   return price;
+}
+
+/** HQ Sales has persisted a per-line review decision (not pending review). */
+export function isReviewedBranchPurchaseLine(item: Pick<BranchPurchaseRequestLinePricing, 'lineStatus'>) {
+  return Boolean(item.lineStatus && item.lineStatus !== 'PENDING_REVIEW');
+}
+
+/**
+ * HQ Sales review table/header amount for one line.
+ * Reviewed lines use latest approved quantity; pending lines keep request estimate.
+ */
+export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
+  if (!isReviewedBranchPurchaseLine(item)) {
+    return requestLineTotal(item);
+  }
+
+  const approvedQuantity = Math.max(Number(item.approvedQuantity ?? 0), 0);
+  if (approvedQuantity <= 0) {
+    return 0;
+  }
+
+  if (item.approvedLineTotalKgs != null && Number.isFinite(Number(item.approvedLineTotalKgs))) {
+    return roundMoney(Number(item.approvedLineTotalKgs));
+  }
+
+  if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+    return roundMoney(Number(item.totalAmount));
+  }
+
+  const price = getFrozenBranchPrice(item);
+  if (price == null) {
+    return 0;
+  }
+
+  return roundMoney(price * approvedQuantity);
+}
+
+/** HQ Sales order amount: authoritative header total after review, else sum of line amounts. */
+export function hqReviewOrderAmount(
+  items: BranchPurchaseRequestLinePricing[],
+  headerTotalEstimatedAmount?: number | null,
+): number {
+  if (items.some(isReviewedBranchPurchaseLine)) {
+    if (headerTotalEstimatedAmount != null && Number.isFinite(Number(headerTotalEstimatedAmount))) {
+      return roundMoney(Number(headerTotalEstimatedAmount));
+    }
+    return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item), 0));
+  }
+
+  return requestOrderTotal(items);
 }
 
 /**

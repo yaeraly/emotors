@@ -6,6 +6,8 @@ import {
   getDisplayQuantity,
   getDraftFormBranchPrice,
   getFrozenBranchPrice,
+  hqReviewLineAmount,
+  hqReviewOrderAmount,
   requestLineTotal,
   requestOrderTotal,
 } from './branch-purchase-request-display.util';
@@ -100,6 +102,60 @@ describe('branch purchase request display totals', () => {
       { quantity: 2, branchPurchasePriceKgs: 12500, totalAmount: 0 },
     ]);
     assert.equal(total, 85000);
+  });
+
+  it('hq review line amount uses latest approved quantity after review', () => {
+    assert.equal(
+      hqReviewLineAmount({
+        quantity: 10,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 100000,
+        lineStatus: 'APPROVED',
+        approvedQuantity: 6,
+        approvedLineTotalKgs: 60000,
+      }),
+      60000,
+    );
+  });
+
+  it('hq review line amount is zero after rejection', () => {
+    assert.equal(
+      hqReviewLineAmount({
+        quantity: 10,
+        branchPurchasePriceKgs: 10000,
+        totalAmount: 100000,
+        lineStatus: 'REJECTED',
+        approvedQuantity: 0,
+      }),
+      0,
+    );
+  });
+
+  it('hq review order amount prefers authoritative header total after any line review', () => {
+    assert.equal(
+      hqReviewOrderAmount(
+        [
+          {
+            quantity: 10,
+            branchPurchasePriceKgs: 1000,
+            totalAmount: 10000,
+            lineStatus: 'PARTIALLY_APPROVED',
+            approvedQuantity: 6,
+            approvedLineTotalKgs: 6000,
+          },
+          {
+            quantity: 5,
+            branchPurchasePriceKgs: 2000,
+            totalAmount: 10000,
+            lineStatus: 'APPROVED',
+            approvedQuantity: 5,
+            approvedLineTotalKgs: 10000,
+          },
+        ],
+        16000,
+      ),
+      16000,
+    );
   });
 
   it('multiple rows calculate independently', () => {

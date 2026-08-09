@@ -143,6 +143,7 @@ import {
   type BranchPurchaseLineReviewContext,
 } from './branch-purchase-line-review.apply';
 import { assertBranchPurchaseLineReviewEditable } from './branch-purchase-line-review-editable.util';
+import { resolveBranchPurchaseReviewedLineAmountKgs } from './branch-purchase-review-totals.util';
 import {
   deriveRequestStatusFromLines,
   type LineReviewAction,
@@ -1184,6 +1185,16 @@ export class OperationsService {
         where: { id: existing.branchId, deletedAt: null },
         select: { branchType: true, hqToBranchMarkupPercent: true },
       });
+      const oldOrderTotalKgs = roundDisplayMoney(Number(existing.totalEstimatedAmount ?? 0));
+      const oldItemAmountKgs = resolveBranchPurchaseReviewedLineAmountKgs({
+        approvedQuantity: item.approvedQuantity,
+        approvedLineTotalKgs: item.approvedLineTotalKgs,
+        totalAmount: item.totalAmount,
+        resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+        estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+        hasPricingPolicyAtReview: item.hasPricingPolicyAtReview,
+        branchType: reviewBranch?.branchType,
+      });
 
       const line = await this.applyBranchPurchaseLineReviewWithIssues(
         tx,
@@ -1196,7 +1207,30 @@ export class OperationsService {
         lineReviewDeps,
       );
 
+      let newOrderTotalKgs = oldOrderTotalKgs;
       if (!line.unchanged) {
+        newOrderTotalKgs = await recalculateBranchPurchaseRequestReviewTotalsInTx(tx, existing.id, existing.branchId);
+        const refreshedItem = await tx.branchPurchaseRequestItem.findFirst({
+          where: { id: item.id },
+          select: {
+            approvedQuantity: true,
+            approvedLineTotalKgs: true,
+            totalAmount: true,
+            estimatedLineProductCostKgs: true,
+            resolvedBranchPriceKgs: true,
+            hasPricingPolicyAtReview: true,
+          },
+        });
+        const newItemAmountKgs = resolveBranchPurchaseReviewedLineAmountKgs({
+          approvedQuantity: refreshedItem?.approvedQuantity ?? line.approvedQuantity,
+          approvedLineTotalKgs: refreshedItem?.approvedLineTotalKgs,
+          totalAmount: refreshedItem?.totalAmount,
+          resolvedBranchPriceKgs: refreshedItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+          estimatedLineProductCostKgs:
+            refreshedItem?.estimatedLineProductCostKgs ?? item.estimatedLineProductCostKgs,
+          hasPricingPolicyAtReview: refreshedItem?.hasPricingPolicyAtReview ?? item.hasPricingPolicyAtReview,
+          branchType: reviewBranch?.branchType,
+        });
         await this.recordBranchPurchaseLineReviewAudits(
           tx,
           user,
@@ -1207,9 +1241,12 @@ export class OperationsService {
           {
             previousLineStatus: item.lineStatus,
             previousApprovedQuantity: item.approvedQuantity,
+            previousItemAmountKgs: oldItemAmountKgs,
+            previousOrderTotalKgs: oldOrderTotalKgs,
+            newItemAmountKgs,
+            newOrderTotalKgs,
           },
         );
-        await recalculateBranchPurchaseRequestReviewTotalsInTx(tx, existing.id, existing.branchId);
       }
 
       return tx.branchPurchaseRequest.findFirstOrThrow({
@@ -1332,6 +1369,10 @@ export class OperationsService {
     previous?: {
       previousLineStatus?: BranchPurchaseRequestLineStatus | null;
       previousApprovedQuantity?: number | null;
+      previousItemAmountKgs?: number;
+      previousOrderTotalKgs?: number;
+      newItemAmountKgs?: number;
+      newOrderTotalKgs?: number;
     },
   ) {
     const request = await tx.branchPurchaseRequest.findFirst({
@@ -1419,6 +1460,10 @@ export class OperationsService {
       newApprovedQty: line.approvedQuantity,
       oldStatus: previous?.previousLineStatus ?? BranchPurchaseRequestLineStatus.PENDING_REVIEW,
       newStatus: line.lineStatus,
+      oldItemAmount: previous?.previousItemAmountKgs ?? 0,
+      newItemAmount: previous?.newItemAmountKgs ?? 0,
+      oldOrderTotal: previous?.previousOrderTotalKgs ?? 0,
+      newOrderTotal: previous?.newOrderTotalKgs ?? 0,
       approvedQuantity: line.approvedQuantity,
       unavailableQuantity: line.unavailableQuantity,
       reasonCode: line.rejectionReasonCode,
