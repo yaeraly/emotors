@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { apiFetch } from '@/lib/api';
+import { formatProductUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type StockRow = {
@@ -36,7 +37,7 @@ type StockResponse = {
 type StockStatusFilter = 'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK' | 'LOW_STOCK' | 'HAS_RESERVATION';
 
 export function BranchWarehouseStockContent() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [summary, setSummary] = useState<WarehouseSummary | null>(null);
   const [data, setData] = useState<StockResponse | null>(null);
   const [search, setSearch] = useState('');
@@ -151,7 +152,6 @@ export function BranchWarehouseStockContent() {
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">{t('sales.product')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.productCode')}</th>
               <th className="px-4 py-3">{t('inventory.category')}</th>
               <th className="px-4 py-3">{t('branchWarehouse.onHand')}</th>
               <th className="px-4 py-3">{t('branchWarehouse.reserved')}</th>
@@ -165,7 +165,7 @@ export function BranchWarehouseStockContent() {
             {loading
               ? Array.from({ length: 5 }).map((_, index) => (
                   <tr key={index} className="animate-pulse">
-                    {Array.from({ length: 9 }).map((__, cellIndex) => (
+                    {Array.from({ length: 8 }).map((__, cellIndex) => (
                       <td key={cellIndex} className="px-4 py-3">
                         <div className="h-4 rounded bg-slate-100" />
                       </td>
@@ -175,12 +175,11 @@ export function BranchWarehouseStockContent() {
               : rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-semibold text-slate-900">{row.productName}</td>
-                    <td className="px-4 py-3">{row.productCode}</td>
                     <td className="px-4 py-3">{row.category ?? '—'}</td>
                     <td className="px-4 py-3">{row.quantityOnHand}</td>
                     <td className="px-4 py-3">{row.reservedQuantity}</td>
                     <td className="px-4 py-3">{row.availableQuantity}</td>
-                    <td className="px-4 py-3">{row.unit}</td>
+                    <td className="px-4 py-3">{formatProductUnit(row.unit, language, t)}</td>
                     <td className="px-4 py-3">
                       {row.lastReceiptDate ? new Date(row.lastReceiptDate).toLocaleDateString() : '—'}
                     </td>
@@ -189,7 +188,7 @@ export function BranchWarehouseStockContent() {
                 ))}
             {!loading && !rows.length ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   {data?.items.length ? t('branchWarehouseOperator.noFilterResults') : t('branchWarehouseOperator.emptyStock')}
                 </td>
               </tr>

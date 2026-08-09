@@ -45,6 +45,20 @@ export function shouldShowTransportCompanyField(): boolean {
   return false;
 }
 
+/** Hide transport-expense UI after branch receipt is finalized. */
+export const BRANCH_RECEIVED_DISTRIBUTION_ORDER_STATUSES = [
+  'RECEIVED',
+  'RECEIVED_BY_BRANCH',
+  'RECEIVED_WITH_DIFFERENCE',
+  'COMPLETED',
+] as const;
+
+export function shouldHideTransportSectionAfterBranchReceipt(status: string) {
+  return BRANCH_RECEIVED_DISTRIBUTION_ORDER_STATUSES.includes(
+    status as (typeof BRANCH_RECEIVED_DISTRIBUTION_ORDER_STATUSES)[number],
+  );
+}
+
 export type BranchReceivingTransportFormState = {
   driverName: string;
   vehicleNumber: string;

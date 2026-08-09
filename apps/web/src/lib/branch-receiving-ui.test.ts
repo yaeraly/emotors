@@ -16,6 +16,7 @@ import {
   shouldShowReceivingBranchField,
   shouldShowTransportCompanyField,
   validateTransportCostInput,
+  shouldHideTransportSectionAfterBranchReceipt,
 } from './branch-receiving-ui';
 
 describe('branch-receiving-ui', () => {
@@ -128,5 +129,13 @@ describe('branch-receiving-ui', () => {
     assert.equal(payload.driverName, undefined);
     assert.equal(payload.vehicleNumber, undefined);
     assert.equal(payload.comment, undefined);
+  });
+
+  it('hides transport section after branch receipt is finalized', () => {
+    assert.equal(shouldHideTransportSectionAfterBranchReceipt('RECEIVED_BY_BRANCH'), true);
+    assert.equal(shouldHideTransportSectionAfterBranchReceipt('RECEIVED_WITH_DIFFERENCE'), true);
+    assert.equal(shouldHideTransportSectionAfterBranchReceipt('SHIPPED'), false);
+    assert.equal(shouldHideTransportSectionAfterBranchReceipt('SENT'), false);
+    assert.equal(shouldHideTransportSectionAfterBranchReceipt('PICKING'), false);
   });
 });

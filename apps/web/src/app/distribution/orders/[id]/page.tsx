@@ -21,7 +21,7 @@ import { ReceivingTransportCostSection } from '@/components/distribution/Receivi
 import { BranchReceivingWorkspace } from '@/components/distribution/BranchReceivingWorkspace';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
-import { shouldShowReceivingBranchField } from '@/lib/branch-receiving-ui';
+import { shouldShowReceivingBranchField, shouldHideTransportSectionAfterBranchReceipt } from '@/lib/branch-receiving-ui';
 import { buildHqDispatchSendPayload, shouldShowHqDispatchTransportFields } from '@/lib/hq-dispatch-form';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -133,6 +133,11 @@ export default function DistributionOrderDetailPage() {
   const showPickingControls = Boolean(canDispatch && order?.status === 'PICKING');
   const showPickedColumn = Boolean(canDispatch && order && ['PICKING', 'PACKED', 'SHIPPED', 'SENT'].includes(order.status));
   const showPickingProgress = Boolean(canDispatch && order?.status === 'PICKING' && pickingProgress.totalCount > 0);
+  const showTransportCostSection = Boolean(
+    order &&
+      (canEnterTransport || operatorView) &&
+      !shouldHideTransportSectionAfterBranchReceipt(order.status),
+  );
 
   const pageContent = (
     <>
@@ -411,7 +416,7 @@ export default function DistributionOrderDetailPage() {
                 }}
               />
             ) : null}
-            {order && (canEnterTransport || operatorView) ? (
+            {showTransportCostSection ? (
               <ReceivingTransportCostSection
                 order={order}
                 canEnter={canEnterTransport}
