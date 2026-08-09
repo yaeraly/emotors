@@ -139,6 +139,14 @@ import {
 import { resolveMasterProductForReceivingInTx } from './branch-receiving-product.util';
 import { sanitizeDistributionOrderForBranchCeo } from './branch-ceo-distribution.presenter';
 import {
+  assertAllDistributionItemsPicked,
+  assertDistributionOrderItemPickingAllowed,
+  buildDistributionPickingProgress,
+  isDistributionItemEligibleForPicking,
+  isDistributionOrderItemPicked,
+} from './distribution-order-item-picking.util';
+import { SetDistributionOrderItemPickedDto } from './dto/set-distribution-order-item-picked.dto';
+import {
   buildBranchReceivingDiscrepancyPayload,
   mapDraftRowToLineItem,
   normalizeBranchReceivingDraftInput,
@@ -811,10 +819,20 @@ export class DistributionService {
 
   pack(user: AuthUser, id: string) {
     return this.prisma.$transaction(async (tx) => {
-      const order = await this.getAccessibleOrderInTx(tx, user, id);
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      await this.assertWarehouseManagerOrderAccess(user, order.sourceWarehouseId);
       if (order.status !== BranchDistributionOrderStatus.PICKING) {
         throw new BadRequestException('Order must be in PICKING before packing');
       }
+      assertAllDistributionItemsPicked(order.items);
       const updated = await tx.branchDistributionOrder.update({
         where: { id },
         data: { status: BranchDistributionOrderStatus.PACKED },
@@ -826,6 +844,67 @@ export class DistributionService {
       });
       await this.auditTransfer(tx, user, 'GOODS_PACKED', updated);
       return this.toResponse(updated);
+    });
+  }
+
+  setOrderItemPicked(user: AuthUser, orderId: string, itemId: string, dto: SetDistributionOrderItemPickedDto) {
+    if (!canDispatchFromHq(user)) {
+      throw new ForbiddenException('Only Warehouse Manager can mark collected items');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      await this.assertWarehouseManagerOrderAccess(user, order.sourceWarehouseId);
+      assertDistributionOrderItemPickingAllowed(order.status);
+
+      const item = order.items.find((row) => row.id === itemId);
+      if (!item) throw new NotFoundException('Distribution order line not found');
+      if (!isDistributionItemEligibleForPicking(item)) {
+        throw new BadRequestException('Line has no quantity to collect');
+      }
+
+      const alreadyPicked = isDistributionOrderItemPicked(item);
+      if (dto.picked === alreadyPicked) {
+        const unchanged = await tx.branchDistributionOrder.findFirstOrThrow({
+          where: { id: orderId },
+          include: this.include(),
+        });
+        return this.toResponse(unchanged, user);
+      }
+
+      await tx.branchDistributionOrderItem.update({
+        where: { id: itemId },
+        data: dto.picked
+          ? { pickedAt: new Date(), pickedByUserId: user.id }
+          : { pickedAt: null, pickedByUserId: null },
+      });
+
+      await this.auditTransfer(
+        tx,
+        user,
+        dto.picked ? 'DISTRIBUTION_ITEM_PICKED' : 'DISTRIBUTION_ITEM_PICK_UNDONE',
+        order,
+        {
+          distributionOrderId: order.id,
+          itemId: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          quantity: item.quantity,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        },
+      );
+
+      const updated = await tx.branchDistributionOrder.findFirstOrThrow({
+        where: { id: orderId },
+        include: this.include(),
+      });
+      return this.toResponse(updated, user);
     });
   }
 
@@ -4710,7 +4789,12 @@ export class DistributionService {
       destinationWarehouse: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
-      items: { include: { product: true } },
+      items: {
+        include: {
+          product: true,
+          pickedBy: { select: { id: true, fullName: true, role: true } },
+        },
+      },
       branchInvoices: true,
       pickingTask: {
         include: {
@@ -5190,8 +5274,12 @@ export class DistributionService {
         deliveryCostKgs: transportExpenseAllocation,
         totalLandedCostKgs:
           Number(item.totalCost ?? unitCost * Number(item.quantity)) + transportExpenseAllocation,
+        pickedAt: item.pickedAt ?? null,
+        pickedByUserId: item.pickedByUserId ?? null,
+        pickedBy: item.pickedBy ?? null,
       };
     });
+    const pickingProgress = buildDistributionPickingProgress(items);
     const productCostTotal =
       items?.reduce((sum: number, item: any) => sum + Number(item.totalCost ?? 0), 0) ?? 0;
     const deliveryCostTotal =
@@ -5223,6 +5311,7 @@ export class DistributionService {
         deliveryCostTotal: Math.round((deliveryCostTotal + Number.EPSILON) * 100) / 100,
         landedCostTotal: Math.round((landedCostTotal + Number.EPSILON) * 100) / 100,
       },
+      pickingProgress,
       items,
       branchInvoice: this.resolveProductBranchInvoice(order)
         ? this.toInvoiceResponse(this.resolveProductBranchInvoice(order))
@@ -5320,6 +5409,7 @@ export class DistributionService {
       totalShipmentWeightKg: shipmentWeightSummary.totalWeightKg,
       shipmentWeightSummary,
       pickingTask: order.pickingTask,
+      pickingProgress: buildDistributionPickingProgress(order.items),
       items: order.items?.map((item: any) => ({
         id: item.id,
         productId: item.productId,
@@ -5327,6 +5417,9 @@ export class DistributionService {
         productName: item.productName,
         quantity: item.quantity,
         dispatchedQuantity: item.dispatchedQuantity ?? item.quantity,
+        pickedAt: item.pickedAt ?? null,
+        pickedByUserId: item.pickedByUserId ?? null,
+        pickedBy: item.pickedBy ?? null,
         unitWeightKg: item.unitWeightKgSnapshot != null ? Number(item.unitWeightKgSnapshot) : Number(item.product?.weightKg ?? 0),
         lineWeightKg:
           item.lineWeightKgSnapshot != null

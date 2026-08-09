@@ -840,8 +840,17 @@ export type BranchDistributionOrderItem = {
   dispatchedQuantity?: number;
   unitWeightKg?: number;
   lineWeightKg?: number;
+  pickedAt?: string | null;
+  pickedByUserId?: string | null;
+  pickedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DistributionPickingProgress = {
+  pickedCount: number;
+  totalCount: number;
+  remainingCount: number;
 };
 
 export type BranchDistributionOrder = {
@@ -881,6 +890,7 @@ export type BranchDistributionOrder = {
   canCompleteReceiving?: boolean;
   transportAllocationReady?: boolean;
   branchInvoice?: BranchInvoice | null;
+  pickingProgress?: DistributionPickingProgress;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;

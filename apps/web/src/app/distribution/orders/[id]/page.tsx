@@ -86,6 +86,22 @@ export default function DistributionOrderDetailPage() {
     }
   }
 
+  async function setItemPicked(itemId: string, picked: boolean) {
+    setError('');
+    setSuccess('');
+    try {
+      setOrder(
+        await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/items/${itemId}/picked`, {
+          method: 'PATCH',
+          body: JSON.stringify({ picked }),
+        }),
+      );
+      setSuccess(picked ? t('distribution.itemPickedDone') : t('distribution.undoItemPick'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   async function dispatchShipment() {
     await action('send', t('distribution.orderSent'), buildHqDispatchSendPayload());
   }
@@ -112,6 +128,11 @@ export default function DistributionOrderDetailPage() {
   const showDeliveryCostSummary =
     showFinancials &&
     Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
+  const pickingProgress = order?.pickingProgress ?? { pickedCount: 0, totalCount: 0, remainingCount: 0 };
+  const allItemsPicked = pickingProgress.totalCount > 0 && pickingProgress.remainingCount === 0;
+  const showPickingControls = Boolean(canDispatch && order?.status === 'PICKING');
+  const showPickedColumn = Boolean(canDispatch && order && ['PICKING', 'PACKED', 'SHIPPED', 'SENT'].includes(order.status));
+  const showPickingProgress = Boolean(canDispatch && order?.status === 'PICKING' && pickingProgress.totalCount > 0);
 
   const pageContent = (
     <>
@@ -162,7 +183,13 @@ export default function DistributionOrderDetailPage() {
                   </button>
                 ) : null}
                 {order.status === 'PICKING' && canDispatch ? (
-                  <button onClick={() => void action('pack', t('distribution.packed'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                  <button
+                    onClick={() => void action('pack', t('distribution.packed'))}
+                    disabled={!allItemsPicked}
+                    className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                    type="button"
+                    title={!allItemsPicked ? t('distribution.packBlockedNotAllPicked') : undefined}
+                  >
                     {t('distribution.pack')}
                   </button>
                 ) : null}
@@ -182,6 +209,23 @@ export default function DistributionOrderDetailPage() {
                   </button>
                 ) : null}
               </div>
+              {showPickingProgress ? (
+                <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <p className="font-semibold text-slate-900">
+                    {t('distribution.pickingProgress')
+                      .replace('{picked}', String(pickingProgress.pickedCount))
+                      .replace('{total}', String(pickingProgress.totalCount))}
+                  </p>
+                  {pickingProgress.remainingCount > 0 ? (
+                    <p className="mt-1">
+                      {t('distribution.pickingProgressRemaining').replace(
+                        '{remaining}',
+                        String(pickingProgress.remainingCount),
+                      )}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
             {order.branchInvoice && showFinancials ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -275,11 +319,15 @@ export default function DistributionOrderDetailPage() {
                           <th className="px-4 py-3">{t('distribution.profit')}</th>
                         </>
                       ) : null}
+                      {showPickedColumn ? <th className="px-4 py-3">{t('distribution.pick')}</th> : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {order.items?.map((item) => (
-                      <tr key={item.id}>
+                    {order.items?.map((item) => {
+                      const isPicked = Boolean(item.pickedAt);
+                      const canPickItem = showPickingControls && Number(item.quantity) > 0;
+                      return (
+                      <tr key={item.id} className={isPicked ? 'bg-green-50' : undefined}>
                         <td className="px-4 py-3">{item.sku}</td>
                         <td className="px-4 py-3">{item.productName}</td>
                         <td className="px-4 py-3">{item.quantity}</td>
@@ -296,8 +344,37 @@ export default function DistributionOrderDetailPage() {
                             <td className="px-4 py-3">{formatKgs(item.profit)}</td>
                           </>
                         ) : null}
+                        {showPickedColumn ? (
+                          <td className="px-4 py-3">
+                            {canPickItem && !isPicked ? (
+                              <button
+                                type="button"
+                                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
+                                onClick={() => void setItemPicked(item.id, true)}
+                              >
+                                {t('distribution.itemPick')}
+                              </button>
+                            ) : null}
+                            {isPicked ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-lg bg-green-100 px-3 py-1.5 text-xs font-semibold text-green-800">
+                                  {t('distribution.itemPickedDone')}
+                                </span>
+                                {canPickItem ? (
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                                    onClick={() => void setItemPicked(item.id, false)}
+                                  >
+                                    {t('distribution.undoItemPick')}
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </td>
+                        ) : null}
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>

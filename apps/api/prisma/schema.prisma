@@ -1599,6 +1599,7 @@ model User {
   shortageReports                                 ShortageReport[]                    @relation("ShortageReportCreator")
   shortageResolutions                             ShortageResolution[]                @relation("ShortageResolutionResolver")
   assignedPickingTasks                            HqWarehousePickingTask[]            @relation("PickingTaskAssignee")
+  pickedDistributionOrderItems                    BranchDistributionOrderItem[]       @relation("DistributionOrderItemPickedBy")
   hqWarehouseManagerAssignments                   HqWarehouseManagerAssignment[]      @relation("HqWarehouseManagerAssignments")
   assignedHqWarehouseManagerAssignments           HqWarehouseManagerAssignment[]      @relation("HqWarehouseAssignmentAssigner")
   hqSalesManagerWarehouseAssignments              HqSalesManagerWarehouseAssignment[] @relation("HqSalesManagerWarehouseAssignments")
@@ -4013,6 +4014,9 @@ model BranchDistributionOrderItem {
   appliedAdjustmentMode       PricingAdjustmentMode?
   appliedAdjustmentValue      Decimal?                     @db.Decimal(14, 2)
   priceResolvedAt             DateTime?
+  pickedAt                    DateTime?
+  pickedByUserId              String?
+  pickedBy                    User?                        @relation("DistributionOrderItemPickedBy", fields: [pickedByUserId], references: [id])
   goodsReceivingItems         GoodsReceivingItem[]
   distributionFifoAllocations DistributionFifoAllocation[]
   receivingDraftRow           BranchDistributionReceivingDraftRow?
@@ -4022,6 +4026,7 @@ model BranchDistributionOrderItem {
 
   @@index([orderId])
   @@index([productId])
+  @@index([pickedByUserId])
 }
 
 model GoodsReceiving {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -17,6 +17,7 @@ import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
+import { SetDistributionOrderItemPickedDto } from './dto/set-distribution-order-item-picked.dto';
 import { EnterReceivingTransportDto } from './dto/enter-receiving-transport.dto';
 import { DistributionService } from './distribution.service';
 
@@ -145,6 +146,17 @@ export class DistributionController {
   @Roles(...DISTRIBUTION_DISPATCH_ROLES)
   pack(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.pack(user, id);
+  }
+
+  @Patch('orders/:orderId/items/:itemId/picked')
+  @Roles(...DISTRIBUTION_DISPATCH_ROLES)
+  setOrderItemPicked(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: SetDistributionOrderItemPickedDto,
+  ) {
+    return this.distributionService.setOrderItemPicked(user, orderId, itemId, dto);
   }
 
   @Post('orders/:id/send')
