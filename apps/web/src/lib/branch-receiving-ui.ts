@@ -25,7 +25,6 @@ export function allowsProductNameWrapping(className: string): boolean {
 
 /** Visible columns on Branch Warehouse receiving product table (in order). */
 export const BRANCH_RECEIVING_TABLE_COLUMNS = [
-  'sku',
   'product',
   'sentQuantity',
   'acceptedQuantity',
@@ -36,7 +35,7 @@ export const BRANCH_RECEIVING_TABLE_COLUMNS = [
 ] as const;
 
 /** Columns removed from the receiving table UI (logic may remain internal). */
-export const REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS = ['missingQuantity', 'status'] as const;
+export const REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS = ['sku', 'missingQuantity', 'status'] as const;
 
 export function shouldShowReceivingBranchField(isOperatorView: boolean): boolean {
   return !isOperatorView;

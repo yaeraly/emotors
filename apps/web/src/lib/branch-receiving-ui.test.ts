@@ -24,8 +24,8 @@ describe('branch-receiving-ui', () => {
     assert.equal(shouldShowReceivingBranchField(false), true);
   });
 
-  it('does not display Недостача or Статус table columns', () => {
-    assert.deepEqual([...REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS], ['missingQuantity', 'status']);
+  it('does not display SKU, Недостача, or Статус table columns', () => {
+    assert.deepEqual([...REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS], ['sku', 'missingQuantity', 'status']);
     for (const removed of REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS) {
       assert.equal(BRANCH_RECEIVING_TABLE_COLUMNS.includes(removed as never), false);
     }
@@ -33,7 +33,6 @@ describe('branch-receiving-ui', () => {
 
   it('displays table columns in the required order', () => {
     assert.deepEqual([...BRANCH_RECEIVING_TABLE_COLUMNS], [
-      'sku',
       'product',
       'sentQuantity',
       'acceptedQuantity',

@@ -257,7 +257,6 @@ export function BranchReceivingWorkspace({
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[44rem] table-auto divide-y divide-slate-200 text-xs">
           <colgroup>
-            <col className="w-[4.5rem]" />
             <col />
             <col className="w-[4.5rem]" />
             <col className="w-[4.5rem]" />
@@ -268,7 +267,6 @@ export function BranchReceivingWorkspace({
           </colgroup>
           <thead className="bg-slate-50 text-left font-bold text-slate-500">
             <tr>
-              <th className="px-2 py-2">SKU</th>
               <th className="min-w-[10rem] px-2 py-2">{t('sales.product')}</th>
               <th className="px-2 py-2 text-center">{t(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.sentQuantity)}</th>
               <th className="px-2 py-2 text-center">{t(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.acceptedQuantity)}</th>
@@ -290,7 +288,6 @@ export function BranchReceivingWorkspace({
 
               return (
                 <tr key={item.id} className={bg}>
-                  <td className="px-2 py-2 align-top whitespace-nowrap">{item.sku}</td>
                   <td className="min-w-[10rem] px-2 py-2 align-top">
                     <p className={BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS}>{item.productName}</p>
                     <p className="text-[10px] text-slate-500">{item.unit}</p>
