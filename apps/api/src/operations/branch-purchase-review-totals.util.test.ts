@@ -167,7 +167,7 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
     );
   });
 
-  it('approved HQ_BRANCH line uses commercial 2 × 1963.59 = 3927.18 not FIFO 630.15', () => {
+  it('approved HQ_BRANCH line uses FIFO payable 630.15 not commercial 2 × 1963.59', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 10,
@@ -178,7 +178,7 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      3927.18,
+      630.15,
     );
   });
 });

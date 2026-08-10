@@ -545,7 +545,7 @@ export class OperationsService {
         ? (await this.getBranchAssignedHqWarehouseId(branchId))
         : await this.requireBranchAssignedHqWarehouse(user, branchId);
     const totalQuantity = resolvedItems.reduce((sum, item) => sum + item.quantity, 0);
-    // Persist the same commercial total the Create Order form shows (sum of qty × branch price).
+    // Persist the same authoritative total all downstream stages must reuse.
     const totalEstimatedAmount = sumDisplayMoneyTotals(
       resolvedItems.map((item) => Number(item.totalAmount ?? 0)),
     );
@@ -5621,22 +5621,15 @@ export class OperationsService {
             estimatedUnitCost = fifoCost.estimatedUnitCost;
           }
         }
-        // Create/submit commercial total matches Create Order form: qty × Цена для филиала.
-        // FIFO cost stays in estimatedLineProductCostKgs for HQ_BRANCH payable after review.
-        const commercialLineTotal =
-          pricing.hasPricingPolicy !== false && branchPurchasePriceKgs > 0 && quantity > 0
-            ? roundDisplayMoney(branchPurchasePriceKgs * quantity)
-            : 0;
-        const totalAmount =
-          commercialLineTotal > 0
-            ? commercialLineTotal
-            : resolveBranchPurchaseLinePayableAmount({
-                branchType: branch?.branchType,
-                quantity,
-                estimatedLineProductCostKgs,
-                unitPriceKgs: branchPurchasePriceKgs,
-                hasPricingPolicy: pricing.hasPricingPolicy,
-              });
+        // Authoritative create/submit line total (shared with HQ/Branch/BA stages):
+        // HQ_BRANCH = FIFO payable snapshot; franchise/dealer = qty × frozen branch price.
+        const totalAmount = resolveBranchPurchaseLinePayableAmount({
+          branchType: branch?.branchType,
+          quantity,
+          estimatedLineProductCostKgs,
+          unitPriceKgs: branchPurchasePriceKgs,
+          hasPricingPolicy: pricing.hasPricingPolicy,
+        });
         const stockMetrics = hqStockMetrics.get(product.id);
 
         return {

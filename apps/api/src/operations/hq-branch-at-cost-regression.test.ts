@@ -74,19 +74,14 @@ describe('HQ Branch at-cost permanent invariant', () => {
       true,
     );
 
-    // Сумма заказа is commercial (approvedQty × frozen branch unit price), not FIFO cost.
-    const commercialLineTotals = lines.map((line) =>
-      roundDisplayMoney(line.unitDisplay * line.quantity),
-    );
-    const commercialOrderTotal = sumDisplayMoneyTotals(commercialLineTotals);
+    // Сумма заказа for HQ_BRANCH is FIFO payable (not commercial unit×qty).
     const payableTotals = sanitized.items.map((item) =>
       Number((item as { totalAmount?: number }).totalAmount ?? 0),
     );
-    assert.equal(sumDisplayMoneyTotals(payableTotals), commercialOrderTotal);
-    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), commercialOrderTotal);
-    assert.notEqual(commercialOrderTotal, HQ_INVENTORY_TOTAL);
+    assert.equal(sumDisplayMoneyTotals(payableTotals), HQ_INVENTORY_TOTAL);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), HQ_INVENTORY_TOTAL);
+    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), driftedUnitTimesQty);
 
-    // FIFO transfer-cost invariant remains on cost fields / payable helper (not Сумма).
     const fifoPayableTotals = lines.map((line) =>
       resolveBranchPurchaseLinePayableAmount({
         branchType: BranchType.HQ_BRANCH,

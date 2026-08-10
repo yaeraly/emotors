@@ -102,7 +102,7 @@ type DraftLine = {
   weightKg: number;
   branchPurchasePriceKgs: number | null;
   wholesalePriceKgs: number | null;
-  /** Optional backend payable/FIFO total — Branch Sales UI totals use qty × branch price instead. */
+  /** Backend authoritative line total (HQ_BRANCH FIFO payable when present). */
   authoritativeLineTotalKgs: number | null;
   pricingPending: boolean;
   priceResolving: boolean;
@@ -777,14 +777,15 @@ function BranchPurchaseRequestsPageInner() {
                   : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
                     ? Boolean(entry.hasPricingPolicy)
                     : branchPrice != null;
-            // Branch Sales Сумма = qty × displayed branch price. Do not store FIFO
-            // lineTotalKgs as the row total — it can disagree with Цена для филиала
-            // (e.g. 630.15 vs 2 × 1963.59).
+            // Prefer backend lineTotalKgs (HQ_BRANCH FIFO payable) so create → BA stays identical.
+            const authoritativeLineTotalKgs = parseBranchMoney(
+              typeof entry === 'object' && entry != null ? entry.lineTotalKgs ?? null : null,
+            );
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
-              authoritativeLineTotalKgs: null,
+              authoritativeLineTotalKgs,
               pricingPending: !hasPricing,
               priceResolving: false,
             };

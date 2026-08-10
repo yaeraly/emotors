@@ -1,5 +1,6 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import { resolveBranchPurchaseLinePayableAmount } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branch-display.util';
 
 export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
@@ -32,13 +33,13 @@ export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
 }
 
 /**
- * Authoritative HQ Sales row `Сумма` for one order line.
+ * Authoritative order-line Сумма for every BPR lifecycle stage.
  *
- * Always:
- *   effectiveQuantity × frozen order-line Цена для филиала (resolvedBranchPriceKgs)
+ * HQ_BRANCH (at-cost): saved FIFO/landed line total (`estimatedLineProductCostKgs`)
+ * FRANCHISE/DEALER: effectiveQuantity × frozen order-line Цена для филиала
  *
- * Never uses FIFO / landed cost / estimatedLineProductCostKgs for this commercial total.
- * FIFO remains in estimatedLineProductCostKgs for cost accounting only.
+ * Never rebuilds HQ_BRANCH payable as rounded catalog/policy unit × qty
+ * (that is the 72 490.50 → 67 870.14 drift).
  */
 export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   quantity: number;
@@ -55,19 +56,19 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
     return 0;
   }
 
-  if (item.hasPricingPolicyAtReview === false) {
-    return 0;
-  }
-
   const unitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
   });
-  if (unitPrice == null) {
-    return 0;
-  }
 
-  return roundDisplayMoney(unitPrice * effectiveQuantity);
+  return resolveBranchPurchaseLinePayableAmount({
+    branchType: item.branchType,
+    quantity: effectiveQuantity,
+    estimatedLineProductCostKgs:
+      item.estimatedLineProductCostKgs != null ? Number(item.estimatedLineProductCostKgs) : null,
+    unitPriceKgs: unitPrice,
+    hasPricingPolicy: item.hasPricingPolicyAtReview !== false,
+  });
 }
 
 export function sumBranchPurchaseHqReviewLineAmountsKgs(
@@ -135,4 +136,27 @@ export function resolveBranchPurchaseReviewedLineAmountKgs(item: {
     hasPricingPolicyAtReview: item.hasPricingPolicyAtReview,
     branchType: item.branchType,
   });
+}
+
+/**
+ * Lifecycle money invariant: status transitions must not change the authoritative
+ * total unless approved quantity or saved line price/cost intentionally changed.
+ */
+export function assertBranchPurchaseAuthoritativeTotalUnchanged(
+  beforeTotalKgs: number,
+  afterTotalKgs: number,
+  options?: { quantityOrPriceChanged?: boolean },
+): { ok: boolean; beforeKgs: number; afterKgs: number; differenceKgs: number } {
+  const beforeKgs = roundDisplayMoney(Number(beforeTotalKgs ?? 0));
+  const afterKgs = roundDisplayMoney(Number(afterTotalKgs ?? 0));
+  const differenceKgs = roundDisplayMoney(afterKgs - beforeKgs);
+  if (options?.quantityOrPriceChanged) {
+    return { ok: true, beforeKgs, afterKgs, differenceKgs };
+  }
+  return {
+    ok: Math.abs(differenceKgs) <= 0,
+    beforeKgs,
+    afterKgs,
+    differenceKgs,
+  };
 }

@@ -84,18 +84,14 @@ export function hqReviewEffectiveQuantity(item: BranchPurchaseRequestLinePricing
 
 /**
  * HQ Sales review table amount for one line.
- * Always: effectiveQuantity × frozen Цена для филиала.
- * Never prefer stale FIFO/cost persisted in totalAmount when branch price is known.
+ * Prefer persisted authoritative totals (HQ_BRANCH FIFO payable / approvedLineTotalKgs).
+ * Fall back to effectiveQuantity × frozen Цена для филиала only when no snapshot exists.
+ * Never overwrite a saved FIFO payable with commercial unit×qty (72 490.50 → 67 870.14).
  */
 export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
   const effectiveQuantity = hqReviewEffectiveQuantity(item);
   if (effectiveQuantity <= 0) {
     return 0;
-  }
-
-  const price = getFrozenBranchPrice(item);
-  if (price != null) {
-    return roundMoney(price * effectiveQuantity);
   }
 
   if (isReviewedBranchPurchaseLine(item)) {
@@ -109,7 +105,12 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
     return roundMoney(Number(item.totalAmount));
   }
 
-  return 0;
+  const price = getFrozenBranchPrice(item);
+  if (price == null) {
+    return 0;
+  }
+
+  return roundMoney(price * effectiveQuantity);
 }
 
 /** HQ Sales order amount: always the sum of all displayed row amounts. */
@@ -143,8 +144,10 @@ export function hqReviewPreviewEffectiveQuantity(
 }
 
 /**
- * Live row Сумма while editing Утв.: draftQty × authoritative branch price.
+ * Live row Сумма while editing Утв.
  * Empty input keeps the previous persisted/requested amount (does not force 0).
+ * When a draft qty equals the current effective qty, keep the persisted authoritative total
+ * so HQ_BRANCH FIFO payable is not replaced by commercial unit×qty during typing.
  */
 export function hqReviewPreviewLineAmount(
   item: BranchPurchaseRequestLinePricing,
@@ -166,6 +169,9 @@ export function hqReviewPreviewLineAmount(
   const qty = Math.max(Number(raw), 0);
   if (qty <= 0) {
     return 0;
+  }
+  if (qty === hqReviewEffectiveQuantity(item)) {
+    return hqReviewLineAmount(item);
   }
   const price = getFrozenBranchPrice(item);
   if (price == null) {
@@ -205,9 +211,8 @@ export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePric
 }
 
 /**
- * Authoritative branch order line total.
- * Before and after HQ Sales review: effective quantity × frozen Цена для филиала.
- * Never prefer stale FIFO/cost stored in totalAmount when branch price is known.
+ * Authoritative branch order line total — same rules as HQ Sales after review.
+ * Before HQ Sales review, prefer persisted API totalAmount when present (FIFO payable for HQ_BRANCH).
  */
 export function branchOrderLineTotal(
   item: BranchPurchaseRequestLinePricing,
@@ -216,16 +221,25 @@ export function branchOrderLineTotal(
   const pendingHqReview =
     options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
   if (pendingHqReview && !options?.reviewed) {
+    if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+      return roundMoney(Number(item.totalAmount));
+    }
     return pendingBranchReviewLineTotal(item);
   }
   return hqReviewLineAmount(item);
 }
 
-/** Authoritative branch order total — always equals sum of displayed line totals. */
+/** Authoritative branch order total — matches HQ Sales / API `totalEstimatedAmount`. */
 export function branchOrderTotal(
   items: BranchPurchaseRequestLinePricing[],
   options?: BranchOrderTotalOptions,
 ): number {
+  if (options?.reviewed) {
+    const header = options.totalEstimatedAmount;
+    if (header != null && Number.isFinite(Number(header)) && Number(header) > 0) {
+      return roundMoney(Number(header));
+    }
+  }
   return roundMoney(items.reduce((sum, item) => sum + branchOrderLineTotal(item, options), 0));
 }
 
@@ -268,25 +282,29 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
 }
 
 /**
- * Row total for NEW/DRAFT create form:
- * displayed quantity × displayed Цена для филиала.
- * Do not use FIFO/landed `authoritativeLineTotalKgs` here — that field can disagree with the
- * unit price shown in the same row (e.g. 630.15 vs 2 × 1963.59).
+ * Row total for NEW/DRAFT create form.
+ * Prefer backend authoritative lineTotalKgs when present (HQ_BRANCH FIFO payable).
+ * Otherwise: displayed quantity × displayed Цена для филиала.
  */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
+  const authoritative = line.authoritativeLineTotalKgs;
+  if (
+    !line.priceResolving &&
+    authoritative != null &&
+    Number.isFinite(Number(authoritative)) &&
+    Number(authoritative) > 0
+  ) {
+    return roundMoney(Number(authoritative));
+  }
   const price = getDraftFormBranchPrice(line);
   const qty = parseDraftFormQuantity(line.quantity);
   if (price != null && qty > 0) {
     return roundMoney(qty * price);
   }
-  const authoritative = line.authoritativeLineTotalKgs;
-  if (authoritative != null && Number.isFinite(Number(authoritative)) && Number(authoritative) > 0) {
-    return roundMoney(Number(authoritative));
-  }
   return 0;
 }
 
-/** Bottom total for NEW/DRAFT form: sum of current row totals (qty × branch price). */
+/** Bottom total for NEW/DRAFT form: sum of current authoritative row totals. */
 export function draftFormOrderTotal(lines: DraftFormLinePricing[]): number {
   return roundMoney(lines.reduce((sum, line) => sum + draftFormLineTotal(line), 0));
 }

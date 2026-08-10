@@ -101,11 +101,11 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /getBranchOrderDisplayQuantity/);
   });
 
-  it('create and draft product table derives totals from quantity times branch price', () => {
+  it('create and draft product table prefers authoritative lineTotalKgs when present', () => {
     assert.match(listPage, /draftFormLineTotal\(line\)/);
     assert.match(listPage, /draftFormOrderTotal\(lines\)/);
-    assert.match(listPage, /authoritativeLineTotalKgs: null/);
-    assert.match(listPage, /Do not store FIFO/);
+    assert.match(listPage, /authoritativeLineTotalKgs/);
+    assert.match(listPage, /lineTotalKgs/);
   });
 
   it('create order form hides branch and branch warehouse selectors for branch sales manager', () => {

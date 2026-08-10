@@ -3,10 +3,15 @@ import { canManageOwnBranchProductRequest } from '../rbac/rbac';
 import type { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.util';
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
-import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 import {
+  resolveBranchPurchaseEstimatedAmountKgs,
+  shouldTransferBranchPurchaseAtCost,
+} from './branch-purchase-estimated-amount.util';
+import {
+  resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
   resolveBranchPurchaseCommercialLineTotalKgs,
+  sumBranchPurchaseBranchLineTotalsKgs,
   sumBranchPurchaseCommercialLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
@@ -123,6 +128,7 @@ export function toBranchPurchaseRequestResponse<T extends {
   branchType?: string | null;
 }>(request: T) {
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
+  const transferAtCost = shouldTransferBranchPurchaseAtCost(branchType);
   const orderedItems = sortBranchPurchaseRequestItems(request.items);
   const items = orderedItems.map((rawItem) => {
     const item = toBranchPurchaseRequestItemResponse(
@@ -169,11 +175,15 @@ export function toBranchPurchaseRequestResponse<T extends {
           : 0;
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
-  // Authoritative Сумма заказа = SUM of commercial line totals (effectiveQty × branch price).
-  // Never substitute FIFO product cost into the order total shown as Сумма заказа.
+  // Shared authoritative order total: HQ_BRANCH = Σ FIFO payable; else Σ commercial lines.
   const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
-  const totalEstimatedAmount =
-    computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount);
+  const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
+    branchType,
+    totalProductCostKgs: transferAtCost ? totalProductCostKgs : computedOrderTotal,
+    lineProductCosts: items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+    storedEstimatedAmountKgs:
+      computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount),
+  });
 
   return {
     ...request,
@@ -381,8 +391,10 @@ export function sanitizeBranchPurchaseRequest<T extends {
   );
   const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
 
-  // HQ_BRANCH: always commercial Сумма (effectiveQty × frozen branch price) for branch users.
-  // FIFO cost fields are stripped; never exposed as line/order Сумма.
+  // HQ_BRANCH at-cost: after HQ review, branch users see the same FIFO payable totals as HQ Sales.
+  // Cost field names are stripped; Сумма itself remains the authoritative FIFO payable amount.
+  // Before HQ Sales review, create/submit display may still show qty × branch price for the unit column,
+  // but order/line Сумма follows the shared presenter totals (FIFO payable) so BA never drifts.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
@@ -390,14 +402,21 @@ export function sanitizeBranchPurchaseRequest<T extends {
           branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
         });
+        const fifoLineTotal = roundDisplayMoney(
+          Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
+        );
         const lineTotal =
-          pendingHqSalesReview || !reviewed
-            ? resolveBranchPurchaseCommercialLineTotalKgs({
-                quantity: item.quantity,
-                branchPurchasePriceKgs: branchUnitPrice,
-                resolvedBranchPriceKgs: branchUnitPrice,
-              })
-            : roundDisplayMoney(Number(fullItem?.totalAmount ?? item.totalAmount ?? 0));
+          pendingHqSalesReview && !reviewed
+            ? fifoLineTotal > 0
+              ? fifoLineTotal
+              : resolveBranchPurchaseBranchLineTotalKgs({
+                  quantity: item.quantity,
+                  branchPurchasePriceKgs: branchUnitPrice,
+                  resolvedBranchPriceKgs: branchUnitPrice,
+                  totalAmount: 0,
+                  transferAtCost: false,
+                })
+            : fifoLineTotal;
         return {
           id: item.id,
           productId: item.productId,
@@ -447,12 +466,17 @@ export function sanitizeBranchPurchaseRequest<T extends {
       });
 
     const branchOrderTotal =
-      pendingHqSalesReview || !reviewed
-        ? sumBranchPurchaseCommercialLineTotalsKgs(
-            sanitizedItems.map((item) => ({
-              quantity: item.quantity,
-              branchPurchasePriceKgs: item.branchPurchasePriceKgs,
-            })),
+      pendingHqSalesReview && !reviewed
+        ? roundDisplayMoney(
+            Number(full.totalEstimatedAmount ?? 0) > 0
+              ? Number(full.totalEstimatedAmount)
+              : sumBranchPurchaseBranchLineTotalsKgs(
+                  sanitizedItems.map((item) => ({
+                    quantity: item.quantity,
+                    branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+                    totalAmount: item.totalAmount,
+                  })),
+                ),
           )
         : full.totalEstimatedAmount;
 

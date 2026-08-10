@@ -7,22 +7,31 @@ import {
   repairBranchPurchaseRequestDerivedTotalsInTx,
 } from './branch-purchase-totals-repair.util';
 import { sanitizeBranchPurchaseRequest, toBranchPurchaseRequestResponse } from './branch-purchase-request.presenter';
+import {
+  assertBranchPurchaseAuthoritativeTotalUnchanged,
+  computeBranchPurchaseHqReviewLineAmountKgs,
+} from './branch-purchase-review-totals.util';
 
-/** Stale DB pattern: FIFO cost leaked into totals vs commercial qty × branch price. */
-const COMMERCIAL_LINE_TOTAL = 67870.14; // 2 × 33935.07
-const STALE_FIFO_LINE = 72490.5;
+/** BPR-1786349778733 / cmsmxivrr0055zueq2pl50udj pattern */
+const AUTHORITATIVE_FIFO_TOTAL = 72490.5;
+const WRONG_COMMERCIAL_TOTAL = 67870.14; // 2 × 33935.07
 const DISPLAY_UNIT = 33935.07;
 const EFFECTIVE_QTY = 2;
 
-function buildStaleHqBranchReviewedOrder() {
+function buildHqBranchReviewedOrder(overrides?: {
+  totalEstimatedAmount?: number;
+  lineTotalAmount?: number;
+  approvedLineTotalKgs?: number | null;
+  status?: BranchPurchaseRequestStatus;
+}) {
   return {
     id: 'cmsmxivrr0055zueq2pl50udj',
-    requestNumber: 'BPR-STALE-PARITY',
-    status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+    requestNumber: 'BPR-1786349778733',
+    status: overrides?.status ?? BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
     reviewedAt: new Date(),
-    totalEstimatedAmount: STALE_FIFO_LINE, // stale FIFO order total after wrong approve
+    totalEstimatedAmount: overrides?.totalEstimatedAmount ?? WRONG_COMMERCIAL_TOTAL,
     transportCostKgs: 0,
-    branch: { branchType: 'HQ_BRANCH' },
+    branch: { branchType: 'HQ_BRANCH', name: 'Test HQ Branch', code: 'HQB' },
     items: [
       {
         id: 'line-reducer',
@@ -33,79 +42,76 @@ function buildStaleHqBranchReviewedOrder() {
         approvedQuantity: EFFECTIVE_QTY,
         lineStatus: 'APPROVED',
         unit: 'pcs',
-        estimatedLineProductCostKgs: STALE_FIFO_LINE,
+        estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_TOTAL,
         resolvedBranchPriceKgs: DISPLAY_UNIT,
-        totalAmount: STALE_FIFO_LINE, // stale FIFO line total
-        approvedLineTotalKgs: STALE_FIFO_LINE,
+        totalAmount: overrides?.lineTotalAmount ?? WRONG_COMMERCIAL_TOTAL,
+        approvedLineTotalKgs:
+          overrides?.approvedLineTotalKgs === undefined
+            ? WRONG_COMMERCIAL_TOTAL
+            : overrides.approvedLineTotalKgs,
         hasPricingPolicyAtSubmit: true,
+        hasPricingPolicyAtReview: true,
       },
     ],
   };
 }
 
-describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)', () => {
-  it('SUBMITTED_TO_HQ create/list/detail use commercial qty × branch price', () => {
-    const createFormTotal = COMMERCIAL_LINE_TOTAL; // 2 × 33935.07
-    const request = {
-      id: 'cmsmxivrr0055zueq2pl50udj',
-      requestNumber: 'BPR-SUBMITTED-LIST',
-      status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
-      reviewedAt: null,
-      totalEstimatedAmount: STALE_FIFO_LINE, // stale FIFO header after wrong submit
-      transportCostKgs: 0,
-      branch: { branchType: 'HQ_BRANCH' },
-      items: [
-        {
-          id: 'line-reducer',
-          productId: 'prod-reducer',
-          sku: 'RED-18',
-          productName: 'Редуктор 23 зуб 5 кг',
-          quantity: EFFECTIVE_QTY,
-          unit: 'pcs',
-          estimatedLineProductCostKgs: STALE_FIFO_LINE,
-          resolvedBranchPriceKgs: DISPLAY_UNIT,
-          totalAmount: STALE_FIFO_LINE, // stale FIFO line total
-          hasPricingPolicyAtSubmit: true,
-        },
-      ],
-    };
-    const parity = assertBranchPurchaseRequestTotalParity(request);
-    assert.equal(parity.hqSalesTotalKgs, createFormTotal);
-    assert.equal(parity.branchManagerTotalKgs, createFormTotal);
-    assert.equal(parity.lineSumKgs, createFormTotal);
-    assert.notEqual(parity.branchManagerTotalKgs, STALE_FIFO_LINE);
-  });
-
-  it('explains 4620.36 as FIFO minus commercial unit×qty (FIFO must not be Сумма)', () => {
+describe('BPR-1786349778733 order total parity (FIFO payable authoritative)', () => {
+  it('explains 4620.36 as commercial unit×qty minus must-not-use-for-Сумма drift source', () => {
     const commercial = roundDisplayMoney(DISPLAY_UNIT * EFFECTIVE_QTY);
-    assert.equal(commercial, COMMERCIAL_LINE_TOTAL);
-    assert.equal(roundDisplayMoney(STALE_FIFO_LINE - commercial), 4620.36);
+    assert.equal(commercial, WRONG_COMMERCIAL_TOTAL);
+    assert.equal(roundDisplayMoney(AUTHORITATIVE_FIFO_TOTAL - commercial), 4620.36);
   });
 
-  it('presenter aligns HQ Sales and Branch Manager totals after review (commercial)', () => {
-    const request = buildStaleHqBranchReviewedOrder();
+  it('product-level reconciliation: only Редуктор line causes 4620.36', () => {
+    const expectedLine = computeBranchPurchaseHqReviewLineAmountKgs({
+      quantity: EFFECTIVE_QTY,
+      approvedQuantity: EFFECTIVE_QTY,
+      lineStatus: 'APPROVED',
+      resolvedBranchPriceKgs: DISPLAY_UNIT,
+      estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_TOTAL,
+      hasPricingPolicyAtReview: true,
+      branchType: 'HQ_BRANCH',
+    });
+    const wrongCommercial = roundDisplayMoney(DISPLAY_UNIT * EFFECTIVE_QTY);
+    assert.equal(expectedLine, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(roundDisplayMoney(expectedLine - wrongCommercial), 4620.36);
+  });
+
+  it('HQ Sales / Branch Sales / line sum all equal 72490.50 after review', () => {
+    const request = buildHqBranchReviewedOrder({
+      totalEstimatedAmount: AUTHORITATIVE_FIFO_TOTAL,
+      lineTotalAmount: AUTHORITATIVE_FIFO_TOTAL,
+      approvedLineTotalKgs: AUTHORITATIVE_FIFO_TOTAL,
+    });
     const parity = assertBranchPurchaseRequestTotalParity(request);
-
-    assert.equal(parity.hqSalesTotalKgs, COMMERCIAL_LINE_TOTAL);
-    assert.equal(parity.branchManagerTotalKgs, COMMERCIAL_LINE_TOTAL);
-    assert.equal(parity.lineSumKgs, COMMERCIAL_LINE_TOTAL);
-    assert.notEqual(parity.hqSalesTotalKgs, STALE_FIFO_LINE);
+    assert.equal(parity.hqSalesTotalKgs, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(parity.lineSumKgs, AUTHORITATIVE_FIFO_TOTAL);
   });
 
-  it('sanitized branch line total uses commercial qty × branch price not FIFO', () => {
-    const sanitized = sanitizeBranchPurchaseRequest(buildStaleHqBranchReviewedOrder(), true);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, COMMERCIAL_LINE_TOTAL);
-    assert.equal(sanitized.totalEstimatedAmount, COMMERCIAL_LINE_TOTAL);
+  it('presenter does not replace FIFO payable with commercial unit×qty', () => {
+    const request = buildHqBranchReviewedOrder({
+      // Stale commercial header/lines (the BA bug)
+      totalEstimatedAmount: WRONG_COMMERCIAL_TOTAL,
+      lineTotalAmount: WRONG_COMMERCIAL_TOTAL,
+      approvedLineTotalKgs: WRONG_COMMERCIAL_TOTAL,
+    });
+    const full = toBranchPurchaseRequestResponse(request);
+    const sanitized = sanitizeBranchPurchaseRequest(request, true);
+    assert.equal(full.totalEstimatedAmount, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal((full.items[0] as { totalAmount?: number }).totalAmount, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, AUTHORITATIVE_FIFO_TOTAL);
   });
 
-  it('full HQ Sales response uses same authoritative commercial line total', () => {
-    const full = toBranchPurchaseRequestResponse(buildStaleHqBranchReviewedOrder());
-    assert.equal((full.items[0] as { totalAmount?: number }).totalAmount, COMMERCIAL_LINE_TOTAL);
-    assert.equal(full.totalEstimatedAmount, COMMERCIAL_LINE_TOTAL);
-  });
-
-  it('repair persists commercial totals from order-line price snapshots', async () => {
-    const request = buildStaleHqBranchReviewedOrder();
+  it('Branch Accountant API total uses same persisted authoritative header after repair', async () => {
+    const request = buildHqBranchReviewedOrder({
+      status: BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
+      totalEstimatedAmount: WRONG_COMMERCIAL_TOTAL,
+      lineTotalAmount: WRONG_COMMERCIAL_TOTAL,
+      approvedLineTotalKgs: WRONG_COMMERCIAL_TOTAL,
+    });
     const updates: Array<{ id: string; totalAmount: number; approvedLineTotalKgs: number | null }> = [];
     const tx = {
       branch: {
@@ -135,25 +141,61 @@ describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)
     };
 
     const result = await repairBranchPurchaseRequestDerivedTotalsInTx(tx, request.id);
-    assert.equal(result.previousOrderTotalKgs, STALE_FIFO_LINE);
-    assert.equal(result.repairedOrderTotalKgs, COMMERCIAL_LINE_TOTAL);
-    assert.equal(result.lineRepairs.length, 1);
-    assert.equal(result.lineRepairs[0]?.previousKgs, STALE_FIFO_LINE);
-    assert.equal(result.lineRepairs[0]?.repairedKgs, COMMERCIAL_LINE_TOTAL);
-    assert.equal(Number(request.totalEstimatedAmount), COMMERCIAL_LINE_TOTAL);
-    assert.equal(Number(request.items[0]?.totalAmount), COMMERCIAL_LINE_TOTAL);
+    assert.equal(result.previousOrderTotalKgs, WRONG_COMMERCIAL_TOTAL);
+    assert.equal(result.repairedOrderTotalKgs, AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(Number(request.totalEstimatedAmount), AUTHORITATIVE_FIFO_TOTAL);
+    assert.equal(Number(request.items[0]?.totalAmount), AUTHORITATIVE_FIFO_TOTAL);
+
+    // BA listPendingConfirmedOrders returns Number(request.totalEstimatedAmount)
+    const branchAccountantApiTotal = Number(request.totalEstimatedAmount);
+    assert.equal(branchAccountantApiTotal, AUTHORITATIVE_FIFO_TOTAL);
+
+    // leave → reopen (presenter reload)
+    const reopened = toBranchPurchaseRequestResponse(request);
+    assert.equal(reopened.totalEstimatedAmount, AUTHORITATIVE_FIFO_TOTAL);
+    const invariant = assertBranchPurchaseAuthoritativeTotalUnchanged(
+      AUTHORITATIVE_FIFO_TOTAL,
+      Number(reopened.totalEstimatedAmount),
+    );
+    assert.equal(invariant.ok, true);
   });
 
-  it('price snapshot on line is preserved — catalog repricing does not change order unit', () => {
-    const request = buildStaleHqBranchReviewedOrder();
-    const sanitized = sanitizeBranchPurchaseRequest(request, true);
-    assert.equal(
-      (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
-      DISPLAY_UNIT,
-    );
-    assert.equal(
-      (sanitized.items[0] as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
-      undefined,
-    );
+  it('lifecycle status transition alone does not change money', () => {
+    const before = AUTHORITATIVE_FIFO_TOTAL;
+    const afterSameQuantities = AUTHORITATIVE_FIFO_TOTAL;
+    const invariant = assertBranchPurchaseAuthoritativeTotalUnchanged(before, afterSameQuantities);
+    assert.equal(invariant.ok, true);
+    assert.equal(invariant.differenceKgs, 0);
+
+    const drifted = assertBranchPurchaseAuthoritativeTotalUnchanged(before, WRONG_COMMERCIAL_TOTAL);
+    assert.equal(drifted.ok, false);
+    assert.equal(drifted.differenceKgs, -4620.36);
+  });
+
+  it('partial approval uses approved qty FIFO snapshot only', () => {
+    const lineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
+      quantity: 10,
+      approvedQuantity: 6,
+      lineStatus: 'PARTIALLY_APPROVED',
+      resolvedBranchPriceKgs: DISPLAY_UNIT,
+      estimatedLineProductCostKgs: 40000,
+      hasPricingPolicyAtReview: true,
+      branchType: 'HQ_BRANCH',
+    });
+    assert.equal(lineTotal, 40000);
+    assert.notEqual(lineTotal, roundDisplayMoney(DISPLAY_UNIT * 6));
+  });
+
+  it('rejected item contributes 0 at every downstream stage', () => {
+    const lineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
+      quantity: 2,
+      approvedQuantity: 0,
+      lineStatus: 'REJECTED',
+      resolvedBranchPriceKgs: DISPLAY_UNIT,
+      estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_TOTAL,
+      hasPricingPolicyAtReview: true,
+      branchType: 'HQ_BRANCH',
+    });
+    assert.equal(lineTotal, 0);
   });
 });

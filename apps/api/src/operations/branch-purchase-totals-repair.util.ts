@@ -1,7 +1,9 @@
 import { BranchPurchaseRequestStatus } from '@prisma/client';
-import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import { resolveBranchPurchaseEstimatedAmountKgs } from './branch-purchase-estimated-amount.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
+  resolveBranchPurchaseHqReviewEffectiveQuantity,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 import {
@@ -111,8 +113,23 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
     branchType,
   }));
 
-  // Authoritative order total = SUM of commercial line totals (never FIFO product cost).
-  const repairedOrderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(refreshedItems);
+  const orderLineSum = sumBranchPurchaseHqReviewLineAmountsKgs(refreshedItems);
+  const productCostKgs = sumDisplayMoneyTotals(
+    items.map((row) => {
+      const qty = resolveBranchPurchaseHqReviewEffectiveQuantity({
+        quantity: Number(row.quantity ?? 0),
+        approvedQuantity: row.approvedQuantity as number | null | undefined,
+        lineStatus: row.lineStatus as string | null | undefined,
+      });
+      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
+    }),
+  );
+  // HQ_BRANCH: order total = Σ saved FIFO line costs; never commercial unit×qty.
+  const repairedOrderTotalKgs = resolveBranchPurchaseEstimatedAmountKgs({
+    branchType,
+    totalProductCostKgs: productCostKgs,
+    storedEstimatedAmountKgs: orderLineSum,
+  });
 
   await tx.branchPurchaseRequest.update({
     where: { id: requestId },

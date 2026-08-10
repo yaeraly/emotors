@@ -48,6 +48,7 @@ import {
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
 import { SelectPaymentTypeDto } from './dto/select-payment-type.dto';
+import { toBranchPurchaseRequestResponse } from '../operations/branch-purchase-request.presenter';
 import {
   CreateBranchFinanceTransferDto,
   RejectBranchFinanceTransferDto,
@@ -172,7 +173,10 @@ export class BranchAccountantService {
         status: 'BRANCH_CONFIRMED',
         convertedOrderId: { not: null },
       },
-      include: { items: true },
+      include: {
+        items: true,
+        branch: { select: { branchType: true } },
+      },
       orderBy: { branchConfirmedAt: 'desc' },
     });
 
@@ -199,11 +203,13 @@ export class BranchAccountantService {
       })
       .map((request) => {
         const order = request.convertedOrderId ? orderById.get(request.convertedOrderId) : null;
+        // Same shared authoritative total as HQ Sales / Branch Sales (never commercial unit×qty drift).
+        const authoritative = toBranchPurchaseRequestResponse(request);
         return {
           id: request.id,
           requestNumber: request.requestNumber,
           branchConfirmedAt: request.branchConfirmedAt,
-          totalEstimatedAmount: Number(request.totalEstimatedAmount ?? 0),
+          totalEstimatedAmount: Number(authoritative.totalEstimatedAmount ?? 0),
           itemCount: request.items.length,
           distributionOrderId: request.convertedOrderId,
           orderNumber: order?.orderNumber ?? null,

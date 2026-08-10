@@ -1,20 +1,30 @@
 import { PrismaClient } from '@prisma/client';
-import { repairBranchPurchaseRequestDerivedTotalsInTx } from '../src/operations/branch-purchase-totals-repair.util';
 import {
   assertBranchPurchaseRequestTotalParity,
+  repairBranchPurchaseRequestDerivedTotalsInTx,
 } from '../src/operations/branch-purchase-totals-repair.util';
+import {
+  computeBranchPurchaseHqReviewLineAmountKgs,
+  resolveBranchPurchaseHqReviewEffectiveQuantity,
+} from '../src/operations/branch-purchase-review-totals.util';
+import { roundDisplayMoney } from '../src/pricing/product-cost-precision.util';
 
-const requestId = process.argv[2];
-if (!requestId) {
-  console.error('Usage: npx tsx scripts/repair-branch-purchase-request-totals.ts <requestId>');
+const lookup = process.argv[2];
+if (!lookup) {
+  console.error(
+    'Usage: npx tsx scripts/repair-branch-purchase-request-totals.ts <requestId|requestNumber>',
+  );
   process.exit(1);
 }
 
 async function main() {
   const prisma = new PrismaClient();
 
-  const before = await prisma.branchPurchaseRequest.findUnique({
-    where: { id: requestId },
+  const before = await prisma.branchPurchaseRequest.findFirst({
+    where: {
+      deletedAt: null,
+      OR: [{ id: lookup }, { requestNumber: lookup }],
+    },
     include: {
       branch: { select: { id: true, name: true, code: true, branchType: true } },
       items: { orderBy: { position: 'asc' } },
@@ -22,14 +32,16 @@ async function main() {
   });
 
   if (!before) {
-    console.error('ORDER NOT FOUND:', requestId);
+    console.error('ORDER NOT FOUND:', lookup);
     process.exit(1);
   }
 
+  const branchType = before.branch.branchType;
   console.log('=== BEFORE REPAIR ===');
-  console.log('Order ID:', before.id);
-  console.log('Order number:', before.requestNumber);
-  console.log('Branch:', before.branch.name, `(${before.branch.code})`, before.branch.branchType);
+  console.log('BPR ID:', before.id);
+  console.log('BPR number:', before.requestNumber);
+  console.log('Branch:', before.branch.name, `(${before.branch.code})`);
+  console.log('Branch type:', branchType);
   console.log('Status:', before.status);
   console.log('Stored order total:', Number(before.totalEstimatedAmount));
 
@@ -43,20 +55,50 @@ async function main() {
   console.log('Sum sanitized line totals:', parityBefore.lineSumKgs);
   console.log('Presenter parity diff:', parityBefore.hqSalesTotalKgs - parityBefore.branchManagerTotalKgs);
 
+  let authoritativeLineSum = 0;
+  let commercialLineSum = 0;
   for (const item of before.items) {
+    const effectiveQty = resolveBranchPurchaseHqReviewEffectiveQuantity(item);
+    const unit = item.resolvedBranchPriceKgs != null ? Number(item.resolvedBranchPriceKgs) : 0;
+    const commercial = roundDisplayMoney(unit * effectiveQty);
+    const authoritative = computeBranchPurchaseHqReviewLineAmountKgs({
+      quantity: item.quantity,
+      approvedQuantity: item.approvedQuantity,
+      lineStatus: item.lineStatus,
+      resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+      estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+      hasPricingPolicyAtReview: item.hasPricingPolicyAtReview ?? item.hasPricingPolicyAtSubmit,
+      branchType,
+    });
+    authoritativeLineSum = roundDisplayMoney(authoritativeLineSum + authoritative);
+    commercialLineSum = roundDisplayMoney(commercialLineSum + commercial);
+
     console.log('---');
     console.log('Product:', item.productName);
-    console.log('Requested qty:', item.quantity);
-    console.log('Approved qty:', item.approvedQuantity);
-    console.log('Line status:', item.lineStatus);
-    console.log('resolvedBranchPriceKgs:', item.resolvedBranchPriceKgs != null ? Number(item.resolvedBranchPriceKgs) : null);
-    console.log('estimatedLineProductCostKgs:', Number(item.estimatedLineProductCostKgs));
+    console.log('Requested quantity:', item.quantity);
+    console.log('Approved quantity:', item.approvedQuantity);
+    console.log('Effective quantity:', effectiveQty);
+    console.log('Saved order-line branch price:', unit);
+    console.log('Saved FIFO line cost:', Number(item.estimatedLineProductCostKgs ?? 0));
+    console.log('Branch Sales/HQ/BA authoritative line total:', authoritative);
+    console.log('Wrong commercial unit×qty line total:', commercial);
+    console.log('Difference:', roundDisplayMoney(authoritative - commercial));
     console.log('DB totalAmount:', Number(item.totalAmount));
-    console.log('DB approvedLineTotalKgs:', item.approvedLineTotalKgs != null ? Number(item.approvedLineTotalKgs) : null);
+    console.log(
+      'DB approvedLineTotalKgs:',
+      item.approvedLineTotalKgs != null ? Number(item.approvedLineTotalKgs) : null,
+    );
   }
+  console.log('---');
+  console.log('Sum of authoritative current line totals:', authoritativeLineSum);
+  console.log('Sum of wrong commercial line totals:', commercialLineSum);
+  console.log(
+    'Order-level commercial drift:',
+    roundDisplayMoney(authoritativeLineSum - commercialLineSum),
+  );
 
   const repair = await prisma.$transaction((tx) =>
-    repairBranchPurchaseRequestDerivedTotalsInTx(tx, requestId),
+    repairBranchPurchaseRequestDerivedTotalsInTx(tx, before.id),
   );
 
   console.log('');
@@ -69,7 +111,7 @@ async function main() {
   }
 
   const after = await prisma.branchPurchaseRequest.findUnique({
-    where: { id: requestId },
+    where: { id: before.id },
     include: {
       branch: { select: { branchType: true } },
       items: { orderBy: { position: 'asc' } },

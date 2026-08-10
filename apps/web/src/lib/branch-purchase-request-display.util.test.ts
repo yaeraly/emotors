@@ -32,7 +32,7 @@ describe('branch purchase request display totals', () => {
     assert.equal(total, 60000);
   });
 
-  it('pending HQ review: prefers displayed qty × branch price over FIFO totalAmount', () => {
+  it('pending HQ review: prefers persisted authoritative totalAmount over commercial unit×qty', () => {
     const total = requestLineTotal(
       {
         quantity: 2,
@@ -41,29 +41,29 @@ describe('branch purchase request display totals', () => {
       },
       { requestStatus: 'SUBMITTED_TO_HQ' },
     );
-    assert.equal(total, 3927.18);
-    assert.notEqual(total, 630.15);
+    assert.equal(total, 630.15);
+    assert.notEqual(total, 3927.18);
   });
 
-  it('pending HQ review create/list/detail parity for reducer line', () => {
+  it('pending HQ review create/list/detail parity for reducer FIFO line', () => {
     const line = {
       quantity: 2,
       branchPurchasePriceKgs: 1963.59,
       totalAmount: 630.15,
     };
-    assert.equal(requestLineTotal(line, { requestStatus: 'SUBMITTED_TO_HQ' }), 3927.18);
+    assert.equal(requestLineTotal(line, { requestStatus: 'SUBMITTED_TO_HQ' }), 630.15);
     assert.equal(
       requestOrderTotal([line], { requestStatus: 'SUBMITTED_TO_HQ' }),
-      3927.18,
+      630.15,
     );
   });
 
-  it('reviewed order uses commercial qty × branch price even if FIFO persisted', () => {
+  it('reviewed order prefers persisted FIFO payable over commercial unit×qty', () => {
     const line = {
       quantity: 2,
       approvedQuantity: 2,
       branchPurchasePriceKgs: 33935.07,
-      totalAmount: 72490.5, // stale FIFO must not win
+      totalAmount: 72490.5,
       approvedLineTotalKgs: 72490.5,
       lineStatus: 'APPROVED',
     };
@@ -71,13 +71,13 @@ describe('branch purchase request display totals', () => {
     assert.equal(commercial, 67870.14);
     assert.equal(
       branchOrderLineTotal(line, { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true }),
-      67870.14,
+      72490.5,
     );
-    assert.equal(hqReviewLineAmount(line), 67870.14);
-    assert.notEqual(hqReviewLineAmount(line), 72490.5);
+    assert.equal(hqReviewLineAmount(line), 72490.5);
+    assert.notEqual(hqReviewLineAmount(line), 67870.14);
   });
 
-  it('reviewed HQ Sales and Branch Manager order totals match commercial formula', () => {
+  it('reviewed HQ Sales and Branch Manager order totals match FIFO payable 72490.50', () => {
     const items = [
       {
         quantity: 2,
@@ -88,13 +88,17 @@ describe('branch purchase request display totals', () => {
         lineStatus: 'APPROVED',
       },
     ];
-    const options = { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true, totalEstimatedAmount: 67870.14 };
-    assert.equal(hqReviewOrderAmount(items), 67870.14);
-    assert.equal(branchOrderTotal(items, options), 67870.14);
-    assert.equal(branchOrderLineTotal(items[0]!, options), 67870.14);
+    const options = {
+      requestStatus: 'PENDING_BRANCH_CONFIRMATION',
+      reviewed: true,
+      totalEstimatedAmount: 72490.5,
+    };
+    assert.equal(hqReviewOrderAmount(items), 72490.5);
+    assert.equal(branchOrderTotal(items, options), 72490.5);
+    assert.equal(branchOrderLineTotal(items[0]!, options), 72490.5);
   });
 
-  it('reviewed line total prefers qty × branch price over stale FIFO totalAmount', () => {
+  it('reviewed line total prefers persisted FIFO totalAmount over commercial unit×qty', () => {
     assert.equal(
       branchOrderLineTotal(
         {
@@ -102,11 +106,12 @@ describe('branch purchase request display totals', () => {
           approvedQuantity: 2,
           branchPurchasePriceKgs: 33935.07,
           totalAmount: 72490.5,
+          approvedLineTotalKgs: 72490.5,
           lineStatus: 'APPROVED',
         },
         { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true },
       ),
-      67870.14,
+      72490.5,
     );
   });
 
@@ -424,7 +429,7 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('after save, draft matching persisted approved qty uses commercial qty × branch price', () => {
+  it('after save, draft matching persisted approved qty keeps FIFO payable total', () => {
     const reviewed = {
       id: 'line-a',
       quantity: 2,
@@ -436,11 +441,11 @@ describe('branch purchase request display totals', () => {
     };
     assert.equal(
       hqReviewPreviewLineAmount(reviewed, { draftApprovedQuantity: 2, decisionAction: 'APPROVE' }),
-      67870.14,
+      72490.5,
     );
   });
 
-  it('approved reducer line persists commercial 2 × 1963.59 = 3927.18 not FIFO 630.15', () => {
+  it('approved reducer line persists FIFO 630.15 not commercial 2 × 1963.59', () => {
     const line = {
       quantity: 10,
       approvedQuantity: 2,
@@ -449,12 +454,12 @@ describe('branch purchase request display totals', () => {
       approvedLineTotalKgs: 630.15,
       lineStatus: 'APPROVED',
     };
-    assert.equal(hqReviewLineAmount(line), 3927.18);
+    assert.equal(hqReviewLineAmount(line), 630.15);
     assert.equal(
       branchOrderLineTotal(line, { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true }),
-      3927.18,
+      630.15,
     );
-    assert.notEqual(hqReviewLineAmount(line), 630.15);
+    assert.notEqual(hqReviewLineAmount(line), 3927.18);
   });
 
   it('multiple rows calculate independently before HQ review', () => {
@@ -518,7 +523,7 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('create form: qty 2 times branch price 1963.59 is 3927.18 not FIFO 630.15', () => {
+  it('create form: prefers authoritative FIFO lineTotal when present', () => {
     assert.equal(
       draftFormLineTotal({
         productId: 'p1',
@@ -526,7 +531,7 @@ describe('branch purchase request draft form totals', () => {
         branchPurchasePriceKgs: 1963.59,
         authoritativeLineTotalKgs: 630.15,
       }),
-      3927.18,
+      630.15,
     );
     assert.equal(
       draftFormLineTotal({
@@ -573,7 +578,7 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('order total equals sum of qty × branch price rows', () => {
+  it('order total equals sum of authoritative rows when lineTotalKgs present', () => {
     assert.equal(
       draftFormOrderTotal([
         {
@@ -594,7 +599,7 @@ describe('branch purchase request draft form totals', () => {
           branchPurchasePriceKgs: 2500,
         },
       ]),
-      16427.18,
+      4129.15,
     );
   });
 });
