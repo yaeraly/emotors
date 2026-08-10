@@ -8,6 +8,8 @@ import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type ShortageRecord = {
   id: string;
   branchId: string;
@@ -34,7 +36,6 @@ export default function BranchProductShortagesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [filters, setFilters] = useState({
     branchId: '',
     productId: '',
@@ -78,10 +79,10 @@ export default function BranchProductShortagesPage() {
         method: 'POST',
         body: JSON.stringify({ status: 'WAITING_STOCK' }),
       });
-      setSuccess(t('productShortages.reviewed'));
+      toast.success(t('productShortages.reviewed'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -97,10 +98,10 @@ export default function BranchProductShortagesPage() {
         method: 'POST',
         body: JSON.stringify({ procurementOrderId: orderId }),
       });
-      setSuccess(t('productShortages.linked'));
+      toast.success(t('productShortages.linked'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -121,7 +122,6 @@ export default function BranchProductShortagesPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
           <label className="block">

@@ -26,6 +26,8 @@ import {
 import { isHqCashierUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type CashierAccountRow = FinanceAccount & {
   totalIncoming?: number;
   totalOutgoing?: number;
@@ -54,8 +56,6 @@ function FinanceAccountsPageContent() {
   const [reconTarget, setReconTarget] = useState<CashierAccountRow | null>(null);
   const [actualBalanceInput, setActualBalanceInput] = useState('');
   const [reconComment, setReconComment] = useState('');
-  const [reconError, setReconError] = useState('');
-  const [reconSuccess, setReconSuccess] = useState('');
   const [reconSaving, setReconSaving] = useState(false);
 
   const load = () => {
@@ -104,8 +104,8 @@ function FinanceAccountsPageContent() {
     setReconTarget(account);
     setActualBalanceInput(toEditableMoney(systemBalance));
     setReconComment('');
-    setReconError('');
-    setReconSuccess('');
+    /* toast clear */ void 0;
+    /* toast clear */ void 0;
   }
 
   const closeReconciliation = useCallback(() => {
@@ -113,7 +113,7 @@ function FinanceAccountsPageContent() {
     setReconTarget(null);
     setActualBalanceInput('');
     setReconComment('');
-    setReconError('');
+    /* toast clear */ void 0;
   }, [reconSaving]);
 
   async function submitReconciliation(event: FormEvent) {
@@ -122,12 +122,12 @@ function FinanceAccountsPageContent() {
 
     const trimmed = actualBalanceInput.trim();
     if (!trimmed) {
-      setReconError(t('finance.reconciliationActualBalanceRequired'));
+      toast.error(t('finance.reconciliationActualBalanceRequired'));
       return;
     }
     const actual = parseMoneyDecimal(trimmed);
     if (actual == null) {
-      setReconError(t('finance.reconciliationActualBalanceInvalid'));
+      toast.error(t('finance.reconciliationActualBalanceInvalid'));
       return;
     }
 
@@ -136,13 +136,13 @@ function FinanceAccountsPageContent() {
     );
     const difference = calculateReconciliationDifference(actual, systemBalance);
     if (Math.abs(difference) > 0.009 && reconComment.trim().length < 3) {
-      setReconError(t('finance.reconciliationCommentRequired'));
+      toast.error(t('finance.reconciliationCommentRequired'));
       return;
     }
 
     setReconSaving(true);
-    setReconError('');
-    setReconSuccess('');
+    /* toast clear */ void 0;
+    /* toast clear */ void 0;
     try {
       await apiFetch('/finance/reconciliations', {
         method: 'POST',
@@ -155,10 +155,10 @@ function FinanceAccountsPageContent() {
       setReconTarget(null);
       setActualBalanceInput('');
       setReconComment('');
-      setReconSuccess(t('finance.reconciliationSaved'));
+      toast.success(t('finance.reconciliationSaved'));
       load();
     } catch (err) {
-      setReconError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setReconSaving(false);
     }
@@ -186,9 +186,6 @@ function FinanceAccountsPageContent() {
       }
     >
       {error ? <FinanceErrorState message={error} /> : null}
-      {reconSuccess ? (
-        <p className="mb-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reconSuccess}</p>
-      ) : null}
       {!hqCashierView ? (
         <input
           value={search}
@@ -367,7 +364,6 @@ function FinanceAccountsPageContent() {
                 className="w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
-            {reconError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{reconError}</p> : null}
             <div className="flex justify-end gap-2">
               <button
                 type="button"

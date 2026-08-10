@@ -7,6 +7,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Supplier = {
   id: string;
   name: string;
@@ -132,7 +134,7 @@ export default function EditSupplierPage() {
       window.localStorage.setItem('emotors_procurement_success', t('procurement.suppliers.updated'));
       router.push('/procurement/suppliers');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

@@ -18,6 +18,8 @@ import type { PaymentMethod, Sale, SaleItem, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { SaleCustomerOption } from '@/components/SaleCustomerSearch';
 
+import { toast } from '@/lib/toast';
+
 type ReturnReason =
   | 'DEFECTIVE'
   | 'WRONG_PRODUCT'
@@ -150,7 +152,7 @@ export default function NewReturnPage() {
       setSelectedSale(fullSale);
       setItems(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -235,7 +237,7 @@ export default function NewReturnPage() {
       router.push('/returns');
       void created;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }

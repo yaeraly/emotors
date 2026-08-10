@@ -11,6 +11,8 @@ import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type Tab = 'products' | 'stock' | 'movements' | 'inventory' | 'receiving' | 'distribution';
 
 type WarehouseDetail = {
@@ -199,7 +201,7 @@ export default function BranchWarehouseDetailPage() {
       if (tab === 'receiving') setReceivings(await apiFetch(`/branch-warehouses/${params.id}/receivings`));
       if (tab === 'distribution') setDistribution(await apiFetch(`/branch-warehouses/${params.id}/distribution`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -210,7 +212,7 @@ export default function BranchWarehouseDetailPage() {
         const branchList = await apiFetch<BranchOption[]>('/branches');
         setBranches(branchList);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('common.error'));
+        toast.error(err instanceof Error ? err.message : t('common.error'));
       }
     }
   }
@@ -226,7 +228,7 @@ export default function BranchWarehouseDetailPage() {
       window.localStorage.setItem('emotors_warehouse_success', t('branchWarehouse.updatedSuccess'));
       router.push('/branch-warehouses');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -255,7 +257,7 @@ export default function BranchWarehouseDetailPage() {
       router.push('/branch-warehouses');
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(message.includes('Internal Server Error') ? t('common.error') : message);
+      toast.error(message.includes('Internal Server Error') ? t('common.error') : message);
     } finally {
       setDeleting(false);
     }

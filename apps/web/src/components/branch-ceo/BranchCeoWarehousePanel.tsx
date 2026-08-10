@@ -20,6 +20,8 @@ import type { SortDirection } from '@/lib/warehouse-list-utils';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const PAGE_SIZE = 10;
 
 type WarehouseDetail = {
@@ -94,7 +96,7 @@ export function BranchCeoWarehousePanel({ showHeader = true }: { showHeader?: bo
       const stock = await apiFetch<StockRow[]>(`/branch-ceo/warehouse/${warehouseResult.id}/products`);
       setProducts(stock);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -184,9 +186,9 @@ export function BranchCeoWarehousePanel({ showHeader = true }: { showHeader?: bo
       });
       setWarehouse(updated);
       setEditing(false);
-      setSuccess(t('branchCeo.warehouseUpdated'));
+      toast.success(t('branchCeo.warehouseUpdated'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

@@ -7,6 +7,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Settings = {
   id: string;
   baseCalculationSource: string;
@@ -60,7 +62,6 @@ export default function PricingSettingsPage() {
   const [loyalty, setLoyalty] = useState<LoyaltySettings | null>(null);
   const [loyaltyDraft, setLoyaltyDraft] = useState<Partial<LoyaltySettings>>({});
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingLoyalty, setSavingLoyalty] = useState(false);
 
@@ -87,7 +88,7 @@ export default function PricingSettingsPage() {
     if (!canManage) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<Settings>('/pricing/settings', {
         method: 'PUT',
@@ -104,9 +105,9 @@ export default function PricingSettingsPage() {
       });
       setSettings(updated);
       setDraft(updated);
-      setSuccess(t('pricing.settingsSaved'));
+      toast.success(t('pricing.settingsSaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -116,7 +117,7 @@ export default function PricingSettingsPage() {
     if (!canManage) return;
     setSavingLoyalty(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<LoyaltySettings>('/pricing/loyalty-settings', {
         method: 'PUT',
@@ -153,9 +154,9 @@ export default function PricingSettingsPage() {
       });
       setLoyalty(updated);
       setLoyaltyDraft(updated);
-      setSuccess(t('pricing.loyaltySaved'));
+      toast.success(t('pricing.loyaltySaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingLoyalty(false);
     }
@@ -165,7 +166,6 @@ export default function PricingSettingsPage() {
     <>
       <PricingHubNav activeTab="settings" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <p className="text-sm text-slate-600">{t('pricing.settingsHint')}</p>
 
       {settings ? (

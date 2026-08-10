@@ -7,6 +7,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type DraftVersion = { id: string; label: string; versionNumber: number; status: string };
 type Simulation = {
   id: string;
@@ -65,7 +67,7 @@ export default function PricingSimulationPage() {
       });
       setSimulation(sim);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }

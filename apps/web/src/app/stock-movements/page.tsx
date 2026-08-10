@@ -8,6 +8,8 @@ import { canCreateStockMovement } from '@/lib/rbac';
 import type { Product, ProductListResponse, StockMovement, StockMovementType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const movementTypes: StockMovementType[] = [
   'IN',
   'OUT',
@@ -57,7 +59,7 @@ export default function StockMovementsPage() {
         warehouseId: current.warehouseId || warehouseResult[0]?.id || '',
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -78,7 +80,7 @@ export default function StockMovementsPage() {
       setForm((current) => ({ ...current, quantity: '1', note: '' }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

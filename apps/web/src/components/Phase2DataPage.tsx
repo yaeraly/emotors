@@ -11,6 +11,8 @@ import {
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Phase2DataPageProps = {
   titleKey: string;
   descriptionKey?: string;
@@ -53,7 +55,7 @@ export function Phase2DataPage({
     try {
       setData(await apiFetch(endpoint));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -81,7 +83,7 @@ export function Phase2DataPage({
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

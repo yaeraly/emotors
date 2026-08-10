@@ -7,6 +7,8 @@ import { isValidCategoryCodePrefix } from '@/lib/product-code-utils';
 import type { ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const emptyForm = {
   code: '',
   nameKy: '',
@@ -42,7 +44,7 @@ export function CategoriesListContent({
   useEffect(() => {
     const message = window.localStorage.getItem('emotors_category_success');
     if (message) {
-      setSuccess(message);
+      toast.success(message);
       window.localStorage.removeItem('emotors_category_success');
     }
     apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => setCurrentUser(null));
@@ -62,7 +64,7 @@ export function CategoriesListContent({
         ),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -86,14 +88,14 @@ export function CategoriesListContent({
           body: JSON.stringify(form),
         });
         window.localStorage.setItem('emotors_category_success', t('inventory.categoryCreated'));
-        setSuccess(t('inventory.categoryCreated'));
+        toast.success(t('inventory.categoryCreated'));
       }
       setEditing(null);
       setForm(emptyForm);
       onCreateFormOpenChange?.(false);
       await loadCategories();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -106,7 +108,7 @@ export function CategoriesListContent({
       });
       await loadCategories();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

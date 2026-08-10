@@ -13,6 +13,8 @@ import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
@@ -26,7 +28,6 @@ export default function UserDetailPage() {
   const [showCreateLogin, setShowCreateLogin] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteSuccess, setDeleteSuccess] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', email: '', password: '' });
   const [cashierEnabled, setCashierEnabled] = useState(false);
   const [cashierSaving, setCashierSaving] = useState(false);
@@ -84,7 +85,7 @@ export default function UserDetailPage() {
         password: '',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -102,7 +103,7 @@ export default function UserDetailPage() {
       setCashierEnabled(enabled);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setCashierSaving(false);
     }
@@ -122,7 +123,7 @@ export default function UserDetailPage() {
       }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -135,7 +136,7 @@ export default function UserDetailPage() {
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(path === 'reset-password' && message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
+      toast.error(path === 'reset-password' && message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
     }
   }
 
@@ -155,7 +156,7 @@ export default function UserDetailPage() {
       setShowCreateLogin(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -175,9 +176,9 @@ export default function UserDetailPage() {
         window.location.href = '/users';
         return;
       }
-      setDeleteSuccess(result.message ?? t('lifecycle.userDeactivatedSuccess'));
+      toast.success(result.message ?? t('lifecycle.userDeactivatedSuccess'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeleteLoading(false);
     }
@@ -225,7 +226,6 @@ export default function UserDetailPage() {
           ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {deleteSuccess ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{deleteSuccess}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
         <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <Input label={t('crm.fullName')} value={form.fullName} onChange={(value) => setField('fullName', value)} />

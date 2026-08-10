@@ -9,6 +9,8 @@ import {
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type ReportResponse = {
   generatedAt: string;
   rows: Array<Record<string, unknown>>;
@@ -35,7 +37,7 @@ export default function FranchiseDirectorReportsPage() {
       setData(await apiFetch<ReportResponse>(`/franchise-director/reports?${params.toString()}`));
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

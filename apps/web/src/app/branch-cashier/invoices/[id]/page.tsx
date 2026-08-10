@@ -26,6 +26,8 @@ import {
 import { translateStatus } from '@/lib/translate-status';
 import type { BranchAccountantInvoice, BranchPaymentMethod } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type RowAccountState = {
   resolution: BranchCashierReceivingAccountResolution | null;
   loading: boolean;
@@ -39,7 +41,6 @@ export default function BranchCashierInvoiceDetailPage() {
   const [accountState, setAccountState] = useState<Record<string, RowAccountState>>({});
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
 
@@ -117,7 +118,7 @@ export default function BranchCashierInvoiceDetailPage() {
         ...current,
         [row.id]: { resolution: null, loading: false },
       }));
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -128,7 +129,7 @@ export default function BranchCashierInvoiceDetailPage() {
       setRows(createInitialPaymentRows());
       setAccountState({});
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -154,7 +155,7 @@ export default function BranchCashierInvoiceDetailPage() {
     event.preventDefault();
     if (!canSubmit || submitting) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     if ('error' in paymentPreview) {
       setError(paymentPreview.error);
@@ -201,12 +202,12 @@ export default function BranchCashierInvoiceDetailPage() {
       idempotencyKeyRef.current = null;
 
       if (updated.workflowStatus === 'PAID' || Number(updated.remainingAmount) <= 0.009) {
-        setSuccess(t('branchCashier.paymentAcceptedInvoicePaid'));
+        toast.success(t('branchCashier.paymentAcceptedInvoicePaid'));
       } else {
-        setSuccess(t('branchCashier.paymentAcceptedInstallmentPartial'));
+        toast.success(t('branchCashier.paymentAcceptedInstallmentPartial'));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -225,7 +226,6 @@ export default function BranchCashierInvoiceDetailPage() {
           </Link>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {invoice ? (
           <>
             <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">

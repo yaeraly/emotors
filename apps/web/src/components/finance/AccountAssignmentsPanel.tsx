@@ -7,6 +7,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type CashierEmployee = {
   id: string;
   fullName: string;
@@ -58,7 +60,7 @@ export function AccountAssignmentsPanel({
       setForm({ userId: '', isPrimary: false });
       onUpdated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   };
 
@@ -68,7 +70,7 @@ export function AccountAssignmentsPanel({
       await apiFetch(`/finance/accounts/${account.id}/unassign/${userId}`, { method: 'POST' });
       onUpdated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   };
 

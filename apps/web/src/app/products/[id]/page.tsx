@@ -29,6 +29,8 @@ type SuggestedProductCode = {
 };
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function ProductDetailPage() {
   const { t, language } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -50,7 +52,6 @@ export default function ProductDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [unitError, setUnitError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showPurchasePriceHistory, setShowPurchasePriceHistory] = useState(false);
   const [purchasePriceForm, setPurchasePriceForm] = useState({
@@ -67,7 +68,7 @@ export default function ProductDetailPage() {
   useEffect(() => {
     const success = window.localStorage.getItem('emotors_product_success');
     if (success) {
-      setSuccessMessage(success);
+      toast.success(success);
       window.localStorage.removeItem('emotors_product_success');
     }
   }, []);
@@ -156,7 +157,7 @@ export default function ProductDetailPage() {
     setSaving(true);
     setError('');
     setUnitError('');
-    setSuccessMessage('');
+    /* toast clear */ void 0;
 
     try {
       if (!editForm.categoryId) {
@@ -219,13 +220,13 @@ export default function ProductDetailPage() {
         weightKg: String(updated.weightKg),
         minStockLevel: String(updated.minStockLevel),
       });
-      setSuccessMessage(t('inventory.productUpdatedSuccess'));
+      toast.success(t('inventory.productUpdatedSuccess'));
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('inactive warehouse')) {
-        setError(t('inventory.cannotAssignInactiveWarehouse'));
+        toast.error(t('inventory.cannotAssignInactiveWarehouse'));
       } else {
-        setError(message);
+        toast.error(message);
       }
     } finally {
       setSaving(false);
@@ -236,7 +237,7 @@ export default function ProductDetailPage() {
     event.preventDefault();
     setPriceSaving(true);
     setError('');
-    setSuccessMessage('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<Product>(`/inventory/products/${params.id}/purchase-price`, {
         method: 'PUT',
@@ -252,9 +253,9 @@ export default function ProductDetailPage() {
         purchasePriceYuan: String(updated.purchasePriceYuan),
         note: '',
       }));
-      setSuccessMessage(t('common.success'));
+      toast.success(t('common.success'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPriceSaving(false);
     }
@@ -265,7 +266,6 @@ export default function ProductDetailPage() {
       <section className="space-y-6">
         <Link href="/products" className="text-sm font-semibold text-blue-700">{t('inventory.products')}</Link>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {successMessage ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p> : null}
         {product ? (
           <>
             <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

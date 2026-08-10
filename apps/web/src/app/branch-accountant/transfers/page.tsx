@@ -6,12 +6,13 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
 import type { FinanceTransfer } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 export default function BranchAccountantTransfersPage() {
   const { t } = useTranslation();
   const [transfers, setTransfers] = useState<FinanceTransfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [rejectTarget, setRejectTarget] = useState<FinanceTransfer | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export default function BranchAccountantTransfersPage() {
       const data = await apiFetch<FinanceTransfer[]>('/branch-accountant/transfers');
       setTransfers(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -37,16 +38,16 @@ export default function BranchAccountantTransfersPage() {
   async function approveTransfer(transfer: FinanceTransfer) {
     setProcessingId(transfer.id);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/branch-accountant/transfers/${transfer.id}/approve`, {
         method: 'POST',
         body: JSON.stringify({ expectedVersion: transfer.version }),
       });
-      setSuccess(t('branchAccountant.transferApproved'));
+      toast.success(t('branchAccountant.transferApproved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setProcessingId(null);
     }
@@ -57,7 +58,7 @@ export default function BranchAccountantTransfersPage() {
     if (!rejectTarget) return;
     setProcessingId(rejectTarget.id);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/branch-accountant/transfers/${rejectTarget.id}/reject`, {
         method: 'POST',
@@ -68,10 +69,10 @@ export default function BranchAccountantTransfersPage() {
       });
       setRejectTarget(null);
       setRejectReason('');
-      setSuccess(t('branchAccountant.transferRejected'));
+      toast.success(t('branchAccountant.transferRejected'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setProcessingId(null);
     }
@@ -86,7 +87,6 @@ export default function BranchAccountantTransfersPage() {
         <h2 className="text-3xl font-bold">{t('branchAccountant.accountTransfersReview')}</h2>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <TransferTable
           title={t('branchAccountant.pendingTransfers')}

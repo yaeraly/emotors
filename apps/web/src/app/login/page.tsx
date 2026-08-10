@@ -8,12 +8,13 @@ import { getDefaultRouteForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function LoginPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [email, setEmail] = useState('owner@emotors.kg');
   const [password, setPassword] = useState('password123');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -26,7 +27,6 @@ export default function LoginPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError('');
     setLoading(true);
 
     try {
@@ -35,7 +35,7 @@ export default function LoginPage() {
       setCachedUser(response.user);
       router.replace(response.user.mustChangePassword ? '/change-password' : getDefaultRouteForUser(response.user));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.invalidCredentials'));
+      toast.error(err instanceof Error ? err.message : t('auth.invalidCredentials'));
     } finally {
       setLoading(false);
     }
@@ -87,12 +87,6 @@ export default function LoginPage() {
             required
           />
         </label>
-
-        {error ? (
-          <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </p>
-        ) : null}
 
         <button
           disabled={loading}

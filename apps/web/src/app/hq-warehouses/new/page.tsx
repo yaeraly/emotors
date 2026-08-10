@@ -9,6 +9,8 @@ import { canManageHqWarehouse, hasFullAccess } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function NewHqWarehousePage() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -80,7 +82,7 @@ export default function NewHqWarehousePage() {
       window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.createdSuccess'));
       router.push('/hq-warehouses');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

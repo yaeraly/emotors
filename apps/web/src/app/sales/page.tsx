@@ -14,6 +14,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { formatKgsTableWhole } from '@/lib/money';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
 
 export default function SalesPage() {
@@ -68,7 +70,7 @@ export default function SalesPage() {
       setSales(salesResult);
       setReport(reportResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -79,15 +81,15 @@ export default function SalesPage() {
 
     setDeleting(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       await apiFetch(`/sales/${deleteTarget.id}/installment-draft`, { method: 'DELETE' });
       setSales((current) => current.filter((row) => row.id !== deleteTarget.id));
       setDeleteTarget(null);
-      setSuccess(t('sales.installmentDraftDeleted'));
+      toast.success(t('sales.installmentDraftDeleted'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeleting(false);
     }

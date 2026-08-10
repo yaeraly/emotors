@@ -20,6 +20,8 @@ import { BRANCH_WAREHOUSE_INVENTORY_BASE, branchWarehouseInventoryPath } from '@
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const inventoryTypes: InventoryCountType[] = [
   'FULL_WAREHOUSE',
   'CATEGORY',
@@ -163,7 +165,7 @@ export default function NewInventoryCountPage() {
           : `/inventory/count/${session.id}`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }

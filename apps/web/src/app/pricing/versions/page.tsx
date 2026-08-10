@@ -8,6 +8,8 @@ import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type PolicyVersion = {
   id: string;
   versionNumber: number;
@@ -26,7 +28,6 @@ export default function PricingVersionsPage() {
   const [activeVersion, setActiveVersion] = useState<PolicyVersion | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
 
   const canManage = canManagePricingPolicy(user);
@@ -53,10 +54,10 @@ export default function PricingVersionsPage() {
     setError('');
     try {
       await apiFetch('/pricing/versions', { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.versionCreated'));
+      toast.success(t('pricing.versionCreated'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -68,10 +69,10 @@ export default function PricingVersionsPage() {
     setError('');
     try {
       await apiFetch(`/pricing/versions/${id}/publish`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.versionPublished'));
+      toast.success(t('pricing.versionPublished'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -83,10 +84,10 @@ export default function PricingVersionsPage() {
     setError('');
     try {
       await apiFetch(`/pricing/versions/${id}/rollback`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.versionRolledBack'));
+      toast.success(t('pricing.versionRolledBack'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -96,7 +97,7 @@ export default function PricingVersionsPage() {
     if (!canManage) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const report = await apiFetch<{
         valid: boolean;
@@ -105,7 +106,7 @@ export default function PricingVersionsPage() {
         issues: Array<{ code: string; message: string; severity: string }>;
       }>(`/pricing/versions/${id}/validate`, { method: 'POST', body: JSON.stringify({}) });
       if (report.valid) {
-        setSuccess(t('pricing.validationPassed'));
+        toast.success(t('pricing.validationPassed'));
       } else {
         setError(
           `${t('pricing.validationFailed')}: ${report.issues
@@ -116,7 +117,7 @@ export default function PricingVersionsPage() {
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -126,7 +127,6 @@ export default function PricingVersionsPage() {
     <>
       <PricingHubNav activeTab="versions" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <p className="text-xs text-slate-500">{t('pricing.versionsHint')}</p>
 
       {activeVersion ? (

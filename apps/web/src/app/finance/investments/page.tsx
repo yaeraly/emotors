@@ -13,6 +13,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { canCreateOwnerInvestment, canManageFinanceInvestments } from '@/lib/finance-rbac';
 import type { FinanceAccount, FinanceInvestment, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type InvestmentForm = {
   accountId: string;
   amount: string;
@@ -78,7 +80,7 @@ export default function FinanceInvestmentsPage() {
       setAccounts(accountRows);
       setInvestments(investmentRows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   };
 
@@ -136,7 +138,7 @@ export default function FinanceInvestmentsPage() {
       resetForm();
       await load(showDeleted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -160,7 +162,7 @@ export default function FinanceInvestmentsPage() {
       if (editingId === deleteTarget.id) resetForm();
       await load(showDeleted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeleting(false);
     }

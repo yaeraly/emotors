@@ -16,6 +16,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type BranchOption = { id: string; name: string; code?: string; branchType: string };
 
 type FranchiseSalesRow = FranchiseSalesCatalogRow;
@@ -86,7 +88,6 @@ export default function PricingBranchesPage() {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
-  const [success, setSuccess] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -135,7 +136,7 @@ export default function PricingBranchesPage() {
       );
       setPage(1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
       setWarning('');
       setRows([]);
       setCategories([]);
@@ -174,7 +175,7 @@ export default function PricingBranchesPage() {
       }
     } catch (err) {
       setLoading(false);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -200,12 +201,6 @@ export default function PricingBranchesPage() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
-
-  useEffect(() => {
-    if (!success) return;
-    const timer = window.setTimeout(() => setSuccess(''), 3000);
-    return () => window.clearTimeout(timer);
-  }, [success]);
 
   function updateRow(productId: string, draftMarkup: number) {
     setRows((current) =>
@@ -238,7 +233,7 @@ export default function PricingBranchesPage() {
     const savedMarkup = row.draftMarkup;
     setSavingId(productId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
       const updated = await apiFetch<FranchiseSalesRow>(`/pricing/franchise-sales/${productId}${query}`, {
@@ -270,10 +265,10 @@ export default function PricingBranchesPage() {
           };
         }),
       );
-      setSuccess(t('pricing.rowSaved'));
+      toast.success(t('pricing.rowSaved'));
       window.sessionStorage.setItem('branchOrderPricingRevision', String(Date.now()));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingId(null);
     }
@@ -304,11 +299,6 @@ export default function PricingBranchesPage() {
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {warning ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{warning}</p>
-      ) : null}
-      {success ? (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
-          {success}
-        </div>
       ) : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
 

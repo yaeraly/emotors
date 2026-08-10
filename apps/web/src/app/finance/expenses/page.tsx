@@ -15,6 +15,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type ExpenseRow = {
   id: string;
   expenseNumber: string;
@@ -78,7 +80,7 @@ function FinanceExpensesPageContent() {
       setForm({ category: '', accountId: '', amount: '', payee: '', purpose: '' });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   };
 

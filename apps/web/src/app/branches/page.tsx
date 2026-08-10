@@ -11,6 +11,8 @@ import type { Branch, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 export default function BranchesPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -24,7 +26,6 @@ export default function BranchesPage() {
     ownerName: '',
   });
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -50,14 +51,14 @@ export default function BranchesPage() {
     void loadBranches();
     if (window.localStorage.getItem('emotors-branch-created')) {
       window.localStorage.removeItem('emotors-branch-created');
-      setSuccess(t('branches.created'));
+      toast.success(t('branches.created'));
       void loadBranches();
       router.refresh();
     }
     const deletedMessage = window.localStorage.getItem('emotors-branch-deleted');
     if (deletedMessage) {
       window.localStorage.removeItem('emotors-branch-deleted');
-      setSuccess(deletedMessage);
+      toast.success(deletedMessage);
       void loadBranches();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,7 +75,7 @@ export default function BranchesPage() {
       setAllBranches(all);
       setUser(me);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -111,10 +112,10 @@ export default function BranchesPage() {
       );
       if (!result.success) throw new Error(t('branches.deleteFailed'));
       setDeleteTarget(null);
-      setSuccess(t('branches.deletedSuccess'));
+      toast.success(t('branches.deletedSuccess'));
       await loadBranches();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
+      toast.error(err instanceof Error ? err.message : t('branches.deleteFailed'));
     } finally {
       setDeleteLoading(false);
     }
@@ -138,7 +139,6 @@ export default function BranchesPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-lg font-bold text-slate-950">{t('branches.filter')}</h3>

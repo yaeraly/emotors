@@ -5,6 +5,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SellerRow = {
   employeeId: string;
   employeeName: string;
@@ -46,7 +48,7 @@ export default function SalesMotivationSellersPage() {
       setMessage(`Начислено записей: ${result.createdCount}`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

@@ -12,6 +12,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { BranchType, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type OverrideRow = {
   id: string;
   branchId: string;
@@ -130,7 +132,7 @@ export default function PricingOverridesPage() {
     if (!canManage) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const payload = {
         branchId: form.branchId,
@@ -153,11 +155,11 @@ export default function PricingOverridesPage() {
       } else {
         await apiFetch('/pricing/overrides', { method: 'POST', body: JSON.stringify(payload) });
       }
-      setSuccess(t('pricing.overrideSaved'));
+      toast.success(t('pricing.overrideSaved'));
       resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -169,10 +171,10 @@ export default function PricingOverridesPage() {
     setError('');
     try {
       await apiFetch(`/pricing/overrides/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.overrideApproved'));
+      toast.success(t('pricing.overrideApproved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -184,11 +186,11 @@ export default function PricingOverridesPage() {
     setError('');
     try {
       await apiFetch(`/pricing/overrides/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.overrideCancelled'));
+      toast.success(t('pricing.overrideCancelled'));
       if (editingId === id) resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

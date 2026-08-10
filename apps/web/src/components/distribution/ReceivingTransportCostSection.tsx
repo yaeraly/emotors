@@ -6,6 +6,8 @@ import type { BranchDistributionOrder } from '@/lib/types';
 import { buildBranchReceivingTransportPayload } from '@/lib/branch-receiving-ui';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} сом`;
 }
@@ -55,7 +57,6 @@ export function ReceivingTransportCostSection({
     allocations: PreviewAllocation[];
   } | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
 
@@ -96,7 +97,7 @@ export function ReceivingTransportCostSection({
       setPreview(result);
     } catch (err) {
       setPreview(null);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPreviewing(false);
     }
@@ -105,16 +106,16 @@ export function ReceivingTransportCostSection({
   async function submitTransportCost() {
     setSubmitting(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<BranchDistributionOrder>(`/distribution/orders/${order.id}/transport-cost`, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
       onUpdated(updated);
-      setSuccess(t('branchWarehouseOperator.transportEntered'));
+      toast.success(t('branchWarehouseOperator.transportEntered'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -127,7 +128,6 @@ export function ReceivingTransportCostSection({
   return (
     <div className="space-y-4">
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {canShowTransportEntry ? (
         <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-bold">{t('branchWarehouseOperator.transportExpenses')}</h3>

@@ -10,6 +10,8 @@ import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { canAssignHqWarehouseManager, canCreateHqEmployee, isBranchPanelUser } from '@/lib/rbac';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function NewUserPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -101,7 +103,7 @@ export default function NewUserPage() {
       }
       router.push(`/users/${created.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

@@ -24,6 +24,8 @@ import {
 import { useTranslation } from '@/i18n/useTranslation';
 import type { GoodsReceiving, ShortageReport } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type BranchReceivingWorkspaceProps = {
   orderId: string;
   destinationWarehouseId: string;
@@ -50,7 +52,6 @@ export function BranchReceivingWorkspace({
 }: BranchReceivingWorkspaceProps) {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<BranchReceivingProgress | undefined>(initialProgress);
-  const [saveToast, setSaveToast] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -114,8 +115,8 @@ export function BranchReceivingWorkspace({
       const ok = await saveRow(itemId);
       if (ok) {
         invalidateTransportAllocation();
-        setSaveToast(t('chinaReceiving.saveState.saved'));
-        setTimeout(() => setSaveToast(''), 2000);
+        toast.success(t('chinaReceiving.saveState.saved'));
+        setTimeout(() => /* toast clear */ void 0, 2000);
       } else {
         setError(t('common.error'));
       }
@@ -163,13 +164,13 @@ export function BranchReceivingWorkspace({
       }
       setAllocationResult(result);
       setTransportAllocationReady(true);
-      setSaveToast(TRANSPORT_ALLOCATION_SUCCESS_MESSAGE);
-      setTimeout(() => setSaveToast(''), 4000);
+      toast.success(TRANSPORT_ALLOCATION_SUCCESS_MESSAGE);
+      setTimeout(() => /* toast clear */ void 0, 4000);
       onAllocationSuccess?.(result);
     } catch (err) {
       setAllocationResult(null);
       setTransportAllocationReady(false);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPreviewing(false);
     }
@@ -196,7 +197,7 @@ export function BranchReceivingWorkspace({
       setCompleted(true);
       onCompleted?.(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -207,12 +208,6 @@ export function BranchReceivingWorkspace({
       <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
 
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-
-      {saveToast ? (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
-          {saveToast}
-        </div>
-      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label={t('chinaReceiving.summary.products')} value={String(displayProgress.products)} />

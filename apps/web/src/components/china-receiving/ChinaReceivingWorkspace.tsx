@@ -25,6 +25,8 @@ import {
   type VerificationFilterStatus,
 } from '@/lib/china-receiving-filters';
 
+import { toast } from '@/lib/toast';
+
 type EditSession = {
   lockedByUserId: string;
   lockedByUser: { id: string; fullName: string };
@@ -371,7 +373,6 @@ function ChinaReceivingEditableView({
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [saveToast, setSaveToast] = useState<string | null>(null);
   const [filters, setFilters] = useState<ChinaReceivingFilters>(() => ({
     categoryId: ALL_CATEGORIES,
     search: '',
@@ -455,8 +456,8 @@ function ChinaReceivingEditableView({
     filters.categoryId !== ALL_CATEGORIES || filters.search.trim().length > 0 || filters.status !== 'all';
 
   const showSaveToast = useCallback(() => {
-    setSaveToast(t('chinaReceiving.savedToast'));
-    window.setTimeout(() => setSaveToast(null), 2000);
+    toast.success(t('chinaReceiving.savedToast'));
+    
   }, [t]);
 
   const handleSaveRow = useCallback(
@@ -482,7 +483,7 @@ function ChinaReceivingEditableView({
       await apiFetch(`/procurement/china-receiving/${task.id}/session/take-over`, { method: 'POST' });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -538,7 +539,7 @@ function ChinaReceivingEditableView({
       window.localStorage.setItem('emotors_china_receiving_success', t('chinaReceiving.receivedSuccess'));
       router.push('/hq-warehouses/china-receiving');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -596,12 +597,6 @@ function ChinaReceivingEditableView({
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
           {t('chinaReceiving.differenceAutoWarning')}
         </p>
-      ) : null}
-
-      {saveToast ? (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
-          {saveToast}
-        </div>
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

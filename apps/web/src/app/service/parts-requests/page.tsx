@@ -11,6 +11,8 @@ import type { PartsRequest, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 export default function PartsRequestsPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -44,7 +46,7 @@ export default function PartsRequestsPage() {
       await apiFetch(`/service-orders/parts-requests/${requestId}/issue`, { method: 'POST', body: JSON.stringify({}) });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

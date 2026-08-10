@@ -9,6 +9,8 @@ import { canCreateBranchOwner } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type CreateBranchOwnerResponse = User & {
   branch?: Branch;
   warehouse?: Warehouse;
@@ -70,7 +72,7 @@ export default function NewBranchOwnerPage() {
       sessionStorage.setItem('users.branchOwnerCreatedSuccess', '1');
       router.replace('/users');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
       setSubmitting(false);
     }
   }

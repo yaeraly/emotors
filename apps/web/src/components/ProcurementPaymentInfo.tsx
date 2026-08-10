@@ -16,6 +16,8 @@ import {
   type SupplierAccountFormValue,
 } from '@/lib/procurement-payment-info-form';
 
+import { toast } from '@/lib/toast';
+
 export type { SupplierAccountFormValue };
 
 type QrCode = {
@@ -187,7 +189,7 @@ export function ProcurementPaymentInfo({
     try {
       await ensureDraft('QR_CODE');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -229,7 +231,7 @@ export function ProcurementPaymentInfo({
       load();
       onQrChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -245,7 +247,7 @@ export function ProcurementPaymentInfo({
       load();
       onQrChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }

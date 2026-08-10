@@ -8,6 +8,8 @@ import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function ChinaReceivingDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ orderId: string }>();
@@ -26,7 +28,7 @@ export default function ChinaReceivingDetailPage() {
       setError('');
       return detail;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
       return null;
     }
   }, [params.orderId, t]);

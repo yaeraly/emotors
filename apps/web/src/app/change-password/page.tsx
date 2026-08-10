@@ -8,6 +8,8 @@ import { getDefaultRouteForUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type ChangePasswordResponse = {
   success: boolean;
   accessToken: string;
@@ -35,7 +37,7 @@ export default function ChangePasswordPage() {
       setToken(response.accessToken);
       router.replace(getDefaultRouteForUser(response.user));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

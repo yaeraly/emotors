@@ -11,6 +11,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type WholesaleRow = {
   id: string;
   productId: string;
@@ -47,7 +49,6 @@ export default function PricingWholesalePage() {
   const [rows, setRows] = useState<EditableMarkupRow[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [overrideRow, setOverrideRow] = useState<EditableMarkupRow | null>(null);
@@ -102,7 +103,7 @@ export default function PricingWholesalePage() {
 
     setSavingId(productId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     cancelRowPreviews(productId);
     try {
       await apiFetch<WholesaleRow>(`/pricing/wholesale/${productId}`, {
@@ -115,9 +116,9 @@ export default function PricingWholesalePage() {
       });
       markRowSaved(productId);
       await load(branchId);
-      setSuccess(t('pricing.markupsSaved'));
+      toast.success(t('pricing.markupsSaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingId(null);
     }
@@ -126,16 +127,16 @@ export default function PricingWholesalePage() {
   async function restoreInheritance(productId: string) {
     setSavingId(productId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch<WholesaleRow>(`/pricing/wholesale/${productId}/maximum-markup-override`, {
         method: 'DELETE',
       });
       markRowSaved(productId);
       await load(branchId);
-      setSuccess(t('pricing.inheritanceRestored'));
+      toast.success(t('pricing.inheritanceRestored'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingId(null);
     }
@@ -155,7 +156,6 @@ export default function PricingWholesalePage() {
     <>
       <PricingHubNav activeTab="wholesale" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
       <p className="text-xs text-slate-500">{t('pricing.wholesaleHint')}</p>
       <p className="text-xs text-slate-500">{t('pricing.catalogEngineHint')}</p>
@@ -217,7 +217,7 @@ export default function PricingWholesalePage() {
           });
           markRowSaved(overrideRow.id);
           await load(branchId);
-          setSuccess(t('pricing.maximumMarkupOverridden'));
+          toast.success(t('pricing.maximumMarkupOverridden'));
           setOverrideRow(null);
         }}
       />

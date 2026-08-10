@@ -12,6 +12,8 @@ import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, 
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Tab = 'details' | 'inventory' | 'receivings' | 'transfers' | 'history';
 
 type InventoryRow = {
@@ -47,7 +49,6 @@ export default function HqWarehouseDetailPage() {
   const [transfers, setTransfers] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ReceivingRow | null>(null);
   const [deleteWarehouseOpen, setDeleteWarehouseOpen] = useState(false);
   const [deleteWarehouseRequireReason, setDeleteWarehouseRequireReason] = useState(false);
@@ -85,7 +86,7 @@ export default function HqWarehouseDetailPage() {
       if (tab === 'transfers') setTransfers(await apiFetch(`/hq-warehouses/${params.id}/transfers`));
       if (tab === 'history') setHistory(await apiFetch(`/hq-warehouses/${params.id}/history`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -110,7 +111,7 @@ export default function HqWarehouseDetailPage() {
       window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.infoUpdatedSuccess'));
       router.push('/hq-warehouses');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -135,7 +136,7 @@ export default function HqWarehouseDetailPage() {
       await apiFetch(`/hq-warehouses/${params.id}/deactivate`, { method: 'POST' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -147,7 +148,7 @@ export default function HqWarehouseDetailPage() {
         method: 'DELETE',
         body: JSON.stringify({ reason }),
       });
-      setSuccess(result.archived ? t('hqWarehouse.archivedInstead') : t('hqWarehouse.deletedSuccess'));
+      toast.success(result.archived ? t('hqWarehouse.archivedInstead') : t('hqWarehouse.deletedSuccess'));
       setDeleteWarehouseOpen(false);
       if (!result.archived) {
         router.push('/hq-warehouses');
@@ -159,7 +160,7 @@ export default function HqWarehouseDetailPage() {
       if (message.toLowerCase().includes('reason is required')) {
         setDeleteWarehouseRequireReason(true);
       }
-      setError(message);
+      toast.error(message);
     } finally {
       setDeletingWarehouse(false);
     }
@@ -169,7 +170,7 @@ export default function HqWarehouseDetailPage() {
     if (!deleteTarget) return;
     setDeletingReceiving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const result = await apiFetch<{ archived?: boolean; deleted?: boolean; message?: string }>(
         `/hq-warehouses/${params.id}/receivings/${deleteTarget.id}`,
@@ -179,14 +180,14 @@ export default function HqWarehouseDetailPage() {
         },
       );
       if (result.archived) {
-        setSuccess(t('hqWarehouse.receiving.archivedMessage'));
+        toast.success(t('hqWarehouse.receiving.archivedMessage'));
       } else {
-        setSuccess(t('hqWarehouse.receiving.deletedSuccess'));
+        toast.success(t('hqWarehouse.receiving.deletedSuccess'));
       }
       setDeleteTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeletingReceiving(false);
     }
@@ -252,7 +253,6 @@ export default function HqWarehouseDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <div className="flex flex-wrap gap-2">
           {visibleTabs.map((item) => (
@@ -370,7 +370,7 @@ export default function HqWarehouseDetailPage() {
                             onClick={() => {
                               setDeleteTarget(row);
                               setError('');
-                              setSuccess('');
+                              /* toast clear */ void 0;
                             }}
                             className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700"
                           >

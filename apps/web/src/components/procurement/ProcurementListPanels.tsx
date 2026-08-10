@@ -9,6 +9,8 @@ import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type Supplier = {
   id: string;
   name: string;
@@ -32,7 +34,7 @@ export function SuppliersListPanel() {
   useEffect(() => {
     const message = window.localStorage.getItem('emotors_procurement_success');
     if (message) {
-      setSuccess(message);
+      toast.success(message);
       window.localStorage.removeItem('emotors_procurement_success');
     }
     void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
@@ -49,18 +51,18 @@ export function SuppliersListPanel() {
     if (!deleteTarget || !deleteReason.trim()) return;
     setDeleting(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const result = await apiFetch<{ archived?: boolean }>(`/procurement/suppliers/${deleteTarget.id}`, {
         method: 'DELETE',
         body: JSON.stringify({ reason: deleteReason.trim() }),
       });
-      setSuccess(result.archived ? t('procurement.suppliers.archived') : t('procurement.suppliers.deleted'));
+      toast.success(result.archived ? t('procurement.suppliers.archived') : t('procurement.suppliers.deleted'));
       setDeleteTarget(null);
       setDeleteReason('');
       await loadSuppliers();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeleting(false);
     }
@@ -71,7 +73,6 @@ export function SuppliersListPanel() {
   return (
     <>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -147,7 +148,7 @@ export function FactoriesListPanel() {
   useEffect(() => {
     const message = window.localStorage.getItem('emotors_procurement_success');
     if (message) {
-      setSuccess(message);
+      toast.success(message);
       window.localStorage.removeItem('emotors_procurement_success');
     }
     apiFetch<Factory[]>('/procurement/factories')
@@ -158,7 +159,6 @@ export function FactoriesListPanel() {
   return (
     <>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -208,7 +208,7 @@ export function TransportCompaniesListPanel() {
   useEffect(() => {
     const message = window.localStorage.getItem('emotors_procurement_success');
     if (message) {
-      setSuccess(message);
+      toast.success(message);
       window.localStorage.removeItem('emotors_procurement_success');
     }
     void apiFetch<User>('/auth/me')
@@ -294,7 +294,7 @@ export function ProcurementOrdersListPanel() {
   useEffect(() => {
     const message = window.localStorage.getItem('emotors_procurement_success');
     if (message) {
-      setSuccess(message);
+      toast.success(message);
       window.localStorage.removeItem('emotors_procurement_success');
     }
     void Promise.all([
@@ -326,13 +326,13 @@ export function ProcurementOrdersListPanel() {
         method: 'DELETE',
         body: JSON.stringify({ reason }),
       });
-      setSuccess(result.archived ? t('procurement.orders.archivedSuccess') : t('procurement.orders.deletedSuccess'));
+      toast.success(result.archived ? t('procurement.orders.archivedSuccess') : t('procurement.orders.deletedSuccess'));
       setDeleteTarget(null);
       setOrders(await apiFetch<ProcurementOrder[]>('/procurement/orders'));
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('reason is required')) setDeleteRequireReason(true);
-      setError(message);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -341,7 +341,6 @@ export function ProcurementOrdersListPanel() {
   return (
     <>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <label className="block min-w-56">
           <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.warehouse')}</span>

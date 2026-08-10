@@ -29,6 +29,8 @@ import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 const statuses: BranchDistributionOrderStatus[] = [
   'DRAFT',
   'INVOICED',
@@ -78,7 +80,7 @@ export default function DistributionOrdersPage() {
         setOrders(orderResult);
         setBranches(branchResult);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('common.error'));
+        toast.error(err instanceof Error ? err.message : t('common.error'));
       } finally {
         setLoading(false);
       }

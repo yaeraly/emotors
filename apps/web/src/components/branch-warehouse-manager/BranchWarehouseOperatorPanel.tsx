@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type BranchWarehouseSummary = {
   id: string;
   name: string;
@@ -66,7 +68,7 @@ export function BranchWarehouseOperatorPanel() {
         setStock(inventory);
         setPendingOrders(orders);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('common.error'));
+        toast.error(err instanceof Error ? err.message : t('common.error'));
       } finally {
         setLoading(false);
       }

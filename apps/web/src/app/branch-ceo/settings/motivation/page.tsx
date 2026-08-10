@@ -6,6 +6,8 @@ import { EmotorsRecommendationCard } from '@/components/sales-motivation/Emotors
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type PlanLevel = { salesThreshold: number; bonusAmount: number };
 type AvgLevel = { averageReceiptThreshold: number; bonusAmount: number };
 
@@ -146,14 +148,14 @@ export default function SalesMotivationSettingsPage() {
       recommendationSource: recommendations.recommendation.source,
       comment: 'Применена рекомендация EMOTORS',
     }));
-    setSuccess('Рекомендация применена в форму. Сохраните, чтобы активировать новую версию.');
+    toast.success('Рекомендация применена в форму. Сохраните, чтобы активировать новую версию.');
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch('/sales-motivation/settings', {
         method: 'POST',
@@ -163,10 +165,10 @@ export default function SalesMotivationSettingsPage() {
           installmentEffectiveFrom: new Date(form.installmentEffectiveFrom).toISOString(),
         }),
       });
-      setSuccess('Новая версия мотивации сохранена и активирована.');
+      toast.success('Новая версия мотивации сохранена и активирована.');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

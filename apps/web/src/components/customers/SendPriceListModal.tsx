@@ -9,6 +9,8 @@ import {
 import { formatCustomerPriceListUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SearchCustomer = {
   id: string;
   fullName: string;
@@ -87,7 +89,7 @@ export function SendPriceListModal({
       );
       setResults(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -120,7 +122,7 @@ export function SendPriceListModal({
       );
       setPreview(previewData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -140,7 +142,7 @@ export function SendPriceListModal({
       setPreview(previewData);
     } catch (err) {
       setPreview(null);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -181,7 +183,7 @@ export function SendPriceListModal({
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -220,7 +222,7 @@ export function SendPriceListModal({
 
       window.open(result.whatsappLink, '_blank', 'noopener,noreferrer');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }

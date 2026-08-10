@@ -11,6 +11,8 @@ import { getStatusLabel } from '@/lib/translate-status';
 import type { InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const activeStatuses = new Set(['DRAFT', 'COUNTING', 'REJECTED']);
 const historyStatuses = new Set(['SUBMITTED', 'APPROVED', 'COMPLETED']);
 
@@ -29,7 +31,6 @@ export function InventoryCountListContent({
   const [deleteTarget, setDeleteTarget] = useState<InventoryCountSession | null>(null);
   const [deleteRequireReason, setDeleteRequireReason] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -67,14 +68,14 @@ export function InventoryCountListContent({
         body: JSON.stringify({ reason }),
       });
       setDeleteTarget(null);
-      setSuccessMessage(result.archived ? t('inventoryCount.archivedSuccess') : t('inventoryCount.deletedSuccess'));
+      toast.success(result.archived ? t('inventoryCount.archivedSuccess') : t('inventoryCount.deletedSuccess'));
       await loadSessions();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('reason is required')) {
         setDeleteRequireReason(true);
       }
-      setLoadError(message);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -93,9 +94,6 @@ export function InventoryCountListContent({
             {t('common.retry')}
           </button>
         </div>
-      ) : null}
-      {successMessage ? (
-        <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p>
       ) : null}
 
       <section className="space-y-4">

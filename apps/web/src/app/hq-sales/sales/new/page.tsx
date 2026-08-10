@@ -6,6 +6,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type CustomerOption = {
   id: string;
   fullName: string;
@@ -128,7 +130,7 @@ export default function HqSalesNewPage() {
       });
       router.push(`/hq-sales/sales/${sale.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

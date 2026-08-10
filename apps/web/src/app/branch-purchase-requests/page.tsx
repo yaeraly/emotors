@@ -42,6 +42,8 @@ import { translateStatus } from '@/lib/translate-status';
 import { draftFormLineTotal, draftFormOrderTotal } from '@/lib/branch-purchase-request-display.util';
 import { formatKgsLocalized } from '@/lib/money';
 
+import { toast } from '@/lib/toast';
+
 type RequestItem = {
   id?: string;
   productId: string;
@@ -403,7 +405,7 @@ function BranchPurchaseRequestsPageInner() {
 
   function openNewRequestForm() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     if (branchSalesManagerView) {
       router.push(`${BRANCH_PRODUCT_ORDERS_LIST_HREF}?new=1`);
       return;
@@ -436,7 +438,7 @@ function BranchPurchaseRequestsPageInner() {
     });
     setLines(linesFromRequest(request));
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setFormDirty(false);
     setShowFormLocal(true);
   }
@@ -505,14 +507,14 @@ function BranchPurchaseRequestsPageInner() {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      setSuccess(t('branchProductRequest.saveChangesSuccess'));
+      toast.success(t('branchProductRequest.saveChangesSuccess'));
       await load();
       if (branchSalesManagerView) {
         resetCreateForm();
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(localizeBranchRequestError(message));
+      toast.error(localizeBranchRequestError(message));
     }
   }
 
@@ -521,7 +523,7 @@ function BranchPurchaseRequestsPageInner() {
     if (submitting) return;
     const activeDraftId = branchSalesManagerView ? draftIdFromUrl : editingDraftId;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     try {
       if (activeDraftId) {
@@ -531,7 +533,7 @@ function BranchPurchaseRequestsPageInner() {
           body: JSON.stringify(payload),
         });
         if (asDraft) {
-          setSuccess(t('branchProductRequest.saveChangesSuccess'));
+          toast.success(t('branchProductRequest.saveChangesSuccess'));
           await load();
           if (branchSalesManagerView) {
             resetCreateForm();
@@ -539,7 +541,7 @@ function BranchPurchaseRequestsPageInner() {
           return;
         }
         await apiFetch(`/branch-purchase-requests/${activeDraftId}/submit`, { method: 'POST' });
-        setSuccess(t('distribution.branchOrderSubmitted'));
+        toast.success(t('distribution.branchOrderSubmitted'));
         resetCreateForm();
         await load();
         return;
@@ -550,19 +552,17 @@ function BranchPurchaseRequestsPageInner() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      setSuccess(asDraft ? t('distribution.saveDraft') : t('distribution.branchOrderSubmitted'));
+      toast.success(asDraft ? t('distribution.saveDraft') : t('distribution.branchOrderSubmitted'));
       resetCreateForm();
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       const localized = localizeBranchRequestError(message);
-      setError(
-        localized !== message
+      toast.error(localized !== message
           ? localized
           : asDraft
             ? message
-            : t('branchProductRequest.submitFailed'),
-      );
+            : t('branchProductRequest.submitFailed'),);
     } finally {
       setSubmitting(false);
     }
@@ -574,11 +574,11 @@ function BranchPurchaseRequestsPageInner() {
     setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${id}/submit`, { method: 'POST' });
-      setSuccess(t('distribution.branchOrderSubmitted'));
+      toast.success(t('distribution.branchOrderSubmitted'));
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(localizeBranchRequestError(message));
+      toast.error(localizeBranchRequestError(message));
     } finally {
       setSubmitting(false);
     }
@@ -588,10 +588,10 @@ function BranchPurchaseRequestsPageInner() {
     setError('');
     try {
       await apiFetch(`/branch-purchase-requests/${id}/cancel`, { method: 'POST' });
-      setSuccess(t('common.success'));
+      toast.success(t('common.success'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -599,10 +599,10 @@ function BranchPurchaseRequestsPageInner() {
     setError('');
     try {
       await apiFetch(`/branch-purchase-requests/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('distribution.orderRejected'));
+      toast.success(t('distribution.orderRejected'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -620,11 +620,11 @@ function BranchPurchaseRequestsPageInner() {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      setSuccess(t('branchHqRouting.sentToWarehouse'));
+      toast.success(t('branchHqRouting.sentToWarehouse'));
       window.location.href = `/distribution/orders/${order.id}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(localizeBranchRequestError(message));
+      toast.error(localizeBranchRequestError(message));
     }
   }
 
@@ -944,7 +944,6 @@ function BranchPurchaseRequestsPageInner() {
             }
           >
             {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-            {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
             <HqSalesListTableCard>
               {loading ? (
                 <HqSalesListLoadingState message={t('operations.hqBranchOrdersLoading')} />
@@ -1021,7 +1020,6 @@ function BranchPurchaseRequestsPageInner() {
         {!hqSalesView && listError ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{listError}</p>
         ) : null}
-        {success && !hqSalesView ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {showForm ? (
           <form onSubmit={(event) => event.preventDefault()} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

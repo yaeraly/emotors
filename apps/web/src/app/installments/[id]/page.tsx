@@ -10,6 +10,8 @@ import type { PaymentMethod, SaleInstallmentApproval } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
 
+import { toast } from '@/lib/toast';
+
 type InstallmentDetail = SaleInstallmentApproval & {
   sale: {
     id: string;
@@ -54,7 +56,7 @@ export default function InstallmentDetailPage() {
       const data = await apiFetch<InstallmentDetail>(`/sales/installments/${params.id}`);
       setInstallment(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -69,7 +71,7 @@ export default function InstallmentDetailPage() {
     event.preventDefault();
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       if (!method) {
         setError(t('sales.paymentMethodRequired'));
@@ -85,10 +87,10 @@ export default function InstallmentDetailPage() {
       });
       setAmount('');
       setNote('');
-      setSuccess(t('sales.installmentPaymentRecorded'));
+      toast.success(t('sales.installmentPaymentRecorded'));
       await loadInstallment();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

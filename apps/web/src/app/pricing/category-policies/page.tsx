@@ -7,6 +7,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type MaximumPricePolicy = 'DISABLED' | 'WARNING_ONLY' | 'HARD_LIMIT';
 
 type CategoryRow = {
@@ -35,7 +37,6 @@ export default function PricingCategoryPoliciesPage() {
   const [rows, setRows] = useState<EditableCategoryRow[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -82,7 +83,7 @@ export default function PricingCategoryPoliciesPage() {
 
     setSavingId(categoryId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/pricing/categories/${categoryId}/maximum-policy`, {
         method: 'PUT',
@@ -93,10 +94,10 @@ export default function PricingCategoryPoliciesPage() {
           defaultWholesaleMaximumMarkupPercent: row.draftWholesaleMarkup,
         }),
       });
-      setSuccess(t('pricing.categoryPolicySaved'));
+      toast.success(t('pricing.categoryPolicySaved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingId(null);
     }
@@ -106,7 +107,6 @@ export default function PricingCategoryPoliciesPage() {
     <>
       <PricingHubNav activeTab="category-policies" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
 
       <p className="text-xs text-slate-500">{t('pricing.categoryPoliciesHint')}</p>

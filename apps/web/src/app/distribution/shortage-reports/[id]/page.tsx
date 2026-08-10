@@ -9,6 +9,8 @@ import type { ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 const resolutionTypes = [
   'SEND_IMMEDIATELY',
   'ADD_TO_NEXT_ORDER',
@@ -24,7 +26,6 @@ export default function ShortageReportDetailPage() {
   const [resolutionType, setResolutionType] = useState<string>('SEND_IMMEDIATELY');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   async function load() {
     try {
@@ -35,7 +36,7 @@ export default function ShortageReportDetailPage() {
       setReport(result);
       setUser(me);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -46,16 +47,16 @@ export default function ShortageReportDetailPage() {
 
   async function resolve() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setReport(await apiFetch<ShortageReport>(`/distribution/shortage-reports/${id}/resolve`, {
         method: 'POST',
         body: JSON.stringify({ resolutionType, note: note || undefined }),
       }));
-      setSuccess(t('distribution.reportResolved'));
+      toast.success(t('distribution.reportResolved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -69,7 +70,6 @@ export default function ShortageReportDetailPage() {
           <h2 className="text-3xl font-bold text-slate-950">{report?.reportNumber ?? '-'}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {report ? (
           <>
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

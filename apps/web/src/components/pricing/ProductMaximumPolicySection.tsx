@@ -6,6 +6,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type MaximumPricePolicy = 'DISABLED' | 'WARNING_ONLY' | 'HARD_LIMIT';
 type MaximumPricePolicySource = 'CATEGORY' | 'PRODUCT';
 
@@ -59,7 +61,7 @@ export function ProductMaximumPolicySection({ productId }: Props) {
     if (!policy || !canManage) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/pricing/products/${productId}/maximum-policy`, {
         method: 'PUT',
@@ -80,10 +82,10 @@ export function ProductMaximumPolicySection({ productId }: Props) {
               : undefined,
         }),
       });
-      setSuccess(t('pricing.productPolicySaved'));
+      toast.success(t('pricing.productPolicySaved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

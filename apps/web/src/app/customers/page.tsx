@@ -22,6 +22,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const TOKEN_KEY = 'emotors_access_token';
 const businessStatuses: CustomerStatus[] = ['ACTIVE', 'VIP', 'RISK', 'INACTIVE', 'ARCHIVED'];
 const allStatuses: CustomerStatus[] = [
@@ -218,7 +220,7 @@ function CustomersPageContent() {
         current ? result.find((customer) => customer.id === current.id) ?? null : null,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -255,7 +257,7 @@ function CustomersPageContent() {
       await loadCustomers();
       showSuccess(t('crm.customerCreated'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -462,7 +464,7 @@ function CustomersPageContent() {
       );
     } catch (err) {
       console.error('Customer archive failed', err);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeletingCustomerId(null);
     }
@@ -479,8 +481,8 @@ function CustomersPageContent() {
   }
 
   function showSuccess(message: string) {
-    setSuccessMessage(message);
-    window.setTimeout(() => setSuccessMessage(''), 3000);
+    toast.success(message);
+    
   }
 
   return (

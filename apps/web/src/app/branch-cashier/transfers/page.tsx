@@ -11,6 +11,8 @@ import {
 } from '@/lib/branch-cashier-receiving-account';
 import type { FinanceAccount, FinanceTransfer } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type TransferForm = {
   sourceAccountId: string;
   destinationAccountId: string;
@@ -34,7 +36,6 @@ export default function BranchCashierTransfersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   const activeAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'ACTIVE'),
@@ -67,7 +68,7 @@ export default function BranchCashierTransfersPage() {
       setAccounts(accountData);
       setTransfers(transferData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -87,7 +88,7 @@ export default function BranchCashierTransfersPage() {
       amount: String(transfer.amount),
       reason: transfer.reason ?? '',
     });
-    setSuccess('');
+    /* toast clear */ void 0;
     setError('');
   }
 
@@ -100,7 +101,7 @@ export default function BranchCashierTransfersPage() {
     event.preventDefault();
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const payload = {
         sourceAccountId: form.sourceAccountId,
@@ -113,18 +114,18 @@ export default function BranchCashierTransfersPage() {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
-        setSuccess(t('branchCashier.transferUpdated'));
+        toast.success(t('branchCashier.transferUpdated'));
       } else {
         await apiFetch('/branch-cashier/transfers', {
           method: 'POST',
           body: JSON.stringify({ ...payload, idempotencyKey: crypto.randomUUID() }),
         });
-        setSuccess(t('branchCashier.transferSubmitted'));
+        toast.success(t('branchCashier.transferSubmitted'));
       }
       resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -136,7 +137,6 @@ export default function BranchCashierTransfersPage() {
         <h2 className="text-3xl font-bold">{t('branchCashier.accountTransfers')}</h2>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <h3 className="md:col-span-2 text-lg font-bold">

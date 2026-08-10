@@ -11,6 +11,8 @@ import {
   hasFullAccess,
 } from '@/lib/rbac';
 
+import { toast } from '@/lib/toast';
+
 type TransportExpense = {
   id: string;
   expenseNumber: string;
@@ -123,7 +125,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -150,7 +152,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       }
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -162,7 +164,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       await apiFetch(`/procurement/transport-expenses/${id}/submit`, { method: 'POST', body: JSON.stringify({}) });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -184,7 +186,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       setApproveTarget(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -205,7 +207,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       setConfirmTarget(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -223,7 +225,7 @@ export function ProcurementTransportExpenses({ orderId, user }: Props) {
       setReturnReason('');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

@@ -8,6 +8,8 @@ import type { Branch, BranchDistributionOrder, Product, ProductListResponse, War
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type ItemForm = { productId: string; quantity: string; unitPrice: string };
 
 export default function NewDistributionOrderPage() {
@@ -78,7 +80,7 @@ export default function NewDistributionOrderPage() {
       });
       router.push(`/distribution/orders/${order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

@@ -13,12 +13,13 @@ import {
 import { translateStatus } from '@/lib/translate-status';
 import type { BranchAccountantInvoice } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 export default function BranchAccountantInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [invoice, setInvoice] = useState<BranchAccountantInvoice | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [installmentFirstPayment, setInstallmentFirstPayment] = useState('0');
   const [installmentTermMonths, setInstallmentTermMonths] = useState('3');
   const [installmentDueDate, setInstallmentDueDate] = useState('');
@@ -32,7 +33,7 @@ export default function BranchAccountantInvoiceDetailPage() {
     try {
       setInvoice(await apiFetch<BranchAccountantInvoice>(`/branch-accountant/invoices/${id}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -68,7 +69,7 @@ export default function BranchAccountantInvoiceDetailPage() {
 
   async function selectFullPayment() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchAccountantInvoice>(`/branch-accountant/invoices/${id}/select-payment-type`, {
@@ -76,9 +77,9 @@ export default function BranchAccountantInvoiceDetailPage() {
           body: JSON.stringify({ paymentType: 'FULL_PAYMENT' }),
         }),
       );
-      setSuccess(t('branchAccountant.fullPaymentSelected'));
+      toast.success(t('branchAccountant.fullPaymentSelected'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -86,7 +87,7 @@ export default function BranchAccountantInvoiceDetailPage() {
     event.preventDefault();
     if (!installmentPreview) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     try {
       setInvoice(
@@ -100,9 +101,9 @@ export default function BranchAccountantInvoiceDetailPage() {
           }),
         }),
       );
-      setSuccess(t('branchAccountant.installmentRequested'));
+      toast.success(t('branchAccountant.installmentRequested'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -112,7 +113,7 @@ export default function BranchAccountantInvoiceDetailPage() {
     event.preventDefault();
     if (!invoice) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     const remaining = Number(invoice.remainingAmount);
     const amount =
@@ -128,9 +129,9 @@ export default function BranchAccountantInvoiceDetailPage() {
           }),
         }),
       );
-      setSuccess(t('branchAccountant.earlyPaymentRequested'));
+      toast.success(t('branchAccountant.earlyPaymentRequested'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -138,18 +139,18 @@ export default function BranchAccountantInvoiceDetailPage() {
 
   async function sendToCashier() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(await apiFetch<BranchAccountantInvoice>(`/branch-accountant/invoices/${id}/send-to-cashier`, { method: 'POST' }));
-      setSuccess(t('distribution.sentToCashier'));
+      toast.success(t('distribution.sentToCashier'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function sendEarlyPaymentToCashier(requestId: string) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchAccountantInvoice>(
@@ -157,9 +158,9 @@ export default function BranchAccountantInvoiceDetailPage() {
           { method: 'POST' },
         ),
       );
-      setSuccess(t('branchAccountant.sentToCashierDone'));
+      toast.success(t('branchAccountant.sentToCashierDone'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -200,7 +201,6 @@ export default function BranchAccountantInvoiceDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {invoice ? (
           <>

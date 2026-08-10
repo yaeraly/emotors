@@ -12,6 +12,8 @@ import { canCashierReportPaymentFailure } from '@/lib/cashier-bill-actions';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type BillSource = 'SUPPLIER_PAYMENT' | 'TRANSPORT_EXPENSE';
 
 type BillRow = {
@@ -173,7 +175,6 @@ function CashierBillsPageContent() {
   const [filters, setFilters] = useState(emptyFilters);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<BillDetail | null>(null);
-  const [actionError, setActionError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reasonModal, setReasonModal] = useState<{ mode: 'return' | 'fail'; row: BillRow } | null>(null);
   const [reason, setReason] = useState('');
@@ -182,7 +183,6 @@ function CashierBillsPageContent() {
   const [cashierComment, setCashierComment] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [confirmError, setConfirmError] = useState('');
-  const [pinNotice, setPinNotice] = useState('');
   const [pinning, setPinning] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('BANK_ACCOUNT');
   const [financeAccountId, setFinanceAccountId] = useState('');
@@ -215,7 +215,7 @@ function CashierBillsPageContent() {
       const response = await apiFetch<BillsResponse>(`/procurement/cashier-bills?${queryString}`);
       setData(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -250,12 +250,12 @@ function CashierBillsPageContent() {
   }, [canAccess, load]);
 
   async function openDetail(row: BillRow) {
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       const detail = await apiFetch<BillDetail>(`/procurement/cashier-bills/${row.source}/${row.id}`);
       setSelected(detail);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -310,7 +310,7 @@ function CashierBillsPageContent() {
   async function runAction(row: BillRow, path: string, body?: Record<string, unknown>) {
     if (saving) return;
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/${path}`, {
         method: 'POST',
@@ -322,10 +322,10 @@ function CashierBillsPageContent() {
       setCashierComment('');
       setReceiptFile(null);
       setConfirmError('');
-      setPinNotice('');
+      /* toast clear */ void 0;
       await refreshAfterAction(row);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -354,7 +354,7 @@ function CashierBillsPageContent() {
     const row = paymentDeleteTarget;
     if (!row) return;
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/permanent-delete`, {
         method: 'POST',
@@ -364,7 +364,7 @@ function CashierBillsPageContent() {
       setSelected(null);
       await load();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -439,7 +439,7 @@ function CashierBillsPageContent() {
     setPaymentAmount('');
     setDifferenceReason('');
     setConfirmError('');
-    setPinNotice('');
+    /* toast clear */ void 0;
   }
 
   async function openConfirmModal(row: BillRow) {
@@ -529,8 +529,8 @@ function CashierBillsPageContent() {
     if (saving || pinning) return;
     setPinning(true);
     setConfirmError('');
-    setPinNotice('');
-    setActionError('');
+    /* toast clear */ void 0;
+    /* toast clear */ void 0;
     try {
       if (receiptFile) {
         await uploadReceipt(row, receiptFile);
@@ -545,14 +545,14 @@ function CashierBillsPageContent() {
         }),
       });
       await refreshAfterAction(row);
-      setPinNotice(t('finance.cashierBills.pinned'));
+      toast.info(t('finance.cashierBills.pinned'));
     } catch (err) {
       const message = mapFetchError(err, {
         fallback: t('finance.cashierBills.closeFailed'),
         alreadyProcessedMessage: t('finance.cashierBills.alreadyProcessed'),
       });
       setConfirmError(message);
-      setActionError(message);
+      toast.error(message);
     } finally {
       setPinning(false);
     }
@@ -561,8 +561,8 @@ function CashierBillsPageContent() {
   async function confirmPayment(row: BillRow) {
     if (saving || pinning) return;
     setConfirmError('');
-    setPinNotice('');
-    setActionError('');
+    /* toast clear */ void 0;
+    /* toast clear */ void 0;
 
     const validated = validateConfirmForm(row);
     if (!validated) return;
@@ -606,7 +606,7 @@ function CashierBillsPageContent() {
         alreadyProcessedMessage: t('finance.cashierBills.alreadyProcessed'),
       });
       setConfirmError(message);
-      setActionError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -645,7 +645,6 @@ function CashierBillsPageContent() {
         </div>
 
         {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-        {actionError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p> : null}
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <SummaryChip label={t('finance.cashierBills.awaiting')} value={String(summary?.awaitingCount ?? 0)} />
@@ -1120,9 +1119,6 @@ function CashierBillsPageContent() {
             />
             {confirmError ? (
               <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{confirmError}</p>
-            ) : null}
-            {pinNotice ? (
-              <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{pinNotice}</p>
             ) : null}
             <div className="flex flex-wrap justify-end gap-2">
               <button

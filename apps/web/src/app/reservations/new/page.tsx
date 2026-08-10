@@ -20,6 +20,8 @@ import { canCreateCustomer } from '@/lib/rbac';
 import type { Customer, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type ReservationItemRow = {
   productId: string;
   productName: string;
@@ -135,7 +137,7 @@ export default function NewReservationPage() {
       setShowCreateCustomer(false);
       setCreateCustomerForm({ fullName: '', phone: '', whatsappPhone: '' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setCreatingCustomer(false);
     }
@@ -178,7 +180,7 @@ export default function NewReservationPage() {
       router.push('/reservations');
       void created;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }

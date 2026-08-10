@@ -37,6 +37,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import { BusinessDateField } from '@/components/BusinessDateField';
 
+import { toast } from '@/lib/toast';
+
 export default function SaleDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -76,7 +78,7 @@ export default function SaleDetailPage() {
       setSale(result);
       setCurrentUser(currentUserResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -90,7 +92,7 @@ export default function SaleDetailPage() {
     }
     setSavingPayment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       const result = await apiFetch<Sale>(`/sales/${saleId}/payments`, {
@@ -105,9 +107,9 @@ export default function SaleDetailPage() {
       setAmount('');
       setNote('');
       setMethod('');
-      setSuccess('Payment added successfully');
+      toast.success('Payment added successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingPayment(false);
     }
@@ -117,7 +119,7 @@ export default function SaleDetailPage() {
     path: 'send-whatsapp' | 'finalize' | 'cancel',
   ) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       const response = await apiFetch<any>(`/sales/${saleId}/${path}`, {
@@ -130,36 +132,36 @@ export default function SaleDetailPage() {
         window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
       }
 
-      setSuccess('Sale updated successfully');
+      toast.success('Sale updated successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function voidPayment(paymentId: string) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const result = await apiFetch<Sale>(`/sales/${saleId}/payments/${paymentId}/void`, {
         method: 'POST',
       });
       setSale(result);
-      setSuccess('Payment voided successfully');
+      toast.success('Payment voided successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function submitInstallmentRequest() {
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/submit`, { method: 'POST' });
       await loadSale();
-      setSuccess(t('sales.installmentRequestSubmitted'));
+      toast.success(t('sales.installmentRequestSubmitted'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -168,7 +170,7 @@ export default function SaleDetailPage() {
   async function approveInstallmentRequest() {
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/approve`, {
         method: 'POST',
@@ -178,9 +180,9 @@ export default function SaleDetailPage() {
       });
       await loadSale();
       setApprovalComment('');
-      setSuccess(t('sales.installmentRequestApproved'));
+      toast.success(t('sales.installmentRequestApproved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -193,7 +195,7 @@ export default function SaleDetailPage() {
     }
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/cancel`, {
         method: 'POST',
@@ -202,9 +204,9 @@ export default function SaleDetailPage() {
       setShowCancelForm(false);
       setCancellationReason('');
       await loadSale();
-      setSuccess(t('sales.installmentRequestCancelled'));
+      toast.success(t('sales.installmentRequestCancelled'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -213,13 +215,13 @@ export default function SaleDetailPage() {
   async function returnRejectedSaleToDraft() {
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/return-to-draft`, { method: 'POST' });
       await loadSale();
-      setSuccess(t('sales.returnedToDraft'));
+      toast.success(t('sales.returnedToDraft'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -228,7 +230,7 @@ export default function SaleDetailPage() {
   async function returnInstallmentForRevision() {
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/return-for-revision`, {
         method: 'POST',
@@ -239,9 +241,9 @@ export default function SaleDetailPage() {
       setShowReturnForRevisionForm(false);
       setRevisionComment('');
       await loadSale();
-      setSuccess(t('sales.installmentReturnedForRevision'));
+      toast.success(t('sales.installmentReturnedForRevision'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -254,7 +256,7 @@ export default function SaleDetailPage() {
     }
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/reject`, {
         method: 'POST',
@@ -263,9 +265,9 @@ export default function SaleDetailPage() {
       setShowRejectForm(false);
       setRejectionReason('');
       await loadSale();
-      setSuccess(t('sales.installmentRequestRejected'));
+      toast.success(t('sales.installmentRequestRejected'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }

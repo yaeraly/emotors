@@ -9,6 +9,8 @@ import { hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const MODULE_FILTERS = [
   'ALL',
   'UNREAD',
@@ -46,7 +48,7 @@ export default function NotificationsPage() {
       setAlerts(result);
       setCurrentUser(me);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

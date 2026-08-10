@@ -6,6 +6,8 @@ import { apiFetch } from '@/lib/api';
 import type { MarkupPreviewResponse } from '@/lib/pricing-markup-preview';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const REASON_CODES = [
   'MARKET_PRICE',
   'PRODUCT_SPECIFIC_MARGIN',
@@ -156,7 +158,7 @@ export function MaximumMarkupOverrideModal({
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

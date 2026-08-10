@@ -19,6 +19,8 @@ import type { Branch, BranchType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type BranchForm = {
   name: string;
   code: string;
@@ -213,7 +215,7 @@ export default function BranchDetailPage() {
     if (!branch) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<Branch>(`/branches/${branch.id}/assigned-hq-warehouse`, {
         method: 'PUT',
@@ -222,9 +224,9 @@ export default function BranchDetailPage() {
         }),
       });
       setBranch(updated);
-      setSuccess(t('branchHqRouting.assignmentSaved'));
+      toast.success(t('branchHqRouting.assignmentSaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -264,7 +266,7 @@ export default function BranchDetailPage() {
 
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const payload: Record<string, unknown> = {
         name: form.name,
@@ -310,11 +312,9 @@ export default function BranchDetailPage() {
       }));
       setAssignedHqWarehouseId(updated.assignedHqWarehouseId ?? '');
       setEditing(false);
-      setSuccess(
-        branchTypeChanged ? t('branches.branchTypeChangedSuccess') : t('branches.updated'),
-      );
+      toast.success(branchTypeChanged ? t('branches.branchTypeChangedSuccess') : t('branches.updated'),);
     } catch (err) {
-      setError(localizeBranchError(err instanceof Error ? err.message : t('branches.branchTypeChangeFailed'), t));
+      toast.error(localizeBranchError(err instanceof Error ? err.message : t('branches.branchTypeChangeFailed'), t));
     } finally {
       setSaving(false);
     }
@@ -325,7 +325,7 @@ export default function BranchDetailPage() {
 
     setDeleting(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       const result = await apiFetch<{ success?: boolean; permanentlyDeleted?: boolean; message?: string }>(
@@ -344,7 +344,7 @@ export default function BranchDetailPage() {
       setDeleteModalOpen(false);
       router.replace('/branches');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
+      toast.error(err instanceof Error ? err.message : t('branches.deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -363,12 +363,12 @@ export default function BranchDetailPage() {
         },
       );
       setWarehouseDeleteModalOpen(false);
-      setSuccess(t('lifecycle.warehouseDeletedSuccess'));
+      toast.success(t('lifecycle.warehouseDeletedSuccess'));
       setBranchWarehouseId(null);
       setBranchWarehouseCode(null);
       setBranchWarehouseMissing(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setWarehouseDeleting(false);
     }
@@ -409,7 +409,6 @@ export default function BranchDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {canManage && editing ? (
           <form onSubmit={saveBranch} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">

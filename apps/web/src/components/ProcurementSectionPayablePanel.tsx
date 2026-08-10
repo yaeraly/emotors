@@ -19,6 +19,8 @@ import {
   usesCargoQrPaymentForm,
 } from '@/lib/cargo-payment-form.util';
 
+import { toast } from '@/lib/toast';
+
 type QrCode = {
   id: string;
   fileName: string;
@@ -630,7 +632,7 @@ export function ProcurementSectionPayablePanel({
       setTouchedPaymentFields({ bankName: false, accountHolder: false, accountNumber: false });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -660,7 +662,7 @@ export function ProcurementSectionPayablePanel({
       setApproveTarget(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -683,7 +685,7 @@ export function ProcurementSectionPayablePanel({
       setConfirmTarget(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -709,7 +711,7 @@ export function ProcurementSectionPayablePanel({
       }
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -727,7 +729,7 @@ export function ProcurementSectionPayablePanel({
       setReturnReason('');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -1370,7 +1372,7 @@ function TransportCompanyQuickCreateModal({
       }
       await onCreated(company);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

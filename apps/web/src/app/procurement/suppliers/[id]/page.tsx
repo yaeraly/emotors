@@ -8,6 +8,8 @@ import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SupplierContact = {
   id: string;
   fullName: string;
@@ -57,7 +59,7 @@ export default function SupplierDetailPage() {
       setContacts(contactResult);
       void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -77,7 +79,7 @@ export default function SupplierDetailPage() {
       setForm({ fullName: '', position: '', wechat: '', phone: '', email: '', notes: '', isPrimary: false });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -87,7 +89,7 @@ export default function SupplierDetailPage() {
       await apiFetch(`/procurement/contacts/${contactId}`, { method: 'DELETE' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

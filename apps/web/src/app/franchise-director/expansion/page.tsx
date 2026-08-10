@@ -5,6 +5,8 @@ import { FranchiseDirectorShell } from '@/components/franchise-director/Franchis
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const STATUSES = ['LEAD', 'NEGOTIATION', 'AGREEMENT', 'PREPARING', 'OPENING', 'ACTIVE', 'SUSPENDED', 'CLOSED'] as const;
 
 type Lead = {
@@ -41,7 +43,7 @@ export default function FranchiseDirectorExpansionPage() {
     try {
       setRows(await apiFetch<Lead[]>('/franchise-director/expansion'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -70,7 +72,7 @@ export default function FranchiseDirectorExpansionPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -83,7 +85,7 @@ export default function FranchiseDirectorExpansionPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

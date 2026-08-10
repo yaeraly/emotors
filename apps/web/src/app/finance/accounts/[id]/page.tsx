@@ -21,6 +21,8 @@ import {
 import { isBranchAccountantUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, FinanceLedgerEntry, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 export default function FinanceAccountDetailsPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -29,12 +31,10 @@ export default function FinanceAccountDetailsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [account, setAccount] = useState<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] } | null>(null);
   const [error, setError] = useState('');
-  const [actionError, setActionError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
-  const [nameSuccess, setNameSuccess] = useState('');
 
   const reload = () => {
     setLoading(true);
@@ -72,12 +72,10 @@ export default function FinanceAccountDetailsPage() {
     if (!account || busy) return;
     const nextName = nameDraft.trim();
     if (!nextName) {
-      setActionError(t('finance.accountNameRequired'));
+      toast.error(t('finance.accountNameRequired'));
       return;
     }
     setBusy(true);
-    setActionError('');
-    setNameSuccess('');
     try {
       const updated = await apiFetch<FinanceAccount>(`/finance/accounts/${account.id}`, {
         method: 'PUT',
@@ -86,9 +84,9 @@ export default function FinanceAccountDetailsPage() {
       setAccount((prev) => (prev ? { ...prev, ...updated } : updated));
       setNameDraft(updated.name);
       setEditingName(false);
-      setNameSuccess(t('finance.accountNameUpdated'));
+      toast.success(t('finance.accountNameUpdated'));
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -97,16 +95,17 @@ export default function FinanceAccountDetailsPage() {
   async function runAction(path: string, method: 'PATCH' | 'POST' | 'DELETE', successRedirect?: boolean) {
     if (busy) return;
     setBusy(true);
-    setActionError('');
     try {
       const result = await apiFetch<FinanceAccount>(path, { method });
       if (successRedirect && method === 'DELETE' && (result as { deletedAt?: string | null }).deletedAt) {
+        toast.success(t('common.success'));
         router.push('/finance/accounts');
         return;
       }
+      toast.success(t('common.success'));
       reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -128,11 +127,7 @@ export default function FinanceAccountDetailsPage() {
       ]}
     >
       {error ? <FinanceErrorState message={error} /> : null}
-      {searchParams.get('created') === 'zero' ? (
-        <p className="mb-4 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">
-          {t('finance.zeroBalanceAccountCreated')}
-        </p>
-      ) : null}
+      {null}
       {loading ? <FinanceLoadingState /> : null}
       {account ? (
         <>
@@ -178,10 +173,6 @@ export default function FinanceAccountDetailsPage() {
 
           {(canManage || canApproveLifecycle || canRenameAccount) ? (
             <div className="flex flex-wrap gap-2 rounded-3xl border border-slate-200 bg-white p-4">
-              {actionError ? <div className="w-full"><FinanceErrorState message={actionError} /></div> : null}
-              {nameSuccess ? (
-                <p className="w-full rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{nameSuccess}</p>
-              ) : null}
               {canManage && !isBranchAccountant && (status === 'DRAFT' || status === 'BLOCKED' || status === 'INACTIVE') ? (
                 <button
                   type="button"
@@ -268,7 +259,7 @@ export default function FinanceAccountDetailsPage() {
                           onClick={() => {
                             setEditingName(false);
                             setNameDraft(account.name);
-                            setActionError('');
+                            /* toast clear */ void 0;
                           }}
                           className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
                         >
@@ -285,8 +276,6 @@ export default function FinanceAccountDetailsPage() {
                           onClick={() => {
                             setEditingName(true);
                             setNameDraft(account.name);
-                            setNameSuccess('');
-                            setActionError('');
                           }}
                           className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700"
                         >

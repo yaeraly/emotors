@@ -24,6 +24,8 @@ import type {
   User,
 } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 const eventTypes: CustomerEventType[] = [
   'NOTE',
   'CALL',
@@ -123,7 +125,7 @@ export default function CustomerDetailPage() {
       );
       setTimeline(result.timeline);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }

@@ -22,6 +22,8 @@ import {
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export type SupplierPayment = {
   id: string;
   sequenceNumber?: number;
@@ -268,7 +270,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       });
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -354,7 +356,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       closeForm();
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -370,7 +372,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       });
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -387,7 +389,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       });
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -405,7 +407,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       });
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -436,7 +438,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       }
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -455,7 +457,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       setReturnReason('');
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -482,7 +484,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       setConfirmTarget(null);
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

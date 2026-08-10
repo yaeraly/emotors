@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { I18nProvider } from '@/i18n/useTranslation';
+import { ToastProvider } from '@/components/ToastProvider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -16,7 +17,10 @@ export default function RootLayout({
   return (
     <html lang="ky">
       <body>
-        <I18nProvider>{children}</I18nProvider>
+        <I18nProvider>
+          {children}
+          <ToastProvider />
+        </I18nProvider>
       </body>
     </html>
   );

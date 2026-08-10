@@ -9,6 +9,8 @@ import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type PickingTask = {
   id: string;
   status: string;
@@ -42,7 +44,7 @@ export default function PickingTasksPage() {
         setUser(me);
         setError('');
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : t('common.error'));
+        if (!cancelled) toast.error(err instanceof Error ? err.message : t('common.error'));
       }
     }
     void load();

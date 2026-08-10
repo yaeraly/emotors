@@ -58,6 +58,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type SaleItemForm = {
   productId: string;
   productName: string;
@@ -212,7 +214,7 @@ function NewSalePageContent() {
       );
       setItems(hydratedItems);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoadingDraft(false);
     }
@@ -443,7 +445,7 @@ function NewSalePageContent() {
     if (refreshedItems.some((item) => !item.hasPricingPolicy)) {
       setError(t('sales.priceNotConfigured'));
     } else if (hadManualPrices) {
-      setSuccess(t('sales.manualPriceResetOnCustomerChange'));
+      toast.success(t('sales.manualPriceResetOnCustomerChange'));
     }
   }
 
@@ -680,7 +682,7 @@ function NewSalePageContent() {
       return null;
     }
     setSaving(true);
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       let sale = await apiFetch<Sale>(
@@ -724,7 +726,7 @@ function NewSalePageContent() {
       setDraftSale(sale);
       return sale;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
       return null;
     } finally {
       setSaving(false);
@@ -752,7 +754,7 @@ function NewSalePageContent() {
       window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
       setError(t('sales.whatsappSent'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -767,16 +769,16 @@ function NewSalePageContent() {
 
     setSubmittingInstallment(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       await apiFetch(`/sales/${sale.id}/installment-request/submit`, { method: 'POST' });
       const updated = await apiFetch<Sale>(`/sales/${sale.id}`);
       setDraftSale(updated);
       setError('');
-      setSuccess(t('sales.installmentRequestSubmitted'));
+      toast.success(t('sales.installmentRequestSubmitted'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmittingInstallment(false);
     }
@@ -824,7 +826,7 @@ function NewSalePageContent() {
         customerType: 'RETAIL',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setCreatingCustomer(false);
     }
@@ -945,7 +947,7 @@ function NewSalePageContent() {
 
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
 
     try {
       if (selectedCustomer) {
@@ -986,13 +988,13 @@ function NewSalePageContent() {
       });
       setDraftSale(finalized);
       if (branchCashierHandoffFlow && paymentType === 'FULL_PAYMENT') {
-        setSuccess(t('sales.registeredSentToCashier'));
+        toast.success(t('sales.registeredSentToCashier'));
         router.push('/sales');
         return;
       }
       router.push(`/sales/${finalized.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -1007,7 +1009,7 @@ function NewSalePageContent() {
       });
       setDraftSale(cancelled);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

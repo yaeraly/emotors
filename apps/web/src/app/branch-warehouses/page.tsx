@@ -27,6 +27,8 @@ import {
 } from '@/lib/warehouse-list-utils';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const PAGE_SIZE = 10;
 
 type BranchWarehouseMetrics = {
@@ -83,7 +85,7 @@ function BranchWarehousesPageContent() {
   useEffect(() => {
     const successMessage = window.localStorage.getItem('emotors_warehouse_success');
     if (successMessage) {
-      setSuccess(successMessage);
+      toast.success(successMessage);
       window.localStorage.removeItem('emotors_warehouse_success');
     }
     Promise.all([

@@ -7,6 +7,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SaleDetail = {
   id: string;
   saleNumber: string;
@@ -57,7 +59,7 @@ export default function HqSaleDetailPage() {
       await apiFetch(`/hq-b2b-sales/${saleId}/resubmit-payment`, { method: 'POST' });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setResubmitting(false);
     }

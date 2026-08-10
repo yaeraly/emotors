@@ -5,6 +5,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type PaymentRequestRow = {
   id: string;
   saleId: string;
@@ -51,7 +53,7 @@ export default function HqAccountantPaymentConfirmationsPage() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActionId(null);
     }
@@ -68,7 +70,7 @@ export default function HqAccountantPaymentConfirmationsPage() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActionId(null);
     }

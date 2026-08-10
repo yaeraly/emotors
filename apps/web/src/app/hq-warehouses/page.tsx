@@ -25,6 +25,8 @@ import {
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const PAGE_SIZE = 10;
 
 type HqTab = 'warehouses' | 'inventory';
@@ -77,7 +79,6 @@ function HqWarehousesPageContent() {
   const [warehouses, setWarehouses] = useState<WarehouseMetrics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
@@ -89,7 +90,7 @@ function HqWarehousesPageContent() {
   useEffect(() => {
     const success = window.localStorage.getItem('emotors_warehouse_success');
     if (success) {
-      setSuccess(success);
+      toast.success(success);
       window.localStorage.removeItem('emotors_warehouse_success');
     }
     void load();
@@ -112,7 +113,7 @@ function HqWarehousesPageContent() {
       setWarehouses(normalized);
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -217,7 +218,6 @@ function HqWarehousesPageContent() {
         />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <SectionTopNav
           tabs={hqTabs}

@@ -15,6 +15,8 @@ import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPa
 import { formatProductUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Supplier = { id: string; name: string };
 type Factory = { id: string; name: string; supplierId: string };
 
@@ -390,7 +392,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         router.push(`/procurement/orders/${created.id}?tab=payments`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

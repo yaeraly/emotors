@@ -15,6 +15,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type ReconciliationRow = {
   id: string;
   reconciliationNumber: string;
@@ -76,7 +78,7 @@ function FinanceReconciliationPageContent() {
       setForm({ accountId: '', actualBalance: '', notes: '' });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   };
 

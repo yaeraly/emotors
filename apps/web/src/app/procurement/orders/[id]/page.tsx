@@ -37,6 +37,8 @@ import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { BusinessDateField } from '@/components/BusinessDateField';
 
+import { toast } from '@/lib/toast';
+
 type ProcurementOrderItem = {
   id: string;
   productId: string;
@@ -288,7 +290,6 @@ function ProcurementOrderDetailPageContent() {
     hqWarehouseId: '',
   });
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [savingChinaDomestic, setSavingChinaDomestic] = useState(false);
   const [savingCargoReceipt, setSavingCargoReceipt] = useState(false);
   const [uploadingCargoReceipt, setUploadingCargoReceipt] = useState(false);
@@ -657,16 +658,16 @@ function ProcurementOrderDetailPageContent() {
 
   async function recalculateLandedCost() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/recalculate`, {
         method: 'POST',
         body: JSON.stringify({ reason: 'Manual recalculation from landed cost tab' }),
       });
-      setSuccess(t('common.success'));
+      toast.success(t('common.success'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -714,7 +715,7 @@ function ProcurementOrderDetailPageContent() {
       setChinaDomesticChangeReason('');
       setSvhChangeReason('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -726,16 +727,16 @@ function ProcurementOrderDetailPageContent() {
   async function unlockOrder(reason: string) {
     setUnlocking(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/unlock`, {
         method: 'POST',
         body: JSON.stringify({ reason }),
       });
-      setSuccess(t('procurement.orders.editWindow.unlockSuccess'));
+      toast.success(t('procurement.orders.editWindow.unlockSuccess'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setUnlocking(false);
     }
@@ -749,17 +750,17 @@ function ProcurementOrderDetailPageContent() {
     }
     setUnlockingChinaDomestic(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/unlock-china-domestic-transport`, {
         method: 'POST',
         body: JSON.stringify({ reason }),
       });
-      setSuccess(t('procurement.chinaDomestic.unlockSuccess'));
+      toast.success(t('procurement.chinaDomestic.unlockSuccess'));
       setChinaDomesticUnlockReason('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setUnlockingChinaDomestic(false);
     }
@@ -767,13 +768,13 @@ function ProcurementOrderDetailPageContent() {
 
   async function action(path: string) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/${path}`, { method: 'POST' });
-      setSuccess(t('common.success'));
+      toast.success(t('common.success'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -785,7 +786,7 @@ function ProcurementOrderDetailPageContent() {
     }
     setSavingChinaDomestic(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/china-domestic-transport`, {
         method: 'PUT',
@@ -795,11 +796,11 @@ function ProcurementOrderDetailPageContent() {
           changeReason: chinaDomesticChangeReason.trim() || undefined,
         }),
       });
-      setSuccess(t('procurement.transport.saved'));
+      toast.success(t('procurement.transport.saved'));
       setChinaDomesticChangeReason('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingChinaDomestic(false);
     }
@@ -810,7 +811,7 @@ function ProcurementOrderDetailPageContent() {
     const requestId = ++cargoSaveRequestIdRef.current;
     setSavingCargoReceipt(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<ProcurementOrder>(`/procurement/orders/${id}/cargo-receipt`, {
         method: 'PUT',
@@ -826,10 +827,10 @@ function ProcurementOrderDetailPageContent() {
       });
       if (requestId !== cargoSaveRequestIdRef.current) return;
       applyCargoPaymentSaveResult(updated);
-      setSuccess(t('procurement.orders.cargoPaymentSaved'));
+      toast.success(t('procurement.orders.cargoPaymentSaved'));
     } catch (err) {
       if (requestId !== cargoSaveRequestIdRef.current) return;
-      setError(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
+      toast.error(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
     } finally {
       if (requestId === cargoSaveRequestIdRef.current) {
         setSavingCargoReceipt(false);
@@ -865,7 +866,7 @@ function ProcurementOrderDetailPageContent() {
     if (!order || finalized || readOnlyFinance) return;
     setSavingImportCosts(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/import-costs`, {
         method: 'PUT',
@@ -876,10 +877,10 @@ function ProcurementOrderDetailPageContent() {
           otherExpenseKgs: Number(logisticsForm.otherExpenseKgs || 0),
         }),
       });
-      setSuccess(t('procurement.transport.saved'));
+      toast.success(t('procurement.transport.saved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingImportCosts(false);
     }
@@ -896,7 +897,7 @@ function ProcurementOrderDetailPageContent() {
     }
     setSavingSvh(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/svh-to-hq-transport`, {
         method: 'PUT',
@@ -910,11 +911,11 @@ function ProcurementOrderDetailPageContent() {
           changeReason: svhChangeReason.trim() || undefined,
         }),
       });
-      setSuccess(t('procurement.domesticTransport.saved'));
+      toast.success(t('procurement.domesticTransport.saved'));
       setSvhChangeReason('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingSvh(false);
     }
@@ -928,7 +929,7 @@ function ProcurementOrderDetailPageContent() {
     if (!token) return;
     setUploadingCargoReceipt(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -959,9 +960,9 @@ function ProcurementOrderDetailPageContent() {
           cargoAttachments: nextAttachments,
         };
       });
-      setSuccess(t('procurement.payments.cargoReceiptAttached'));
+      toast.success(t('procurement.payments.cargoReceiptAttached'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
+      toast.error(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
     } finally {
       setUploadingCargoReceipt(false);
     }
@@ -970,7 +971,7 @@ function ProcurementOrderDetailPageContent() {
   async function receiveGoods() {
     if (!order || cargoValidationError) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/orders/${id}/receive-to-hq`, {
         method: 'POST',
@@ -995,10 +996,10 @@ function ProcurementOrderDetailPageContent() {
           })),
         }),
       });
-      setSuccess(t('procurement.orders.received'));
+      toast.success(t('procurement.orders.received'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -1024,7 +1025,6 @@ function ProcurementOrderDetailPageContent() {
           ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {readOnlyFinance ? <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">{t('procurement.orders.readOnlyFinance')}</p> : null}
         {previewTotals?.isEstimated ? (
           <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.orders.landedCostEstimatedWarning')}</p>

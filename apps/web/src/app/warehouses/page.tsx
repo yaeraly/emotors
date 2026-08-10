@@ -7,6 +7,8 @@ import { apiFetch } from '@/lib/api';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function WarehousesPage() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -38,7 +40,7 @@ export default function WarehousesPage() {
         branchId: current.branchId || currentUserResult.branchId || branchResult[0]?.id || '',
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -84,7 +86,7 @@ export default function WarehousesPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

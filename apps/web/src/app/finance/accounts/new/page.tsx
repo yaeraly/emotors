@@ -9,6 +9,8 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { isBranchAccountantUser } from '@/lib/rbac';
 import type { FinanceAccountTypeDefinition, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 const BRANCH_ACCOUNTANT_TYPES = new Set(['BANK', 'QR']);
 
 export default function CreateFinanceAccountPage() {
@@ -93,7 +95,7 @@ export default function CreateFinanceAccountPage() {
 
       router.push(`/finance/accounts/${account.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }

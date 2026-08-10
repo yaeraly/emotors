@@ -8,6 +8,8 @@ import { apiFetch } from '@/lib/api';
 import { translateStatus } from '@/lib/translate-status';
 import type { AccountantInvoiceWorkflowStatus, BranchAccountantInvoice } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type PendingConfirmedOrder = {
   id: string;
   requestNumber: string;
@@ -86,7 +88,7 @@ export default function BranchAccountantInvoicesPage() {
         setPendingOrders((rows) => rows.filter((row) => row.id !== requestId));
         router.push(`/branch-accountant/invoices/${invoice.id}`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('common.error'));
+        toast.error(err instanceof Error ? err.message : t('common.error'));
       } finally {
         setCreatingInvoiceFor(null);
       }

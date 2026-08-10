@@ -26,6 +26,8 @@ import { buildHqDispatchSendPayload, shouldShowHqDispatchTransportFields } from 
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 export default function DistributionOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
@@ -34,7 +36,6 @@ export default function DistributionOrderDetailPage() {
   const [receiving, setReceiving] = useState<GoodsReceiving | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   async function load() {
     try {
@@ -45,7 +46,7 @@ export default function DistributionOrderDetailPage() {
       setCurrentUser(me);
       setOrder(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -71,7 +72,7 @@ export default function DistributionOrderDetailPage() {
       return;
     }
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setOrder(
         await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/${path}`, {
@@ -79,16 +80,16 @@ export default function DistributionOrderDetailPage() {
           body: body ? JSON.stringify(body) : path === 'send-to-warehouse' ? JSON.stringify({}) : undefined,
         }),
       );
-      setSuccess(message);
+      toast.success(message);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function setItemPicked(itemId: string, picked: boolean) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setOrder(
         await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/items/${itemId}/picked`, {
@@ -96,9 +97,9 @@ export default function DistributionOrderDetailPage() {
           body: JSON.stringify({ picked }),
         }),
       );
-      setSuccess(picked ? t('distribution.itemPickedDone') : t('distribution.undoItemPick'));
+      toast.success(picked ? t('distribution.itemPickedDone') : t('distribution.undoItemPick'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -150,7 +151,6 @@ export default function DistributionOrderDetailPage() {
         <h2 className="text-3xl font-bold text-slate-950">{order?.orderNumber ?? '-'}</h2>
       </div>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {order ? (
         <>
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -407,11 +407,9 @@ export default function DistributionOrderDetailPage() {
                 onCompleted={(result) => {
                   setReceiving(result.receiving);
                   setShortageReport(result.shortageReport);
-                  setSuccess(
-                    result.shortageReport
+                  toast.success(result.shortageReport
                       ? t('distribution.hasDifferences')
-                      : t('distribution.branchReceivingCompletedSuccess'),
-                  );
+                      : t('distribution.branchReceivingCompletedSuccess'),);
                   void load();
                 }}
               />
@@ -422,7 +420,7 @@ export default function DistributionOrderDetailPage() {
                 canEnter={canEnterTransport}
                 onUpdated={(updated) => {
                   setOrder(updated);
-                  setSuccess(t('branchWarehouseOperator.transportEntered'));
+                  toast.success(t('branchWarehouseOperator.transportEntered'));
                 }}
               />
             ) : null}

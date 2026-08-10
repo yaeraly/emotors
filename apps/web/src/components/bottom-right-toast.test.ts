@@ -9,31 +9,32 @@ const detailPage = readFileSync(
   join(root, 'app/branch-purchase-requests/[id]/page.tsx'),
   'utf8',
 );
-const toastComponent = readFileSync(join(root, 'components/BottomRightToast.tsx'), 'utf8');
+const toastLib = readFileSync(join(root, 'lib/toast.ts'), 'utf8');
+const toastProvider = readFileSync(join(root, 'components/ToastProvider.tsx'), 'utf8');
 
-describe('HQ Sales line review bottom-right toast', () => {
-  it('detail page uses shared bottom-right toast for line review feedback', () => {
-    assert.match(detailPage, /useBottomRightToast/);
-    assert.match(detailPage, /<BottomRightToast/);
+describe('HQ Sales line review uses global bottom-right toast', () => {
+  it('detail page uses global toast API for line review feedback', () => {
+    assert.match(detailPage, /from '@\/lib\/toast'/);
     assert.match(detailPage, /lineReviewApproved/);
     assert.match(detailPage, /lineReviewRejected/);
     assert.match(detailPage, /lineReviewSaveFailed/);
-    assert.match(detailPage, /showLineReviewSuccess/);
-    assert.match(detailPage, /showLineReviewError/);
+    assert.match(detailPage, /toast\.success/);
+    assert.match(detailPage, /toast\.error/);
   });
 
-  it('toast container is fixed bottom-right', () => {
-    assert.match(toastComponent, /fixed bottom-6 right-6/);
-    assert.match(toastComponent, /bg-emerald-600/);
-    assert.match(toastComponent, /bg-red-600/);
+  it('global toast container is fixed bottom-right', () => {
+    assert.match(toastProvider, /fixed bottom-4 right-4/);
+    assert.match(toastProvider, /bg-emerald-600/);
+    assert.match(toastProvider, /bg-red-600/);
+    assert.match(toastLib, /export const toast/);
   });
 
-  it('line review success uses toast for HQ Sales instead of inline banner', () => {
+  it('line review success uses toast instead of inline green banner', () => {
     const submitBlock = detailPage.slice(
       detailPage.indexOf('async function submitLineReview'),
       detailPage.indexOf('function setLineAction'),
     );
-    assert.match(submitBlock, /if \(hqSalesView\) \{[\s\S]*showLineReviewSuccess/);
-    assert.match(submitBlock, /else \{[\s\S]*setSuccess\(t\('branchProductRequest\.lineReviewSaved'\)\)/);
+    assert.match(submitBlock, /toast\.success\(lineReviewSuccessMessage/);
+    assert.doesNotMatch(submitBlock, /setSuccess\(/);
   });
 });

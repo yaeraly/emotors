@@ -15,6 +15,8 @@ import type { BranchInvoice, BranchPayment, BranchPaymentMethod, BranchType, Use
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 const methods: BranchPaymentMethod[] = ['CASH', 'QR', 'BANK', 'TRANSFER', 'INSTALLMENT', 'BALANCE'];
 
 export default function BranchInvoiceDetailPage() {
@@ -31,7 +33,6 @@ export default function BranchInvoiceDetailPage() {
   const [installmentMonths, setInstallmentMonths] = useState('3');
   const [installmentRejectComment, setInstallmentRejectComment] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   async function load() {
     try {
@@ -42,7 +43,7 @@ export default function BranchInvoiceDetailPage() {
       setInvoice(invoiceData);
       setCurrentUser(me);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -54,7 +55,7 @@ export default function BranchInvoiceDetailPage() {
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/payments`, {
@@ -70,28 +71,26 @@ export default function BranchInvoiceDetailPage() {
       setAmount('');
       setNote('');
       setReceiptReference('');
-      setSuccess(
-        canSubmitBranchInvoicePayment(currentUser) && !canConfirmBranchInvoicePayment(currentUser)
+      toast.success(canSubmitBranchInvoicePayment(currentUser) && !canConfirmBranchInvoicePayment(currentUser)
           ? t('distribution.paymentSubmittedAuto')
-          : t('distribution.paymentAdded'),
-      );
+          : t('distribution.paymentAdded'),);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function confirmPayment(payment: BranchPayment) {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/payments/${payment.id}/confirm`, {
           method: 'POST',
         }),
       );
-      setSuccess(t('distribution.paymentConfirmed'));
+      toast.success(t('distribution.paymentConfirmed'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -101,7 +100,7 @@ export default function BranchInvoiceDetailPage() {
       return;
     }
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/payments/${payment.id}/reject`, {
@@ -110,16 +109,16 @@ export default function BranchInvoiceDetailPage() {
         }),
       );
       setRejectComment('');
-      setSuccess(t('distribution.paymentRejected'));
+      toast.success(t('distribution.paymentRejected'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function requestInstallment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment`, {
@@ -130,20 +129,20 @@ export default function BranchInvoiceDetailPage() {
           }),
         }),
       );
-      setSuccess(t('distribution.installmentRequested'));
+      toast.success(t('distribution.installmentRequested'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function approveInstallment() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment/approve`, { method: 'POST' }));
-      setSuccess(t('distribution.installmentApprovedWarehouseReady'));
+      toast.success(t('distribution.installmentApprovedWarehouseReady'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -153,7 +152,7 @@ export default function BranchInvoiceDetailPage() {
       return;
     }
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(
         await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment/reject`, {
@@ -162,20 +161,20 @@ export default function BranchInvoiceDetailPage() {
         }),
       );
       setInstallmentRejectComment('');
-      setSuccess(t('sales.installmentRequestRejected'));
+      toast.success(t('sales.installmentRequestRejected'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   async function sendToCashier() {
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/send-to-cashier`, { method: 'POST' }));
-      setSuccess(t('distribution.sentToCashier'));
+      toast.success(t('distribution.sentToCashier'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -195,7 +194,6 @@ export default function BranchInvoiceDetailPage() {
           <h2 className="text-3xl font-bold">{invoice?.invoiceNumber ?? '-'}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {invoice ? (
           <>
             <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">

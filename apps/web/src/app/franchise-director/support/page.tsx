@@ -5,6 +5,8 @@ import { FranchiseDirectorShell } from '@/components/franchise-director/Franchis
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const ASSIGNEE_ROLES = ['Branch Manager', 'Marketing', 'Academy', 'Supply Manager'] as const;
 
 type Task = {
@@ -34,7 +36,7 @@ export default function FranchiseDirectorSupportPage() {
     try {
       setTasks(await apiFetch<Task[]>('/franchise-director/tasks'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -53,7 +55,7 @@ export default function FranchiseDirectorSupportPage() {
       setForm({ title: '', description: '', assigneeRole: 'Branch Manager', dueAt: '' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -65,7 +67,7 @@ export default function FranchiseDirectorSupportPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

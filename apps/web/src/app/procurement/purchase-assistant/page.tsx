@@ -10,6 +10,8 @@ import { canManageProcurement, isSupplyChainManagerUser, hasFullAccess } from '@
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type Priority = 'URGENT' | 'RECOMMENDED' | 'SUFFICIENT';
 
 type AssistantItem = {
@@ -85,7 +87,7 @@ export default function PurchaseAssistantPage() {
       });
     } catch (err) {
       setData(null);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -196,7 +198,7 @@ export default function PurchaseAssistantPage() {
       );
       router.push('/procurement/orders/new');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBusy(false);
     }

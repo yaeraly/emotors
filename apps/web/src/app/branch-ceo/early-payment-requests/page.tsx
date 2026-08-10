@@ -5,6 +5,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
 
+import { toast } from '@/lib/toast';
+
 type EarlyPaymentRequest = {
   id: string;
   orderNumber: string | null;
@@ -29,7 +31,7 @@ export default function BranchCeoEarlyPaymentsPage() {
     try {
       setRequests(await apiFetch<EarlyPaymentRequest[]>('/branch-ceo/early-payment-requests'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -44,7 +46,7 @@ export default function BranchCeoEarlyPaymentsPage() {
       await apiFetch(`/branch-ceo/early-payment-requests/${id}/approve`, { method: 'POST' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -60,7 +62,7 @@ export default function BranchCeoEarlyPaymentsPage() {
       setRejectReason('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

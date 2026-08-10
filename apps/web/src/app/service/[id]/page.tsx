@@ -10,6 +10,8 @@ import type { PaymentMethod, ServiceOrder, ServiceProductOption, User } from '@/
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 export default function ServiceOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
@@ -52,7 +54,7 @@ export default function ServiceOrderDetailPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -62,7 +64,7 @@ export default function ServiceOrderDetailPage() {
       await apiFetch(`/service-orders/${id}/${path}`, { method: 'PUT', body: JSON.stringify(payload) });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -83,7 +85,7 @@ export default function ServiceOrderDetailPage() {
       setPartNotes('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

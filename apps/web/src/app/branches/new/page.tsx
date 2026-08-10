@@ -9,11 +9,12 @@ import { canAssignBranchHqWarehouse } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function NewBranchPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
@@ -42,7 +43,7 @@ export default function NewBranchPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSaving(true);
     try {
       await apiFetch('/branches', {
@@ -52,12 +53,12 @@ export default function NewBranchPage() {
           assignedHqWarehouseId: form.assignedHqWarehouseId || null,
         }),
       });
-      setSuccess(t('branches.created'));
+      toast.success(t('branches.created'));
       window.localStorage.setItem('emotors-branch-created', '1');
       router.push('/branches');
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -80,7 +81,6 @@ export default function NewBranchPage() {
           <h2 className="text-3xl font-bold text-slate-950">{t('branches.new')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <p className="md:col-span-2 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
             {t('branches.autoCodeHint')}

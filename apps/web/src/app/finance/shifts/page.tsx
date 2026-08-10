@@ -13,6 +13,8 @@ import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { CashierShift, FinanceAccount, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 export default function FinanceShiftsPage() {
   return (
     <Suspense fallback={null}>
@@ -73,7 +75,7 @@ function FinanceShiftsPageContent() {
       await apiFetch('/finance/shifts/open', { method: 'POST', body: JSON.stringify({ accountId: openForm.accountId, openingBalance: Number(openForm.openingBalance) }) });
       setOpenForm({ accountId: '', openingBalance: '' });
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : t('common.error')); }
+    } catch (err) { toast.error(err instanceof Error ? err.message : t('common.error')); }
   };
 
   const onClose = async (event: FormEvent) => {
@@ -82,7 +84,7 @@ function FinanceShiftsPageContent() {
       await apiFetch(`/finance/shifts/${closeForm.shiftId}/close`, { method: 'POST', body: JSON.stringify({ actualBalance: Number(closeForm.actualBalance) }) });
       setCloseForm({ shiftId: '', actualBalance: '' });
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : t('common.error')); }
+    } catch (err) { toast.error(err instanceof Error ? err.message : t('common.error')); }
   };
 
   return (

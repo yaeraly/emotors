@@ -6,6 +6,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SaleRow = {
   id: string;
   saleNumber: string;
@@ -45,7 +47,7 @@ export default function HqSalesInstallmentRequestsPage() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActionId(null);
     }
@@ -62,7 +64,7 @@ export default function HqSalesInstallmentRequestsPage() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActionId(null);
     }

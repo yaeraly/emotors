@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { BottomRightToast, useBottomRightToast } from '@/components/BottomRightToast';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
+import { toast } from '@/lib/toast';
 import {
   canManageBranchPurchaseRequests,
   canManageOwnBranchProductRequest,
@@ -276,12 +276,9 @@ export default function BranchPurchaseRequestDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submittingLineId, setSubmittingLineId] = useState<string | null>(null);
   const [lineDecisions, setLineDecisions] = useState<Record<string, LineDecision>>({});
-  const { toast: lineReviewToast, showSuccess: showLineReviewSuccess, showError: showLineReviewError } =
-    useBottomRightToast();
 
   function localizeBranchRequestError(message: string) {
     if (message.includes('NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH')) return t('branchHqRouting.noWarehouseAssigned');
@@ -423,11 +420,7 @@ export default function BranchPurchaseRequestDetailPage() {
     if (resolvedDecision.action === 'APPROVE') {
       const validationError = validateApprovedQuantityForApprove(t, item, resolvedDecision.approvedQuantity);
       if (validationError) {
-        if (hqSalesView) {
-          showLineReviewError(validationError);
-        } else {
-          setError(validationError);
-        }
+        toast.error(validationError);
         return;
       }
     }
@@ -436,17 +429,11 @@ export default function BranchPurchaseRequestDetailPage() {
       (resolvedDecision.action === 'REJECT' || resolvedDecision.action === 'REMOVE') &&
       !resolvedDecision.publicComment.trim()
     ) {
-      const commentError = t('branchProductRequest.commentRequired');
-      if (hqSalesView) {
-        showLineReviewError(commentError);
-      } else {
-        setError(commentError);
-      }
+      toast.error(t('branchProductRequest.commentRequired'));
       return;
     }
 
     setError('');
-    setSuccess('');
     setSubmittingLineId(item.id);
     try {
       const detail = await apiFetch<RequestDetail>(
@@ -458,18 +445,10 @@ export default function BranchPurchaseRequestDetailPage() {
       );
       setRequest(detail);
       setLineDecisions(buildLineDecisionsFromItems(detail.items, detail.hqStockStatus !== 'unavailable'));
-      if (hqSalesView) {
-        showLineReviewSuccess(lineReviewSuccessMessage(t, resolvedDecision.action));
-      } else {
-        setSuccess(t('branchProductRequest.lineReviewSaved'));
-      }
+      toast.success(lineReviewSuccessMessage(t, resolvedDecision.action));
     } catch (err) {
       const message = localizeBranchRequestError(err instanceof Error ? err.message : t('common.error'));
-      if (hqSalesView) {
-        showLineReviewError(message || t('branchProductRequest.lineReviewSaveFailed'));
-      } else {
-        setError(message);
-      }
+      toast.error(message || t('branchProductRequest.lineReviewSaveFailed'));
     } finally {
       setSubmittingLineId(null);
     }
@@ -480,11 +459,7 @@ export default function BranchPurchaseRequestDetailPage() {
       const decision = lineDecisions[item.id] ?? defaultLineDecision(item, request?.hqStockStatus !== 'unavailable');
       const validationError = validateApprovedQuantityForApprove(t, item, decision.approvedQuantity);
       if (validationError) {
-        if (hqSalesView) {
-          showLineReviewError(validationError);
-        } else {
-          setError(validationError);
-        }
+        toast.error(validationError);
         return;
       }
       const approvedQty = parseApprovedQuantityInput(decision.approvedQuantity);
@@ -504,14 +479,14 @@ export default function BranchPurchaseRequestDetailPage() {
   async function confirmBranchOrder() {
     if (!request || submitting) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${request.id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('branchProductRequest.branchConfirmed'));
+      toast.success(t('branchProductRequest.branchConfirmed'));
       await load();
     } catch (err) {
-      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+      toast.error(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
     } finally {
       setSubmitting(false);
     }
@@ -520,14 +495,14 @@ export default function BranchPurchaseRequestDetailPage() {
   async function declineBranchOrder() {
     if (!request || submitting) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${request.id}/decline`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('branchProductRequest.branchDeclined'));
+      toast.success(t('branchProductRequest.branchDeclined'));
       await load();
     } catch (err) {
-      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+      toast.error(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
     } finally {
       setSubmitting(false);
     }
@@ -549,7 +524,7 @@ export default function BranchPurchaseRequestDetailPage() {
     }
 
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     setSubmitting(true);
     try {
       const body = {
@@ -565,10 +540,10 @@ export default function BranchPurchaseRequestDetailPage() {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      setSuccess(t('branchProductRequest.reviewSubmitted'));
+      toast.success(t('branchProductRequest.reviewSubmitted'));
       await load();
     } catch (err) {
-      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+      toast.error(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
     } finally {
       setSubmitting(false);
     }
@@ -579,10 +554,10 @@ export default function BranchPurchaseRequestDetailPage() {
     setError('');
     try {
       await apiFetch(`/branch-purchase-requests/${request.id}/reject`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('distribution.orderRejected'));
+      toast.success(t('distribution.orderRejected'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -594,11 +569,11 @@ export default function BranchPurchaseRequestDetailPage() {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      setSuccess(t('branchHqRouting.sentToWarehouse'));
+      toast.success(t('branchHqRouting.sentToWarehouse'));
       window.location.href = `/distribution/orders/${order.id}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(localizeBranchRequestError(message));
+      toast.error(localizeBranchRequestError(message));
     }
   }
 
@@ -778,8 +753,6 @@ export default function BranchPurchaseRequestDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
-        <BottomRightToast toast={lineReviewToast} />
 
         {branchOnlyView && reviewed ? (
           <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">

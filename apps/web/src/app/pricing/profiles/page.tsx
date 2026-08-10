@@ -7,6 +7,8 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { BranchType, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type CategoryOption = { id: string; code: string; nameRu: string; nameEn: string };
 type CategoryDiscount = { categoryId: string; discountPercent: number };
 
@@ -56,7 +58,6 @@ export default function PricingProfilesPage() {
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [discountDraft, setDiscountDraft] = useState<Record<string, string>>({});
   const [assignBranchId, setAssignBranchId] = useState('');
@@ -122,7 +123,7 @@ export default function PricingProfilesPage() {
     if (!canManage || !selectedProfile) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const discounts: CategoryDiscount[] = categories.map((category) => ({
         categoryId: category.id,
@@ -132,10 +133,10 @@ export default function PricingProfilesPage() {
         method: 'PUT',
         body: JSON.stringify({ discounts }),
       });
-      setSuccess(t('pricing.categoryDiscountsSaved'));
+      toast.success(t('pricing.categoryDiscountsSaved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -150,12 +151,12 @@ export default function PricingProfilesPage() {
         method: 'PUT',
         body: JSON.stringify({ profileId: assignProfileId || null }),
       });
-      setSuccess(t('pricing.profileAssigned'));
+      toast.success(t('pricing.profileAssigned'));
       setAssignBranchId('');
       setAssignProfileId('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -165,7 +166,6 @@ export default function PricingProfilesPage() {
     <>
       <PricingHubNav activeTab="profiles" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       <p className="text-xs text-slate-500">{t('pricing.profilesHint')}</p>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">

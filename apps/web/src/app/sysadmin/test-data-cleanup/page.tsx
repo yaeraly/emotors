@@ -6,6 +6,8 @@ import { apiFetch } from '@/lib/api';
 import { CLEANUP_COUNT_LABELS } from '@/lib/test-data-cleanup-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const ALL_CONFIRMATION = 'DELETE ALL TEST DATA';
 
 const CATEGORIES = [
@@ -42,7 +44,7 @@ export default function TestDataCleanupPage() {
       const data = await apiFetch<CountsResponse>('/dev-admin/test-data-cleanup/counts');
       setCounts(data.counts);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -63,7 +65,7 @@ export default function TestDataCleanupPage() {
     }
     setRunning(category);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch('/dev-admin/test-data-cleanup', {
         method: 'POST',
@@ -73,12 +75,12 @@ export default function TestDataCleanupPage() {
           confirmation: category === 'all' ? allConfirmation : undefined,
         }),
       });
-      setSuccess(t('sysadmin.cleanup.success'));
+      toast.success(t('sysadmin.cleanup.success'));
       setPendingCategory(null);
       setAllConfirmation('');
       await loadCounts();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setRunning(null);
     }

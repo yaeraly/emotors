@@ -45,6 +45,8 @@ import {
 } from '@/lib/supplier-payment-cny-preview.util';
 import type { User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type BillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
 
 type BillRow = {
@@ -168,7 +170,6 @@ function BillsToPayPageContent() {
   const [filters, setFilters] = useState(emptyFilters);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<BillDetail | null>(null);
-  const [actionError, setActionError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reasonModal, setReasonModal] = useState<{ mode: 'return' | 'reject'; bill: BillRow } | null>(null);
   const [reason, setReason] = useState('');
@@ -248,7 +249,7 @@ function BillsToPayPageContent() {
       const response = await apiFetch<BillsResponse>(`/procurement/bills-to-pay?${queryString}`);
       setData(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -283,12 +284,12 @@ function BillsToPayPageContent() {
   }, [canAccess, load]);
 
   async function openDetail(row: BillRow) {
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       const detail = await apiFetch<BillDetail>(`/procurement/bills-to-pay/${row.source}/${row.id}`);
       setSelected(detail);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -297,7 +298,7 @@ function BillsToPayPageContent() {
     const bill = selected || reasonModal?.bill || paymentModal;
     if (!bill) return;
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/procurement/bills-to-pay/${bill.source}/${bill.id}/${path}`, {
         method: 'POST',
@@ -311,7 +312,7 @@ function BillsToPayPageContent() {
         setSelected(detail);
       }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -361,7 +362,7 @@ function BillsToPayPageContent() {
     const ctx = paymentDeleteContext;
     if (!ctx) return;
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       const body: Record<string, unknown> = {};
       if (ctx.payment?.id) {
@@ -378,7 +379,7 @@ function BillsToPayPageContent() {
       setSelected(null);
       await load();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -561,7 +562,7 @@ function BillsToPayPageContent() {
 
     setSaving(true);
     setSupplierPaymentError('');
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(
         `/procurement/bills-to-pay/${supplierPaymentModal.bill.source}/${supplierPaymentModal.bill.id}/pay`,
@@ -618,7 +619,7 @@ function BillsToPayPageContent() {
       return;
     }
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     setCargoReturnError('');
     try {
       await apiFetch(
@@ -658,7 +659,7 @@ function BillsToPayPageContent() {
     }
     setSaving(true);
     setPostponeError('');
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       const body: Record<string, string | undefined> = {
         nextPaymentDate: postponeForm.nextPaymentDate,
@@ -692,7 +693,7 @@ function BillsToPayPageContent() {
     if (!payload) return;
 
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     setCargoPaymentError('');
     try {
       await apiFetch(
@@ -746,7 +747,7 @@ function BillsToPayPageContent() {
       return;
     }
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     setPaymentFormError('');
     try {
       await apiFetch(
@@ -861,7 +862,7 @@ function BillsToPayPageContent() {
     if (!payload) return;
 
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     setPaymentFormError('');
     try {
       if (editingPayment?.id) {
@@ -890,7 +891,7 @@ function BillsToPayPageContent() {
       await load();
       await refreshSelected(paymentModal.source, paymentModal.id);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -908,24 +909,24 @@ function BillsToPayPageContent() {
     );
 
     if (!(amountYuan > 0)) {
-      setActionError(t('finance.billsToPay.amountMustBePositive'));
+      toast.error(t('finance.billsToPay.amountMustBePositive'));
       return;
     }
     if (!(exchangeRate > 0)) {
-      setActionError(t('finance.billsToPay.exchangeRate'));
+      toast.error(t('finance.billsToPay.exchangeRate'));
       return;
     }
     if (!accountId) {
-      setActionError(t('finance.billsToPay.accountRequired'));
+      toast.error(t('finance.billsToPay.accountRequired'));
       return;
     }
     if (!recipientName) {
-      setActionError(t('finance.billsToPay.recipientRequired'));
+      toast.error(t('finance.billsToPay.recipientRequired'));
       return;
     }
 
     setSaving(true);
-    setActionError('');
+    /* toast clear */ void 0;
     try {
       // Refresh accounts so balance check is current before send-to-cashier.
       const list = await apiFetch<Array<{ id: string; name: string; availableBalance: number }>>(
@@ -934,7 +935,7 @@ function BillsToPayPageContent() {
       setAccounts(list);
       const account = list.find((item) => item.id === accountId);
       if (!account || approvedKgs > Number(account.availableBalance) + 0.009) {
-        setActionError(t('finance.billsToPay.insufficientBalance'));
+        toast.error(t('finance.billsToPay.insufficientBalance'));
         setSaving(false);
         return;
       }
@@ -946,7 +947,7 @@ function BillsToPayPageContent() {
       await load();
       await refreshSelected(selected.source, selected.id);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -973,7 +974,6 @@ function BillsToPayPageContent() {
   return (
     <FinanceLayout titleKey="finance.billsToPay" breadcrumbs={[{ labelKey: 'finance.billsToPay' }]}>
       {error ? <FinanceErrorState message={error} /> : null}
-      {actionError ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p> : null}
 
       <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
         <SummaryChip label={t('finance.billsToPay.awaiting')} value={String(summary?.awaitingCount ?? 0)} />
@@ -1453,7 +1453,7 @@ function BillsToPayPageContent() {
                   const payload = validatePaymentForm(paymentModal, { requireBalance: true });
                   if (!payload || !editingPayment?.id) return;
                   setSaving(true);
-                  setActionError('');
+                  /* toast clear */ void 0;
                   setPaymentFormError('');
                   try {
                     await apiFetch(
@@ -1472,7 +1472,7 @@ function BillsToPayPageContent() {
                     await load();
                     await refreshSelected(paymentModal.source, paymentModal.id);
                   } catch (err) {
-                    setActionError(err instanceof Error ? err.message : t('common.error'));
+                    toast.error(err instanceof Error ? err.message : t('common.error'));
                   } finally {
                     setSaving(false);
                   }

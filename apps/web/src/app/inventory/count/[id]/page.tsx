@@ -28,6 +28,8 @@ import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventor
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
 import { usePathname } from 'next/navigation';
 
+import { toast } from '@/lib/toast';
+
 type SearchResult = {
   productId: string;
   sku: string;
@@ -96,7 +98,7 @@ export default function InventoryCountDetailPage() {
       });
       setDeleteModalOpen(false);
       if (result.archived) {
-        setSuccess(t('inventoryCount.archivedSuccess'));
+        toast.success(t('inventoryCount.archivedSuccess'));
         await load();
       } else {
         router.replace(inventoryDetailBase);
@@ -106,7 +108,7 @@ export default function InventoryCountDetailPage() {
       if (message.toLowerCase().includes('reason is required')) {
         setDeleteRequireReason(true);
       }
-      setError(message);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -172,9 +174,9 @@ export default function InventoryCountDetailPage() {
     setError('');
     try {
       setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/start`, { method: 'POST' }));
-      setSuccess(t('inventoryCount.started'));
+      toast.success(t('inventoryCount.started'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -202,7 +204,7 @@ export default function InventoryCountDetailPage() {
         ),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -210,9 +212,9 @@ export default function InventoryCountDetailPage() {
     setError('');
     try {
       setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/submit`, { method: 'POST' }));
-      setSuccess(t('inventoryCount.submitted'));
+      toast.success(t('inventoryCount.submitted'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -220,9 +222,9 @@ export default function InventoryCountDetailPage() {
     setError('');
     try {
       setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/approve`, { method: 'POST' }));
-      setSuccess(t('inventoryCount.approved'));
+      toast.success(t('inventoryCount.approved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -236,9 +238,9 @@ export default function InventoryCountDetailPage() {
           body: JSON.stringify({ reason: rejectReason || undefined }),
         }),
       );
-      setSuccess(t('inventoryCount.rejected'));
+      toast.success(t('inventoryCount.rejected'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -253,10 +255,10 @@ export default function InventoryCountDetailPage() {
       });
       setUnexpectedCandidate(null);
       setSearch('');
-      setSuccess(t('inventoryCount.unexpectedProductAdded'));
+      toast.success(t('inventoryCount.unexpectedProductAdded'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setAddingUnexpected(false);
     }
@@ -305,7 +307,7 @@ export default function InventoryCountDetailPage() {
         scrollToItem(item.id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

@@ -19,6 +19,8 @@ import type { Sale, SaleInstallmentApproval, SaleInstallmentApprovalStatus, User
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type InstallmentRequestRow = SaleInstallmentApproval & {
   sale: Pick<Sale, 'id' | 'receiptNumber' | 'totalAmount' | 'paidAmount' | 'debtAmount' | 'status' | 'paymentStatus'> & {
     customer: { id: string; fullName: string; phone: string; customerType?: string };
@@ -90,7 +92,7 @@ export default function SaleInstallmentRequestsPage() {
       setUser(me);
       setRequests(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -104,7 +106,7 @@ export default function SaleInstallmentRequestsPage() {
   async function approveRequest(saleId: string) {
     setActingSaleId(saleId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/approve`, {
         method: 'POST',
@@ -112,12 +114,12 @@ export default function SaleInstallmentRequestsPage() {
           approvalComment: approvalComment.trim() || undefined,
         }),
       });
-      setSuccess(t('sales.installmentRequestApproved'));
+      toast.success(t('sales.installmentRequestApproved'));
       setApprovalComment('');
       setActionMode(null);
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActingSaleId(null);
     }
@@ -131,18 +133,18 @@ export default function SaleInstallmentRequestsPage() {
 
     setActingSaleId(saleId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/reject`, {
         method: 'POST',
         body: JSON.stringify({ rejectionReason: rejectionReason.trim() }),
       });
-      setSuccess(t('sales.installmentRequestRejected'));
+      toast.success(t('sales.installmentRequestRejected'));
       setRejectionReason('');
       setActionMode(null);
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActingSaleId(null);
     }
@@ -151,7 +153,7 @@ export default function SaleInstallmentRequestsPage() {
   async function returnRequestForRevision(saleId: string) {
     setActingSaleId(saleId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/return-for-revision`, {
         method: 'POST',
@@ -159,12 +161,12 @@ export default function SaleInstallmentRequestsPage() {
           revisionComment: revisionComment.trim() || undefined,
         }),
       });
-      setSuccess(t('sales.installmentReturnedForRevision'));
+      toast.success(t('sales.installmentReturnedForRevision'));
       setRevisionComment('');
       setActionMode(null);
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActingSaleId(null);
     }
@@ -178,18 +180,18 @@ export default function SaleInstallmentRequestsPage() {
 
     setActingSaleId(saleId);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       await apiFetch(`/sales/${saleId}/installment-request/cancel`, {
         method: 'POST',
         body: JSON.stringify({ cancellationReason: cancellationReason.trim() }),
       });
-      setSuccess(t('sales.installmentRequestCancelled'));
+      toast.success(t('sales.installmentRequestCancelled'));
       setCancellationReason('');
       setActionMode(null);
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setActingSaleId(null);
     }

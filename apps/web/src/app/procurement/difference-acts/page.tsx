@@ -15,6 +15,8 @@ import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type DifferenceAct = {
   id: string;
   actNumber: string;
@@ -117,7 +119,7 @@ function ProcurementDifferenceActsContent() {
       setSuppliers(supplierList.map((row) => ({ id: row.id, name: row.name })));
       setFactories(factoryList.map((row) => ({ id: row.id, name: row.name })));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -126,7 +128,7 @@ function ProcurementDifferenceActsContent() {
       const list = await apiFetch<DifferenceAct[]>(`/procurement/difference-acts${buildQuery(filters)}`);
       setActs(list);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -143,9 +145,9 @@ function ProcurementDifferenceActsContent() {
       await apiFetch(`/procurement/difference-acts/${act.id}/archive`, { method: 'POST' });
       setActs((current) => current.filter((row) => row.id !== act.id));
       setSelectedAct(null);
-      setSuccess(t('chinaReceiving.actArchived'));
+      toast.success(t('chinaReceiving.actArchived'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoadingId('');
     }

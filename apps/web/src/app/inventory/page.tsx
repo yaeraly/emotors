@@ -11,6 +11,8 @@ import type { InventoryBalance, ProductListResponse, StockValueReport, User } fr
 import { useTranslation } from '@/i18n/useTranslation';
 import { BranchSalesManagerWarehousePanel } from '@/components/branch-sales-manager/BranchSalesManagerWarehousePanel';
 
+import { toast } from '@/lib/toast';
+
 export default function InventoryPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -36,7 +38,7 @@ export default function InventoryPage() {
         setLowStock(lowStockResult);
         setProducts(productsResult);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('common.error'));
+        toast.error(err instanceof Error ? err.message : t('common.error'));
       }
     }
     void load();
@@ -53,7 +55,7 @@ export default function InventoryPage() {
       });
       setYuanRate('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     }
   }
 

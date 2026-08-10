@@ -8,6 +8,8 @@ import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import type { User } from '@/lib/types';
 import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 
+import { toast } from '@/lib/toast';
+
 type MarkupMatrix = {
   retailStandardMarkupPercent: number;
   retailSilverMarkupPercent: number;
@@ -165,7 +167,7 @@ export default function BranchCeoPricingPolicyPage() {
     if (!draft || !policy?.canEdit) return;
     setSaving(true);
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       const updated = await apiFetch<BranchPricingPolicy>('/branch-ceo/pricing-policy', {
         method: 'PUT',
@@ -179,9 +181,9 @@ export default function BranchCeoPricingPolicyPage() {
       });
       setPolicy(updated);
       setDraft(toDraft(updated));
-      setSuccess(t('branchCeo.pricingPolicySaved'));
+      toast.success(t('branchCeo.pricingPolicySaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -201,7 +203,7 @@ export default function BranchCeoPricingPolicyPage() {
       });
       setPreview(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPreviewing(false);
     }
@@ -233,9 +235,6 @@ export default function BranchCeoPricingPolicyPage() {
         )}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? (
-          <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p>
-        ) : null}
 
         {policy && draft ? (
           <>

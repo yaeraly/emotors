@@ -11,6 +11,8 @@ import { canDeleteProduct, shouldHideConfidentialCommercialData } from '@/lib/rb
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export function ProductsListContent() {
   const router = useRouter();
   const { t, language } = useTranslation();
@@ -21,7 +23,6 @@ export function ProductsListContent() {
   const [categoryId, setCategoryId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [deleteTargetProduct, setDeleteTargetProduct] = useState<Product | null>(null);
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
@@ -47,7 +48,7 @@ export function ProductsListContent() {
     } catch (err) {
       setData(null);
       const message = err instanceof Error ? err.message : t('inventory.loadProductsFailed');
-      setError(message.includes('справочнику товаров') ? message : t('inventory.loadProductsFailed'));
+      toast.error(message.includes('справочнику товаров') ? message : t('inventory.loadProductsFailed'));
     } finally {
       setLoading(false);
     }
@@ -56,7 +57,7 @@ export function ProductsListContent() {
   useEffect(() => {
     const success = window.localStorage.getItem('emotors_product_success');
     if (success) {
-      setSuccessMessage(success);
+      toast.success(success);
       window.localStorage.removeItem('emotors_product_success');
     }
     void loadProducts();
@@ -80,7 +81,6 @@ export function ProductsListContent() {
     const url = `${API_URL}/inventory/products/${product.id}`;
     setDeletingProductId(product.id);
     setError('');
-    setSuccessMessage('');
 
     try {
       let response: Response;
@@ -113,13 +113,11 @@ export function ProductsListContent() {
       }
 
       const result = (await response.json()) as { success: boolean; deactivated?: boolean };
-      setSuccessMessage(
-        result.deactivated ? t('inventory.productDeactivated') : t('inventory.productDeleted'),
-      );
+      toast.success(result.deactivated ? t('inventory.productDeactivated') : t('inventory.productDeleted'));
       await loadProducts();
       setDeleteTargetProduct(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('inventory.deleteFailed'));
+      toast.error(err instanceof Error ? err.message : t('inventory.deleteFailed'));
     } finally {
       setDeletingProductId(null);
     }
@@ -152,9 +150,6 @@ export function ProductsListContent() {
         </div>
       </div>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {successMessage ? (
-        <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p>
-      ) : null}
 
       <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (

@@ -8,6 +8,8 @@ import { TransportCompanyFields } from '@/components/TransportCompanyFields';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 export default function NewTransportCompanyPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -42,7 +44,7 @@ export default function NewTransportCompanyPage() {
       window.localStorage.setItem('emotors_procurement_success', t('procurement.transportCompanies.created'));
       router.push('/procurement/transport-companies');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

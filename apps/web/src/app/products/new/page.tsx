@@ -12,6 +12,8 @@ import { canEditPurchasePriceYuan } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type SupplierOption = { id: string; name: string; isActive?: boolean };
 type FactoryOption = { id: string; name: string; isActive?: boolean };
 type SuggestedProductCode = {
@@ -197,7 +199,7 @@ export default function NewProductPage() {
       if (message.toLowerCase().includes('sku') || message.toLowerCase().includes('product code')) {
         setSkuError(message);
       } else {
-        setError(message);
+        toast.error(message);
       }
     } finally {
       setSaving(false);

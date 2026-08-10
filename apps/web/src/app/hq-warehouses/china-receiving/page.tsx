@@ -7,6 +7,8 @@ import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 type ChinaReceivingTask = {
   id: string;
   orderNumber: string;
@@ -79,7 +81,7 @@ export default function ChinaReceivingListPage() {
       );
       setTasks(list);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -88,7 +90,7 @@ export default function ChinaReceivingListPage() {
   useEffect(() => {
     const successMessage = window.localStorage.getItem('emotors_china_receiving_success');
     if (successMessage) {
-      setSuccess(successMessage);
+      toast.success(successMessage);
       window.localStorage.removeItem('emotors_china_receiving_success');
     }
     void loadTasks(EMPTY_FILTERS);

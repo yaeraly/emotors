@@ -11,6 +11,8 @@ import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
+import { toast } from '@/lib/toast';
+
 const hqRoles: Role[] = [
   'CEO',
   'FRANCHISE_DIRECTOR',
@@ -60,14 +62,14 @@ export default function UsersPage() {
   useEffect(() => {
     if (sessionStorage.getItem('users.createSuccess') === '1') {
       sessionStorage.removeItem('users.createSuccess');
-      setSuccessMessage(t('users.employeeCreatedSuccess'));
-      window.setTimeout(() => setSuccessMessage(''), 5000);
+      toast.success(t('users.employeeCreatedSuccess'));
+      
       return;
     }
     if (sessionStorage.getItem('users.branchOwnerCreatedSuccess') === '1') {
       sessionStorage.removeItem('users.branchOwnerCreatedSuccess');
-      setSuccessMessage(t('users.branchOwnerCreatedSuccess'));
-      window.setTimeout(() => setSuccessMessage(''), 5000);
+      toast.success(t('users.branchOwnerCreatedSuccess'));
+      
     }
   }, [t]);
 
@@ -122,7 +124,7 @@ export default function UsersPage() {
       if (result.temporaryPassword) setTemporaryPassword(`${user.fullName}: ${result.temporaryPassword}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
+      toast.error(message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
     }
   }
 
@@ -151,13 +153,11 @@ export default function UsersPage() {
       const targetId = deleteTarget.id;
       setDeleteTarget(null);
       setUsers((current) => current.filter((row) => row.id !== targetId));
-      setSuccessMessage(
-        result.permanentlyDeleted
+      toast.success(result.permanentlyDeleted
           ? t('lifecycle.userDeletedSuccess')
-          : (result.message ?? t('lifecycle.userDeactivatedSuccess')),
-      );
+          : (result.message ?? t('lifecycle.userDeactivatedSuccess')),);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeleteLoading(false);
     }

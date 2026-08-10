@@ -9,6 +9,8 @@ import { apiFetch } from '@/lib/api';
 import type { ServiceCustomerOption, ServiceOrder, ServiceProductOption, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 const WARRANTY_OPTIONS = [
   { value: 0, label: 'Без гарантии' },
   { value: 7, label: '7 дн.' },
@@ -184,7 +186,7 @@ export default function NewServiceOrderPage() {
       });
       router.push(`/service/${order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }

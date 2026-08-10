@@ -20,6 +20,8 @@ import { usesCompactFinanceTransferTable } from '@/lib/finance-transfer-table';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { FinanceAccount, FinanceTransfer, User } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 type TransferForm = {
   sourceAccountId: string;
   destinationAccountId: string;
@@ -156,7 +158,7 @@ function FinanceTransfersPageContent() {
       closeForm();
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -177,7 +179,7 @@ function FinanceTransfersPageContent() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -193,7 +195,7 @@ function FinanceTransfersPageContent() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -211,7 +213,7 @@ function FinanceTransfersPageContent() {
       });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -243,7 +245,7 @@ function FinanceTransfersPageContent() {
       }
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -266,7 +268,7 @@ function FinanceTransfersPageContent() {
       setConfirmTarget(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -285,7 +287,7 @@ function FinanceTransfersPageContent() {
       setReturnReason('');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }

@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
 
+import { toast } from '@/lib/toast';
+
 type AllowedRange = {
   minimumDate: string;
   maximumDate: string;
@@ -79,7 +81,7 @@ export function BusinessDateEditModal({
       await onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }

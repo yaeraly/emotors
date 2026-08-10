@@ -4,6 +4,8 @@ import { ChangeEvent, useState } from 'react';
 import { API_URL, getToken } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
+import { toast } from '@/lib/toast';
+
 type ProductImageUploaderProps = {
   photoUrl: string;
   onChange: (photoUrl: string) => void;
@@ -66,11 +68,9 @@ export function ProductImageUploader({
       onChange(result.url);
     } catch (err) {
       console.error('Product image upload failed', err);
-      setError(
-        err instanceof TypeError
+      toast.error(err instanceof TypeError
           ? t('inventory.apiNotReachable')
-          : t('inventory.imageUploadFailed'),
-      );
+          : t('inventory.imageUploadFailed'),);
     } finally {
       setUploading(false);
     }

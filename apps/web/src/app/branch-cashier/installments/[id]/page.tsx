@@ -15,6 +15,8 @@ import {
 import { computeFullPaymentChange } from '@/lib/sale-full-payment';
 import type { BranchAccountantInvoice, BranchPaymentMethod } from '@/lib/types';
 
+import { toast } from '@/lib/toast';
+
 export default function BranchCashierInstallmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
@@ -26,7 +28,6 @@ export default function BranchCashierInstallmentDetailPage() {
   const [accountLoading, setAccountLoading] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
 
@@ -51,7 +52,7 @@ export default function BranchCashierInstallmentDetailPage() {
       setAccountResolution(resolution);
     } catch (err) {
       setAccountResolution(null);
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setAccountLoading(false);
     }
@@ -73,7 +74,7 @@ export default function BranchCashierInstallmentDetailPage() {
     event.preventDefault();
     if (submitting || !resolvedAccount) return;
     setError('');
-    setSuccess('');
+    /* toast clear */ void 0;
     try {
       setSubmitting(true);
       if (!idempotencyKeyRef.current) {
@@ -99,13 +100,11 @@ export default function BranchCashierInstallmentDetailPage() {
       setAmount('');
       idempotencyKeyRef.current = null;
       await resolveAccount(method);
-      setSuccess(
-        Number(updated.remainingAmount) <= 0.009
+      toast.success(Number(updated.remainingAmount) <= 0.009
           ? t('branchCashier.paymentAcceptedClosed')
-          : t('branchCashier.paymentAcceptedPartial'),
-      );
+          : t('branchCashier.paymentAcceptedPartial'),);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      toast.error(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
@@ -133,7 +132,6 @@ export default function BranchCashierInstallmentDetailPage() {
           </Link>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {invoice ? (
           <>
             <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
