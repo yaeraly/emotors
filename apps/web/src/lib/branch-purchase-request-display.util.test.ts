@@ -30,17 +30,29 @@ describe('branch purchase request display totals', () => {
     assert.equal(total, 60000);
   });
 
-  it('pending HQ review: line total is quantity times branch price not FIFO cost', () => {
+  it('pending HQ review: prefers API totalAmount over display unit×qty', () => {
+    const total = requestLineTotal(
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 33935.07,
+        totalAmount: 72490.5,
+      },
+      { requestStatus: 'SUBMITTED_TO_HQ' },
+    );
+    assert.equal(total, 72490.5);
+    assert.notEqual(total, 67870.14);
+  });
+
+  it('pending HQ review falls back to qty×price only when API total is absent', () => {
     const total = requestLineTotal(
       {
         quantity: 2,
         branchPurchasePriceKgs: 1963.59,
-        totalAmount: 630.15,
+        totalAmount: 0,
       },
       { requestStatus: 'SUBMITTED' },
     );
     assert.equal(total, 3927.18);
-    assert.notEqual(total, 630.15);
   });
 
   it('reviewed order uses authoritative line total not rounded unit×qty', () => {

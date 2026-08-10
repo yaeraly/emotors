@@ -44,6 +44,37 @@ function buildStaleHqBranchReviewedOrder() {
 }
 
 describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)', () => {
+  it('SUBMITTED_TO_HQ list parity matches HQ Sales submitted total', () => {
+    const request = {
+      id: 'cmsmxivrr0055zueq2pl50udj',
+      requestNumber: 'BPR-SUBMITTED-LIST',
+      status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
+      reviewedAt: null,
+      totalEstimatedAmount: AUTHORITATIVE_FIFO_LINE,
+      transportCostKgs: 0,
+      branch: { branchType: 'HQ_BRANCH' },
+      items: [
+        {
+          id: 'line-reducer',
+          productId: 'prod-reducer',
+          sku: 'RED-18',
+          productName: 'Редуктор 18 зуб 4.3 кг',
+          quantity: EFFECTIVE_QTY,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_LINE,
+          resolvedBranchPriceKgs: DISPLAY_UNIT,
+          totalAmount: AUTHORITATIVE_FIFO_LINE,
+          hasPricingPolicyAtSubmit: true,
+        },
+      ],
+    };
+    const parity = assertBranchPurchaseRequestTotalParity(request);
+    assert.equal(parity.hqSalesTotalKgs, AUTHORITATIVE_FIFO_LINE);
+    assert.equal(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_LINE);
+    assert.equal(parity.lineSumKgs, AUTHORITATIVE_FIFO_LINE);
+    assert.notEqual(parity.branchManagerTotalKgs, STALE_LINE_TOTAL);
+  });
+
   it('explains 4620.36 as rounded unit×qty minus authoritative FIFO line total', () => {
     const rounded = roundDisplayMoney(DISPLAY_UNIT * EFFECTIVE_QTY);
     assert.equal(rounded, STALE_LINE_TOTAL);

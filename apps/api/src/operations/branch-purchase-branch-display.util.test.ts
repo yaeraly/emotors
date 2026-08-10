@@ -12,7 +12,7 @@ import {
   resolveBranchPurchaseBranchUnitPriceKgs,
   sumBranchPurchaseBranchLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
-import { sanitizeBranchPurchaseRequest } from './branch-purchase-request.presenter';
+import { sanitizeBranchPurchaseRequest, toBranchPurchaseRequestResponse } from './branch-purchase-request.presenter';
 
 const CHINA_BATCH_TOTAL = 914369.8;
 
@@ -143,37 +143,37 @@ describe('branch purchase branch display totals', () => {
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
   });
 
-  it('sanitized pending HQ review uses requested qty times branch price not FIFO cost', () => {
-    const sanitized = sanitizeBranchPurchaseRequest(
-      {
-        status: BranchPurchaseRequestStatus.SUBMITTED,
-        reviewedAt: null,
-        totalEstimatedAmount: 630.15,
-        transportCostKgs: 0,
-        branch: { branchType: 'HQ_BRANCH' },
-        items: [
-          {
-            id: 'line-1',
-            productId: 'prod-1',
-            sku: 'SKU-1',
-            productName: 'Редуктор 18 зуб 4.3 кг',
-            quantity: 2,
-            unit: 'pcs',
-            estimatedLineProductCostKgs: 630.15,
-            resolvedBranchPriceKgs: 1963.59,
-            totalAmount: 630.15,
-          },
-        ],
-      },
-      true,
-    );
+  it('sanitized SUBMITTED_TO_HQ list total matches HQ Sales submitted FIFO total', () => {
+    const submittedTotal = 72490.5;
+    const displayUnit = 33935.07;
+    const wrongUnitTimesQty = 67870.14;
+    const request = {
+      status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
+      reviewedAt: null,
+      totalEstimatedAmount: submittedTotal,
+      transportCostKgs: 0,
+      branch: { branchType: 'HQ_BRANCH' },
+      items: [
+        {
+          id: 'line-1',
+          productId: 'prod-1',
+          sku: 'SKU-1',
+          productName: 'Редуктор 18 зуб 4.3 кг',
+          quantity: 2,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: submittedTotal,
+          resolvedBranchPriceKgs: displayUnit,
+          totalAmount: submittedTotal,
+        },
+      ],
+    };
+    const full = toBranchPurchaseRequestResponse(request);
+    const sanitized = sanitizeBranchPurchaseRequest(request, true);
 
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 3927.18);
-    assert.equal(sanitized.totalEstimatedAmount, 3927.18);
-    assert.equal(
-      (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
-      1963.59,
-    );
+    assert.equal(full.totalEstimatedAmount, submittedTotal);
+    assert.equal(sanitized.totalEstimatedAmount, submittedTotal);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, submittedTotal);
+    assert.notEqual(sanitized.totalEstimatedAmount, wrongUnitTimesQty);
   });
 
   it('sanitized reviewed franchise order matches HQ Sales approved line totals', () => {

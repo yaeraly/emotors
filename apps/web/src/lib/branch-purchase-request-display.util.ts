@@ -134,27 +134,25 @@ export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePric
 }
 
 /**
- * Authoritative branch order line total — same rules as HQ Sales after review.
- * Before HQ Sales review, branch view uses requested qty × displayed branch price.
- * After review, prefer API presenter `totalAmount` (FIFO/persisted authoritative total).
+ * Authoritative branch order line total — uses API presenter `totalAmount` when available.
+ * Falls back to HQ review math or pre-submit qty×price only when API total is absent
+ * (e.g. draft create form preview before prices load).
  */
 export function branchOrderLineTotal(
   item: BranchPurchaseRequestLinePricing,
   options?: BranchOrderTotalOptions,
 ): number {
+  const fromApi =
+    item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0
+      ? roundMoney(Number(item.totalAmount))
+      : null;
+  if (fromApi != null) {
+    return fromApi;
+  }
   const pendingHqReview =
     options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
   if (pendingHqReview && !options?.reviewed) {
     return pendingBranchReviewLineTotal(item);
-  }
-  if (options?.reviewed) {
-    const authoritative =
-      item.totalAmount != null && Number.isFinite(Number(item.totalAmount))
-        ? Number(item.totalAmount)
-        : null;
-    if (authoritative != null && authoritative > 0) {
-      return roundMoney(authoritative);
-    }
   }
   return hqReviewLineAmount(item);
 }

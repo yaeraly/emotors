@@ -8,9 +8,7 @@ import {
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import {
-  resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
-  sumBranchPurchaseBranchLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 import { computeBranchPurchaseHqReviewLineAmountKgs } from './branch-purchase-review-totals.util';
@@ -386,11 +384,8 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const transferAtCost = shouldTransferBranchPurchaseAtCost(
     request.branch?.branchType ?? request.branchType ?? null,
   );
-  const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
 
-  // HQ_BRANCH at-cost (restore 0007a11): keep FIFO payable totals from `full`.
-  // Never rebuild Сумма as rounded unit × qty (regression from 4330b1f → 914369.08).
-  // Before HQ Sales review, Branch Sales detail must show requested qty × branch price.
+  // HQ_BRANCH at-cost: branch list/detail must mirror HQ Sales submitted totals from `full`.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
@@ -398,16 +393,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
           branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
         });
-        const fifoLineTotal = fullItem?.totalAmount ?? item.totalAmount;
-        const lineTotal = pendingHqSalesReview
-          ? resolveBranchPurchaseBranchLineTotalKgs({
-              quantity: item.quantity,
-              branchPurchasePriceKgs: branchUnitPrice,
-              resolvedBranchPriceKgs: branchUnitPrice,
-              totalAmount: 0,
-              transferAtCost: false,
-            })
-          : fifoLineTotal;
+        const lineTotal = roundDisplayMoney(
+          Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
+        );
         return {
           id: item.id,
           productId: item.productId,
@@ -456,45 +444,25 @@ export function sanitizeBranchPurchaseRequest<T extends {
         };
       });
 
-    const branchOrderTotal = pendingHqSalesReview
-      ? sumBranchPurchaseBranchLineTotalsKgs(
-          sanitizedItems.map((item) => ({
-            quantity: item.quantity,
-            branchPurchasePriceKgs: item.branchPurchasePriceKgs,
-            totalAmount: 0,
-          })),
-        )
-      : full.totalEstimatedAmount;
-
     return {
       ...full,
       branchDisplayStatus,
       partialFulfillmentMessage,
-      totalEstimatedAmount: branchOrderTotal,
+      totalEstimatedAmount: full.totalEstimatedAmount,
       totalProductCostKgs: undefined,
       authoritativeTransferCostKgs: undefined,
       items: sanitizedItems,
     };
   }
 
-  // Franchise/Dealer: CEO branch price × quantity before review; authoritative persisted totals after review.
+  // Franchise/Dealer: mirror HQ Sales submitted/reviewed totals from `full`.
   const branchItems = request.items.map((item) => {
     const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
       branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
       resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
     });
-    const authoritativeLineTotal =
-      fullItem?.totalAmount != null ? Number(fullItem.totalAmount) : Number(item.totalAmount ?? 0);
-    const lineTotal =
-      pendingHqSalesReview || !reviewed
-        ? resolveBranchPurchaseBranchLineTotalKgs({
-            quantity: item.quantity,
-            branchPurchasePriceKgs: branchUnitPrice,
-            resolvedBranchPriceKgs: branchUnitPrice,
-            totalAmount: 0,
-          })
-        : roundDisplayMoney(authoritativeLineTotal);
+    const lineTotal = roundDisplayMoney(Number(fullItem?.totalAmount ?? item.totalAmount ?? 0));
     return {
       id: item.id,
       productId: item.productId,
@@ -543,19 +511,11 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
-  const branchOrderTotal =
-    reviewed && !pendingHqSalesReview
-      ? roundDisplayMoney(
-          branchItems.reduce((sum, item) => sum + Number((item as { totalAmount?: number }).totalAmount ?? 0), 0),
-        )
-      : sumBranchPurchaseBranchLineTotalsKgs(branchItems);
-
   return {
     ...full,
     branchDisplayStatus,
     partialFulfillmentMessage,
-    totalEstimatedAmount:
-      branchOrderTotal > 0 ? branchOrderTotal : full.totalEstimatedAmount,
+    totalEstimatedAmount: full.totalEstimatedAmount,
     totalProductCostKgs: undefined,
     authoritativeTransferCostKgs: undefined,
     items: branchItems,
