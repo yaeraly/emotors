@@ -85,6 +85,7 @@ import {
   isZeroInitialPayment,
   validateBranchOrderInstallmentAmounts,
 } from './branch-order-installment.util';
+import { resolveBranchPurchaseRequestStatusForPaymentEvent } from './branch-purchase-payment-status-sync.util';
 import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibility.util';
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
@@ -3915,61 +3916,63 @@ export class DistributionService {
     });
     const installment = invoice?.branchOrderInstallment ?? null;
 
-    let nextStatus: BranchPurchaseRequestStatus | null = null;
+    let nextStatus: BranchPurchaseRequestStatus | null = resolveBranchPurchaseRequestStatusForPaymentEvent(
+      event,
+      installment?.status,
+    );
 
-    switch (event) {
-      case 'INVOICE_SENT':
-        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
-        break;
-      case 'SENT_TO_CASHIER':
-        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
-        break;
-      case 'PAYMENT_SUBMITTED':
+    if (event === 'PAYMENT_CONFIRMED' && installment?.status === BranchOrderInstallmentStatus.APPROVED) {
+      if (installment.firstPaymentRequired && !installment.firstPaymentConfirmed) {
         nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
-        break;
-      case 'PAYMENT_REJECTED':
-        nextStatus = BranchPurchaseRequestStatus.PAYMENT_REJECTED;
-        break;
-      case 'PAYMENT_CONFIRMED':
-        if (installment?.status === BranchOrderInstallmentStatus.APPROVED) {
-          if (installment.firstPaymentRequired && !installment.firstPaymentConfirmed) {
-            nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
-          } else {
-            nextStatus = BranchPurchaseRequestStatus.PAYMENT_CONFIRMED;
-          }
-        } else if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
-          nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
-        } else if (!installment) {
-          nextStatus = BranchPurchaseRequestStatus.PAYMENT_CONFIRMED;
-        }
-        break;
-      case 'INSTALLMENT_PENDING':
-        nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
-        break;
-      case 'INSTALLMENT_APPROVED':
-        await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
-        await this.promoteBranchRequestToReadyForWarehouse(
-          tx,
-          user,
-          linkedRequest,
-          distributionOrderId,
-          'INSTALLMENT_APPROVED',
-        );
-        return;
-      case 'INSTALLMENT_REJECTED':
-        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
-        break;
-      case 'TRANSPORT_COST_ENTERED':
-        nextStatus = BranchPurchaseRequestStatus.COMPLETED;
-        break;
+      } else {
+        nextStatus = BranchPurchaseRequestStatus.PAYMENT_CONFIRMED;
+      }
+    }
+
+    if (event === 'INSTALLMENT_APPROVED') {
+      await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
+      await this.promoteBranchRequestToReadyForWarehouse(
+        tx,
+        user,
+        linkedRequest,
+        distributionOrderId,
+        'INSTALLMENT_APPROVED',
+      );
+      return;
     }
 
     if (!nextStatus || nextStatus === linkedRequest.status) return;
+
+    const oldStatus = linkedRequest.status;
 
     await tx.branchPurchaseRequest.update({
       where: { id: linkedRequest.id },
       data: { status: nextStatus },
     });
+
+    if (event === 'INSTALLMENT_REJECTED' && nextStatus === BranchPurchaseRequestStatus.REJECTED) {
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_ORDER_REJECTED',
+          entity: 'BranchPurchaseRequest',
+          entityId: linkedRequest.id,
+          metadata: {
+            bprId: linkedRequest.id,
+            installmentId: installment?.id ?? null,
+            oldBprStatus: oldStatus,
+            newBprStatus: nextStatus,
+            decisionBy: user.id,
+            timestamp: new Date().toISOString(),
+            trigger: 'INSTALLMENT_REJECTED',
+            distributionOrderId,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+      return;
+    }
 
     if (nextStatus === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED) {
       await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
@@ -3982,14 +3985,13 @@ export class DistributionService {
           entityId: linkedRequest.id,
           metadata: {
             distributionOrderId,
-            oldStatus: linkedRequest.status,
+            oldStatus,
             newStatus: nextStatus,
             roles: user.roles ?? [user.role],
           },
         },
       });
       await this.promoteBranchRequestToReadyForWarehouse(tx, user, linkedRequest, distributionOrderId, 'FULL_PAYMENT');
-      return;
     }
   }
 
@@ -4491,7 +4493,15 @@ export class DistributionService {
           action: 'INSTALLMENT_REJECTED',
           entity: 'BranchOrderInstallment',
           entityId: invoice.branchOrderInstallment.id,
-          metadata: { invoiceId, comment: dto.comment.trim(), roles: user.roles ?? [user.role] },
+          metadata: {
+            invoiceId,
+            comment: dto.comment.trim(),
+            bprId: linkedRequest?.id ?? null,
+            oldBprStatus: linkedRequest?.status ?? null,
+            decisionBy: user.id,
+            timestamp: new Date().toISOString(),
+            roles: user.roles ?? [user.role],
+          },
         },
       });
 
