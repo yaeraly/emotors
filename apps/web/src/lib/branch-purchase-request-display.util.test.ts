@@ -79,6 +79,27 @@ describe('branch purchase request display totals', () => {
     const options = { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true, totalEstimatedAmount: 72490.5 };
     assert.equal(hqReviewOrderAmount(items), 72490.5);
     assert.equal(branchOrderTotal(items, options), 72490.5);
+    assert.equal(
+      branchOrderLineTotal(items[0]!, options),
+      72490.5,
+    );
+    assert.notEqual(roundMoney(33935.07 * 2), 72490.5);
+  });
+
+  it('reviewed line total prefers API totalAmount over display unit×qty', () => {
+    assert.equal(
+      branchOrderLineTotal(
+        {
+          quantity: 2,
+          approvedQuantity: 2,
+          branchPurchasePriceKgs: 33935.07,
+          totalAmount: 72490.5,
+          lineStatus: 'APPROVED',
+        },
+        { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true },
+      ),
+      72490.5,
+    );
   });
 
   it('does not silently stay zero when branch price exists but totalAmount is zero', () => {

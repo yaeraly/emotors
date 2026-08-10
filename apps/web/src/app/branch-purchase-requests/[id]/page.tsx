@@ -789,7 +789,7 @@ export default function BranchPurchaseRequestDetailPage() {
                 {hqSalesView ? t('branchProductRequest.orderAmount') : t('branchProductRequest.estimatedAmount')}
               </p>
               <p className="mt-1 font-semibold text-slate-900">
-                {formatKgs(hqSalesView ? hqReviewOrderAmount(request.items) : request.totalEstimatedAmount)} KGS
+                {formatKgs(branchOrderTotal(request.items, branchOrderTotalOptions))} KGS
               </p>
             </div>
           ) : branchSalesManagerView ? (

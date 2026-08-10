@@ -54,7 +54,7 @@ describe('branch sales manager ui cleanup', () => {
     assert.doesNotMatch(bsmTable, /inventory\.sku/);
     assert.doesNotMatch(bsmTable, /item\.sku/);
     assert.match(bsmTable, /item\.productName/);
-    assert.match(bsmTable, /getBranchOrderDisplayQuantity\(item, \{ reviewed \}\)/);
+    assert.match(bsmTable, /getBranchOrderDisplayQuantity\(item, \{ reviewed: Boolean\(reviewed\) \}\)/);
     assert.match(bsmTable, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
     assert.match(bsmTable, /formatOrderTotalKgs\(request\.items, branchOrderTotalOptions\)/);
   });
@@ -181,7 +181,7 @@ describe('branch sales manager ui cleanup', () => {
   it('hq sales order detail uses order amount label and hides branch info', () => {
     assert.match(detailPage, /!hqSalesView \? \([\s\S]*distribution\.branch/);
     assert.match(detailPage, /hqSalesView \? t\('branchProductRequest\.orderAmount'\)/);
-    assert.match(detailPage, /hqReviewOrderAmount\(request\.items\)/);
+    assert.match(detailPage, /branchOrderTotal\(request\.items, branchOrderTotalOptions\)/);
   });
 
   it('hq sales compact product table keeps full product names readable without truncation', () => {
