@@ -10,6 +10,8 @@ import {
   getFrozenBranchPrice,
   hqReviewLineAmount,
   hqReviewOrderAmount,
+  hqReviewPreviewLineAmount,
+  hqReviewPreviewOrderAmount,
   requestLineTotal,
   requestOrderTotal,
 } from './branch-purchase-request-display.util';
@@ -340,6 +342,110 @@ describe('branch purchase request display totals', () => {
       ]),
       16000,
     );
+  });
+
+  it('live Утв. draft updates row amount immediately (2 × 1963.59 = 3927.18)', () => {
+    const item = {
+      id: 'line-a',
+      quantity: 10,
+      branchPurchasePriceKgs: 1963.59,
+      totalAmount: 19635.9,
+      lineStatus: 'PENDING_REVIEW',
+    };
+    assert.equal(
+      hqReviewPreviewLineAmount(item, { draftApprovedQuantity: 2, decisionAction: 'APPROVE' }),
+      3927.18,
+    );
+    assert.equal(
+      hqReviewPreviewLineAmount(item, { draftApprovedQuantity: 5, decisionAction: 'APPROVE' }),
+      9817.95,
+    );
+  });
+
+  it('live Утв. draft updates order total as sum of row previews', () => {
+    const items = [
+      {
+        id: 'line-a',
+        quantity: 10,
+        branchPurchasePriceKgs: 1963.59,
+        totalAmount: 19635.9,
+        lineStatus: 'PENDING_REVIEW',
+      },
+      {
+        id: 'line-b',
+        quantity: 3,
+        branchPurchasePriceKgs: 1000,
+        totalAmount: 3000,
+        lineStatus: 'PENDING_REVIEW',
+      },
+    ];
+    const draftByItemId = {
+      'line-a': { draftApprovedQuantity: 2 as const, decisionAction: 'APPROVE' },
+      'line-b': { draftApprovedQuantity: 3 as const, decisionAction: 'APPROVE' },
+    };
+    const orderTotal = hqReviewPreviewOrderAmount(items, draftByItemId);
+    const rowSum = roundMoney(
+      hqReviewPreviewLineAmount(items[0]!, draftByItemId['line-a']) +
+        hqReviewPreviewLineAmount(items[1]!, draftByItemId['line-b']),
+    );
+    assert.equal(orderTotal, rowSum);
+    assert.equal(orderTotal, 6927.18);
+  });
+
+  it('empty Утв. draft does not force zero — falls back to requested/persisted preview', () => {
+    const pending = {
+      id: 'line-a',
+      quantity: 10,
+      branchPurchasePriceKgs: 1963.59,
+      totalAmount: 19635.9,
+      lineStatus: 'PENDING_REVIEW',
+    };
+    assert.equal(
+      hqReviewPreviewLineAmount(pending, { draftApprovedQuantity: '', decisionAction: 'APPROVE' }),
+      hqReviewLineAmount(pending),
+    );
+    assert.equal(
+      hqReviewPreviewLineAmount(pending, { draftApprovedQuantity: '', decisionAction: 'APPROVE' }),
+      19635.9,
+    );
+  });
+
+  it('local REJECT draft previews zero before refetch; persisted reject stays zero', () => {
+    const pending = {
+      id: 'line-a',
+      quantity: 10,
+      branchPurchasePriceKgs: 1963.59,
+      totalAmount: 19635.9,
+      lineStatus: 'PENDING_REVIEW',
+    };
+    assert.equal(
+      hqReviewPreviewLineAmount(pending, { draftApprovedQuantity: '', decisionAction: 'REJECT' }),
+      0,
+    );
+    assert.equal(
+      hqReviewPreviewLineAmount(
+        { ...pending, lineStatus: 'REJECTED', approvedQuantity: 0, totalAmount: 0 },
+        { draftApprovedQuantity: '', decisionAction: 'REJECT' },
+      ),
+      0,
+    );
+  });
+
+  it('after save, draft matching persisted approved qty keeps authoritative FIFO total', () => {
+    const reviewed = {
+      id: 'line-a',
+      quantity: 2,
+      approvedQuantity: 2,
+      branchPurchasePriceKgs: 33935.07,
+      totalAmount: 72490.5,
+      approvedLineTotalKgs: 72490.5,
+      lineStatus: 'APPROVED',
+    };
+    assert.equal(
+      hqReviewPreviewLineAmount(reviewed, { draftApprovedQuantity: 2, decisionAction: 'APPROVE' }),
+      72490.5,
+    );
+    assert.notEqual(roundMoney(33935.07 * 2), 72490.5);
   });
 
   it('multiple rows calculate independently before HQ review', () => {

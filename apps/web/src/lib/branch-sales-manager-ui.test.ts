@@ -189,6 +189,9 @@ describe('branch sales manager ui cleanup', () => {
   it('hq sales order detail uses order amount label and hides branch info', () => {
     assert.match(detailPage, /!hqSalesView \? \([\s\S]*distribution\.branch/);
     assert.match(detailPage, /hqSalesView \? t\('branchProductRequest\.orderAmount'\)/);
+    assert.match(detailPage, /hqSalesDisplayedOrderAmount/);
+    assert.match(detailPage, /hqReviewPreviewOrderAmount/);
+    assert.match(detailPage, /draftApprovedQtyByItemId/);
     assert.match(detailPage, /branchOrderTotal\(request\.items, branchOrderTotalOptions\)/);
   });
 
@@ -205,7 +208,8 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(productCell, /min-w-\[6rem\] w-auto/);
     assert.doesNotMatch(productNameLine, /line-clamp|text-ellipsis|truncate/);
     assert.match(productNameLine, /break-words/);
-    assert.match(detailPage, /hqReviewLineAmount\(item\)/);
+    assert.match(detailPage, /hqReviewPreviewLineAmount\(item/);
+    assert.doesNotMatch(compactTable, /hqReviewLineAmount\(item\)/);
     const longestSampleName =
       'Аккумуляторная батарея LiFePO4 высокой ёмкости для электромобиля EMOTORS Pro Max Extended Range';
     assert.ok(longestSampleName.length >= 80, 'sample catalog-length product name');

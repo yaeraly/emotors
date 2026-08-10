@@ -20,7 +20,7 @@ import { BranchProductOrdersSection } from '@/components/BranchProductOrdersSect
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
-import { formatKgs, roundMoney } from '@/lib/money';
+import { formatKgs } from '@/lib/money';
 import { formatProductUnit } from '@/lib/product-unit';
 import {
   branchOrderLineTotal,
@@ -29,9 +29,10 @@ import {
   formatLineTotalKgs,
   formatOrderTotalKgs,
   getBranchOrderDisplayQuantity,
-  hqReviewLineAmount,
-  hqReviewOrderAmount,
+  hqReviewPreviewLineAmount,
+  hqReviewPreviewOrderAmount,
   requestLineTotal,
+  type HqReviewPreviewDraft,
 } from '@/lib/branch-purchase-request-display.util';
 import {
   approvedQuantityInputValue,
@@ -160,16 +161,6 @@ function resolveRequestStatusLabel(
     return translateStatus(t, request.branchDisplayStatus, 'branchRequest');
   }
   return translateStatus(t, request.status);
-}
-
-function approvedLineTotal(item: RequestItem, approvedQuantity: number) {
-  if (item.approvedLineTotalKgs != null && Number(item.approvedLineTotalKgs) > 0) {
-    return roundMoney(Number(item.approvedLineTotalKgs));
-  }
-  const price =
-    item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs ?? item.branchPurchasePriceKgs;
-  if (price == null || !Number.isFinite(Number(price))) return 0;
-  return roundMoney(Number(price) * approvedQuantity);
 }
 
 function translateRejectionReason(t: (key: string) => string, code?: string | null) {
@@ -598,6 +589,21 @@ export default function BranchPurchaseRequestDetailPage() {
         : undefined,
     [request, reviewed],
   );
+  /** Local Утв. drafts for live row/order preview only — never persisted on keystroke. */
+  const draftApprovedQtyByItemId = useMemo(() => {
+    const draftByItemId: Record<string, HqReviewPreviewDraft> = {};
+    for (const [itemId, decision] of Object.entries(lineDecisions)) {
+      draftByItemId[itemId] = {
+        draftApprovedQuantity: decision.approvedQuantity,
+        decisionAction: decision.action,
+      };
+    }
+    return draftByItemId;
+  }, [lineDecisions]);
+  const hqSalesDisplayedOrderAmount = useMemo(() => {
+    if (!request) return 0;
+    return hqReviewPreviewOrderAmount(request.items, draftApprovedQtyByItemId);
+  }, [request, draftApprovedQtyByItemId]);
   const approvedItemCount = useMemo(
     () => request?.items.filter((item) => (item.approvedQuantity ?? 0) > 0).length ?? 0,
     [request],
@@ -789,7 +795,12 @@ export default function BranchPurchaseRequestDetailPage() {
                 {hqSalesView ? t('branchProductRequest.orderAmount') : t('branchProductRequest.estimatedAmount')}
               </p>
               <p className="mt-1 font-semibold text-slate-900">
-                {formatKgs(branchOrderTotal(request.items, branchOrderTotalOptions))} KGS
+                {formatKgs(
+                  hqSalesView
+                    ? hqSalesDisplayedOrderAmount
+                    : branchOrderTotal(request.items, branchOrderTotalOptions),
+                )}{' '}
+                KGS
               </p>
             </div>
           ) : branchSalesManagerView ? (
@@ -953,7 +964,14 @@ export default function BranchPurchaseRequestDetailPage() {
                       )}
                     </td>
                     <td className="w-0 whitespace-nowrap px-2 py-1.5 text-center tabular-nums">{item.currentBranchStock ?? '-'}</td>
-                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatKgs(hqReviewLineAmount(item))}</td>
+                    <td className="w-0 whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
+                      {formatKgs(
+                        hqReviewPreviewLineAmount(item, {
+                          draftApprovedQuantity: decision.approvedQuantity,
+                          decisionAction: decision.action,
+                        }),
+                      )}
+                    </td>
                     {canActOnRequest && reviewable ? (
                       <td className={`${hqSalesReviewLineStickyCellClass(item.lineStatus)} w-0 whitespace-nowrap px-2 py-1.5`} onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">
@@ -1186,7 +1204,12 @@ export default function BranchPurchaseRequestDetailPage() {
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatFrozenBranchPrice(item, t)}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(requestLineTotal(item))}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right font-semibold tabular-nums text-slate-900')}>
-                          {formatKgs(approvedLineTotal(item, approvedValue))}
+                          {formatKgs(
+                            hqReviewPreviewLineAmount(item, {
+                              draftApprovedQuantity: decision.approvedQuantity,
+                              decisionAction: decision.action,
+                            }),
+                          )}
                         </td>
                       </>
                     ) : null}

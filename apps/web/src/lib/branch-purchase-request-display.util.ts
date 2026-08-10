@@ -116,6 +116,87 @@ export function hqReviewOrderAmount(items: BranchPurchaseRequestLinePricing[]): 
   return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item), 0));
 }
 
+export type HqReviewPreviewDraft = {
+  /** Local Утв. draft; empty string means “not typing a value”. */
+  draftApprovedQuantity?: number | '' | null;
+  /** Local action draft (REJECT/REMOVE → preview 0 before refetch). */
+  decisionAction?: string | null;
+};
+
+/**
+ * Live preview quantity while HQ Sales edits Утв.
+ * Typed draft wins; empty draft falls back to persisted/requested rules (never forced 0).
+ */
+export function hqReviewPreviewEffectiveQuantity(
+  item: BranchPurchaseRequestLinePricing,
+  draft?: HqReviewPreviewDraft,
+): number {
+  if (draft?.decisionAction === 'REJECT' || draft?.decisionAction === 'REMOVE') {
+    return 0;
+  }
+  const raw = draft?.draftApprovedQuantity;
+  if (raw !== '' && raw != null && Number.isFinite(Number(raw))) {
+    return Math.max(Number(raw), 0);
+  }
+  return hqReviewEffectiveQuantity(item);
+}
+
+/**
+ * Live row Сумма while editing Утв.: draftQty × authoritative branch price.
+ * Empty input keeps the previous persisted/requested amount (does not force 0).
+ * When draft matches persisted approved qty on a reviewed line, keep backend
+ * authoritative amount (may differ from unit×qty after FIFO post-review).
+ */
+export function hqReviewPreviewLineAmount(
+  item: BranchPurchaseRequestLinePricing,
+  draft?: HqReviewPreviewDraft,
+): number {
+  if (draft?.decisionAction === 'REJECT' || draft?.decisionAction === 'REMOVE') {
+    return 0;
+  }
+  if (item.lineStatus === 'REJECTED' || item.lineStatus === 'REMOVED_BY_HQ_SALES') {
+    return 0;
+  }
+
+  const raw = draft?.draftApprovedQuantity;
+  const hasDraft = raw !== '' && raw != null && Number.isFinite(Number(raw));
+  if (!hasDraft) {
+    return hqReviewLineAmount(item);
+  }
+
+  const qty = Math.max(Number(raw), 0);
+  const persistedApproved = Math.max(Number(item.approvedQuantity ?? 0), 0);
+  if (
+    isReviewedBranchPurchaseLine(item) &&
+    (item.lineStatus === 'APPROVED' || item.lineStatus === 'PARTIALLY_APPROVED') &&
+    qty === persistedApproved
+  ) {
+    return hqReviewLineAmount(item);
+  }
+
+  if (qty <= 0) {
+    return 0;
+  }
+  const price = getFrozenBranchPrice(item);
+  if (price == null) {
+    return 0;
+  }
+  return roundMoney(price * qty);
+}
+
+/** Live Сумма заказа = sum of current row preview amounts. */
+export function hqReviewPreviewOrderAmount(
+  items: Array<BranchPurchaseRequestLinePricing & { id?: string }>,
+  draftByItemId?: Record<string, HqReviewPreviewDraft | undefined>,
+): number {
+  return roundMoney(
+    items.reduce((sum, item) => {
+      const draft = item.id && draftByItemId ? draftByItemId[item.id] : undefined;
+      return sum + hqReviewPreviewLineAmount(item, draft);
+    }, 0),
+  );
+}
+
 /** Pre–HQ Sales review branch view: requested qty × displayed branch price. */
 export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePricing): number {
   const price = getFrozenBranchPrice(item);
