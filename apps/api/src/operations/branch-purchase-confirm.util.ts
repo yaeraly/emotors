@@ -86,12 +86,11 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       item.estimatedLineProductCostKgs != null && Number(item.estimatedLineProductCostKgs) > 0
         ? roundDisplayMoney(Number(item.estimatedLineProductCostKgs))
         : null;
-    const unitCostRaw =
-      Number(item.estimatedUnitCost ?? 0) > 0
-        ? Number(item.estimatedUnitCost)
-        : Number(product.finalCostKgs);
-    const lineCost =
-      authoritativeLineCost ?? roundDisplayMoney(unitCostRaw * quantity);
+    // Never rebuild HQ transfer cost from rounded display unit × quantity.
+    const lineCost = authoritativeLineCost ?? 0;
+    if (lineCost <= 0) {
+      throw new Error(`Authoritative FIFO line cost missing for product ${item.sku}`);
+    }
     const unitCost = deriveDisplayUnitCost(lineCost, quantity);
 
     lines.push({
@@ -107,7 +106,7 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       pricingPolicyVersionId: item.pricingPolicyVersionId,
       pricingProfileId: item.pricingProfileId,
       resolvedPriceKgs: unitPrice,
-      baseCostKgs: unitCostRaw,
+      baseCostKgs: Number(item.estimatedUnitCost ?? unitCost),
       baseBranchPriceKgs: unitPrice,
       appliedRuleType: item.appliedRuleType,
       appliedRuleId: item.appliedRuleId,

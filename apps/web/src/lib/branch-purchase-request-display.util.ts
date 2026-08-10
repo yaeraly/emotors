@@ -94,14 +94,13 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
     return 0;
   }
 
+  // Always prefer persisted authoritative line totals over unit × qty reconstruction.
   if (isReviewedBranchPurchaseLine(item)) {
     if (item.approvedLineTotalKgs != null && Number.isFinite(Number(item.approvedLineTotalKgs))) {
       return roundMoney(Number(item.approvedLineTotalKgs));
     }
-    if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
-      return roundMoney(Number(item.totalAmount));
-    }
-  } else if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+  }
+  if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
     return roundMoney(Number(item.totalAmount));
   }
 
@@ -110,6 +109,7 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
     return 0;
   }
 
+  // Last-resort draft preview only — never an accounting source when totals exist.
   return roundMoney(price * effectiveQuantity);
 }
 
@@ -193,19 +193,23 @@ export function hqReviewPreviewOrderAmount(
   );
 }
 
-/** Pre–HQ Sales review branch view: requested qty × displayed branch price. */
+/**
+ * Pre–HQ Sales review branch line Сумма.
+ * Prefer persisted API totalAmount (HQ_BRANCH FIFO/authoritative line cost) over
+ * reconstructing from displayed unit price × qty (causes ±0.72 / ±0.19 drift).
+ */
 export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePricing): number {
-  const price = getFrozenBranchPrice(item);
-  const qty = getDisplayQuantity(item);
-  if (price != null && qty > 0) {
-    return roundMoney(price * qty);
-  }
   const authoritative =
     item.totalAmount != null && Number.isFinite(Number(item.totalAmount))
       ? Number(item.totalAmount)
       : null;
   if (authoritative != null && authoritative > 0) {
     return roundMoney(authoritative);
+  }
+  const price = getFrozenBranchPrice(item);
+  const qty = getDisplayQuantity(item);
+  if (price != null && qty > 0) {
+    return roundMoney(price * qty);
   }
   return 0;
 }

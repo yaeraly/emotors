@@ -61,6 +61,7 @@ async function main() {
     console.log('Branch:', bpr.branch.name, branchType);
     console.log('Stored BPR total:', Number(bpr.totalEstimatedAmount));
     console.log('HQ Branch at-cost:', shouldTransferBranchPurchaseAtCost(branchType));
+    console.log('--- STEP 1 forensics headers printed after line scan ---');
 
     if (!shouldTransferBranchPurchaseAtCost(branchType)) {
       console.log('SKIP: not HQ_BRANCH');

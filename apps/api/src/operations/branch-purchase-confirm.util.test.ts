@@ -23,6 +23,7 @@ describe('buildDistributionLinesFromConfirmedRequestItems', () => {
           approvedLineTotalKgs: 500,
           totalAmount: 500,
           estimatedUnitCost: 55,
+          estimatedLineProductCostKgs: 220,
           pricingPolicyVersionId: 'policy-1',
           pricingProfileId: null,
           appliedRuleType: null,
