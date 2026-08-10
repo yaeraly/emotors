@@ -131,6 +131,14 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /max=\{item\.quantity\}/);
   });
 
+  it('hq sales Утв. input allows empty string while editing and does not coerce to 0', () => {
+    assert.match(detailPage, /ApprovedQuantityInput/);
+    assert.match(detailPage, /parseApprovedQuantityChange/);
+    assert.match(detailPage, /approvedQuantityInputValue\(decision\.approvedQuantity\)/);
+    assert.doesNotMatch(detailPage, /approvedQuantity: Number\(event\.target\.value\)/);
+    assert.match(detailPage, /hq-sales-approved-quantity-input\.util/);
+  });
+
   it('hq sales compact product table highlights approved rows from persisted lineStatus', () => {
     assert.match(detailPage, /hqSalesReviewLineRowClass\(item\.lineStatus\)/);
     assert.match(detailPage, /isReviewedApprovedLineStatus/);
