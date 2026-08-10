@@ -166,6 +166,21 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
       50000,
     );
   });
+
+  it('approved HQ_BRANCH line uses commercial 2 × 1963.59 = 3927.18 not FIFO 630.15', () => {
+    assert.equal(
+      computeBranchPurchaseHqReviewLineAmountKgs({
+        quantity: 10,
+        approvedQuantity: 2,
+        lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
+        resolvedBranchPriceKgs: 1963.59,
+        estimatedLineProductCostKgs: 630.15,
+        branchType: 'HQ_BRANCH',
+        hasPricingPolicyAtReview: true,
+      }),
+      3927.18,
+    );
+  });
 });
 
 describe('resolveBranchPurchaseReviewedLineAmountKgs', () => {
