@@ -11,10 +11,6 @@ import type { AuthUser } from '../auth/auth.types';
 import { addBookingHours, BRANCH_CONFIRMATION_BOOKING_HOURS } from '../inventory/hq-stock-booking.constants';
 import type { HqStockBookingService } from '../inventory/hq-stock-booking.service';
 import { sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import {
-  resolveBranchPurchaseEstimatedAmountKgs,
-  resolveBranchPurchaseLinePayableAmount,
-} from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseFifoLineCost } from './branch-purchase-fifo-cost.util';
 import {
   branchPurchaseRequestItemsInclude,
@@ -22,7 +18,6 @@ import {
 } from './branch-purchase-request-items-order.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
-  resolveBranchPurchaseHqReviewEffectiveQuantity,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 import {
@@ -211,33 +206,24 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
     await tx.branchPurchaseRequestItem.update({
       where: { id: row.id },
       data: {
+        // Commercial Сумма: effectiveQty × frozen branch unit price (never FIFO cost).
         totalAmount: lineAmount,
         approvedLineTotalKgs: reviewed && lineAmount > 0 ? lineAmount : null,
       },
     });
   }
 
+  // Сумма заказа = SUM of all current authoritative line totals (full recalculation).
   const orderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(lineInputs);
-  const reviewedProductCostKgs = sumDisplayMoneyTotals(
-    refreshedItems.map((row) => {
-      const qty = resolveBranchPurchaseHqReviewEffectiveQuantity(row);
-      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
-    }),
-  );
-  const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType,
-    totalProductCostKgs: reviewedProductCostKgs,
-    storedEstimatedAmountKgs: orderTotalKgs,
-  });
 
   await tx.branchPurchaseRequest.update({
     where: { id: requestId },
     data: {
-      totalEstimatedAmount: reviewedEstimatedAmountKgs,
+      totalEstimatedAmount: orderTotalKgs,
     },
   });
 
-  return reviewedEstimatedAmountKgs;
+  return orderTotalKgs;
 }
 
 export async function applyBranchPurchaseLineReviewInTx(
@@ -308,16 +294,17 @@ export async function applyBranchPurchaseLineReviewInTx(
     estimatedUnitCost = fifoCost.estimatedUnitCost;
   }
 
-  const payableLineAmount =
-    resolved.approvedQuantity > 0
-      ? resolveBranchPurchaseLinePayableAmount({
-          branchType: reviewBranch?.branchType,
-          quantity: resolved.approvedQuantity,
-          estimatedLineProductCostKgs,
-          unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
-          hasPricingPolicy,
-        })
-      : 0;
+  // Persist commercial Сумма (approvedQty × frozen Цена для филиала).
+  // FIFO cost stays in estimatedLineProductCostKgs only — never as line/order Сумма.
+  const commercialLineAmount = computeBranchPurchaseHqReviewLineAmountKgs({
+    quantity: item.quantity,
+    approvedQuantity: resolved.approvedQuantity,
+    lineStatus: resolved.lineStatus,
+    resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    estimatedLineProductCostKgs,
+    hasPricingPolicyAtReview: hasPricingPolicy,
+    branchType: reviewBranch?.branchType,
+  });
 
   await tx.branchPurchaseRequestItem.update({
     where: { id: item.id },
@@ -330,8 +317,8 @@ export async function applyBranchPurchaseLineReviewInTx(
       rejectionReasonCode: resolved.rejectionReasonCode,
       publicComment: resolved.publicComment,
       hasPricingPolicyAtReview: hasPricingPolicy,
-      approvedLineTotalKgs: payableLineAmount > 0 ? payableLineAmount : null,
-      totalAmount: payableLineAmount,
+      approvedLineTotalKgs: commercialLineAmount > 0 ? commercialLineAmount : null,
+      totalAmount: commercialLineAmount,
       bookingExpiresAt: resolved.approvedQuantity > 0 ? context.branchConfirmationExpiresAt : null,
       bookedQuantity: resolved.approvedQuantity > 0 ? resolved.approvedQuantity : 0,
       estimatedLineProductCostKgs,
@@ -449,33 +436,18 @@ export async function completeBranchPurchaseRequestReviewInTx(
       ? BranchPurchaseRequestStatus.REJECTED
       : BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION;
 
+  // Full commercial order total from persisted line totals (already recalculated).
+  await recalculateBranchPurchaseRequestReviewTotalsInTx(tx, requestId, branchId);
   const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
     where: { requestId },
     orderBy: branchPurchaseRequestItemsOrderBy,
     select: {
-      approvedQuantity: true,
-      quantity: true,
-      estimatedLineProductCostKgs: true,
       totalAmount: true,
     },
   });
-  const reviewedProductCostKgs = sumDisplayMoneyTotals(
-    refreshedItems.map((row) => {
-      const qty = row.approvedQuantity ?? row.quantity;
-      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
-    }),
+  const reviewedEstimatedAmountKgs = sumDisplayMoneyTotals(
+    refreshedItems.map((row) => Number(row.totalAmount ?? 0)),
   );
-  const reviewBranch = await tx.branch.findFirst({
-    where: { id: branchId, deletedAt: null },
-    select: { branchType: true },
-  });
-  const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType: reviewBranch?.branchType,
-    totalProductCostKgs: reviewedProductCostKgs,
-    storedEstimatedAmountKgs: sumDisplayMoneyTotals(
-      refreshedItems.map((row) => Number(row.totalAmount ?? 0)),
-    ),
-  });
 
   const branchConfirmationExpiresAt = addBookingHours(new Date(), BRANCH_CONFIRMATION_BOOKING_HOURS);
 

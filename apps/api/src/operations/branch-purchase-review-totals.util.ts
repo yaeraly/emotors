@@ -1,6 +1,5 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import { resolveBranchPurchaseLinePayableAmount } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branch-display.util';
 
 export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
@@ -32,6 +31,15 @@ export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
   return requested;
 }
 
+/**
+ * Authoritative HQ Sales row `Сумма` for one order line.
+ *
+ * Always:
+ *   effectiveQuantity × frozen order-line Цена для филиала (resolvedBranchPriceKgs)
+ *
+ * Never uses FIFO / landed cost / estimatedLineProductCostKgs for this commercial total.
+ * FIFO remains in estimatedLineProductCostKgs for cost accounting only.
+ */
 export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   quantity: number;
   approvedQuantity?: number | null;
@@ -47,28 +55,19 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
     return 0;
   }
 
+  if (item.hasPricingPolicyAtReview === false) {
+    return 0;
+  }
+
   const unitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
   });
-  const status = item.lineStatus ?? BranchPurchaseRequestLineStatus.PENDING_REVIEW;
-  const pendingReview =
-    status === BranchPurchaseRequestLineStatus.PENDING_REVIEW || status === 'PENDING_REVIEW';
-
-  // Before HQ Sales decides: same commercial total as Create Order (qty × branch unit price).
-  // FIFO payable applies only after line review for HQ_BRANCH at-cost transfers.
-  if (pendingReview && unitPrice != null && item.hasPricingPolicyAtReview !== false) {
-    return roundDisplayMoney(unitPrice * effectiveQuantity);
+  if (unitPrice == null) {
+    return 0;
   }
 
-  return resolveBranchPurchaseLinePayableAmount({
-    branchType: item.branchType,
-    quantity: effectiveQuantity,
-    estimatedLineProductCostKgs:
-      item.estimatedLineProductCostKgs != null ? Number(item.estimatedLineProductCostKgs) : null,
-    unitPriceKgs: unitPrice,
-    hasPricingPolicy: item.hasPricingPolicyAtReview !== false,
-  });
+  return roundDisplayMoney(unitPrice * effectiveQuantity);
 }
 
 export function sumBranchPurchaseHqReviewLineAmountsKgs(

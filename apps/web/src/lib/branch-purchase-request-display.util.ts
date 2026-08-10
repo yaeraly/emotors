@@ -84,12 +84,18 @@ export function hqReviewEffectiveQuantity(item: BranchPurchaseRequestLinePricing
 
 /**
  * HQ Sales review table amount for one line.
- * Pending: Запрос × цена; reviewed: Утв. × цена; rejected: 0.
+ * Always: effectiveQuantity × frozen Цена для филиала.
+ * Never prefer stale FIFO/cost persisted in totalAmount when branch price is known.
  */
 export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
   const effectiveQuantity = hqReviewEffectiveQuantity(item);
   if (effectiveQuantity <= 0) {
     return 0;
+  }
+
+  const price = getFrozenBranchPrice(item);
+  if (price != null) {
+    return roundMoney(price * effectiveQuantity);
   }
 
   if (isReviewedBranchPurchaseLine(item)) {
@@ -103,12 +109,7 @@ export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): numb
     return roundMoney(Number(item.totalAmount));
   }
 
-  const price = getFrozenBranchPrice(item);
-  if (price == null) {
-    return 0;
-  }
-
-  return roundMoney(price * effectiveQuantity);
+  return 0;
 }
 
 /** HQ Sales order amount: always the sum of all displayed row amounts. */
@@ -144,8 +145,6 @@ export function hqReviewPreviewEffectiveQuantity(
 /**
  * Live row Сумма while editing Утв.: draftQty × authoritative branch price.
  * Empty input keeps the previous persisted/requested amount (does not force 0).
- * When draft matches persisted approved qty on a reviewed line, keep backend
- * authoritative amount (may differ from unit×qty after FIFO post-review).
  */
 export function hqReviewPreviewLineAmount(
   item: BranchPurchaseRequestLinePricing,
@@ -165,15 +164,6 @@ export function hqReviewPreviewLineAmount(
   }
 
   const qty = Math.max(Number(raw), 0);
-  const persistedApproved = Math.max(Number(item.approvedQuantity ?? 0), 0);
-  if (
-    isReviewedBranchPurchaseLine(item) &&
-    (item.lineStatus === 'APPROVED' || item.lineStatus === 'PARTIALLY_APPROVED') &&
-    qty === persistedApproved
-  ) {
-    return hqReviewLineAmount(item);
-  }
-
   if (qty <= 0) {
     return 0;
   }
@@ -216,8 +206,8 @@ export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePric
 
 /**
  * Authoritative branch order line total.
- * Before HQ Sales review: always Количество × displayed Цена для филиала (create-form parity).
- * After review: prefer API presenter totalAmount (FIFO/approved), else HQ review math.
+ * Before and after HQ Sales review: effective quantity × frozen Цена для филиала.
+ * Never prefer stale FIFO/cost stored in totalAmount when branch price is known.
  */
 export function branchOrderLineTotal(
   item: BranchPurchaseRequestLinePricing,
@@ -227,13 +217,6 @@ export function branchOrderLineTotal(
     options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
   if (pendingHqReview && !options?.reviewed) {
     return pendingBranchReviewLineTotal(item);
-  }
-  const fromApi =
-    item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0
-      ? roundMoney(Number(item.totalAmount))
-      : null;
-  if (fromApi != null) {
-    return fromApi;
   }
   return hqReviewLineAmount(item);
 }

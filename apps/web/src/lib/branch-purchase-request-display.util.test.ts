@@ -58,29 +58,26 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('reviewed order uses authoritative line total not rounded unit×qty', () => {
+  it('reviewed order uses commercial qty × branch price even if FIFO persisted', () => {
     const line = {
       quantity: 2,
       approvedQuantity: 2,
       branchPurchasePriceKgs: 33935.07,
-      totalAmount: 72490.5,
+      totalAmount: 72490.5, // stale FIFO must not win
       approvedLineTotalKgs: 72490.5,
       lineStatus: 'APPROVED',
     };
-    const roundedUnitTotal = roundMoney(line.branchPurchasePriceKgs * line.quantity);
-    assert.equal(roundedUnitTotal, 67870.14);
-    assert.notEqual(roundedUnitTotal, line.totalAmount);
+    const commercial = roundMoney(line.branchPurchasePriceKgs * line.approvedQuantity);
+    assert.equal(commercial, 67870.14);
     assert.equal(
       branchOrderLineTotal(line, { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true }),
-      72490.5,
+      67870.14,
     );
-    assert.equal(
-      hqReviewLineAmount(line),
-      72490.5,
-    );
+    assert.equal(hqReviewLineAmount(line), 67870.14);
+    assert.notEqual(hqReviewLineAmount(line), 72490.5);
   });
 
-  it('reviewed HQ Sales and Branch Manager order totals match', () => {
+  it('reviewed HQ Sales and Branch Manager order totals match commercial formula', () => {
     const items = [
       {
         quantity: 2,
@@ -91,17 +88,13 @@ describe('branch purchase request display totals', () => {
         lineStatus: 'APPROVED',
       },
     ];
-    const options = { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true, totalEstimatedAmount: 72490.5 };
-    assert.equal(hqReviewOrderAmount(items), 72490.5);
-    assert.equal(branchOrderTotal(items, options), 72490.5);
-    assert.equal(
-      branchOrderLineTotal(items[0]!, options),
-      72490.5,
-    );
-    assert.notEqual(roundMoney(33935.07 * 2), 72490.5);
+    const options = { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true, totalEstimatedAmount: 67870.14 };
+    assert.equal(hqReviewOrderAmount(items), 67870.14);
+    assert.equal(branchOrderTotal(items, options), 67870.14);
+    assert.equal(branchOrderLineTotal(items[0]!, options), 67870.14);
   });
 
-  it('reviewed line total prefers API totalAmount over display unit×qty', () => {
+  it('reviewed line total prefers qty × branch price over stale FIFO totalAmount', () => {
     assert.equal(
       branchOrderLineTotal(
         {
@@ -113,7 +106,7 @@ describe('branch purchase request display totals', () => {
         },
         { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true },
       ),
-      72490.5,
+      67870.14,
     );
   });
 
@@ -431,7 +424,7 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('after save, draft matching persisted approved qty keeps authoritative FIFO total', () => {
+  it('after save, draft matching persisted approved qty uses commercial qty × branch price', () => {
     const reviewed = {
       id: 'line-a',
       quantity: 2,
@@ -443,9 +436,25 @@ describe('branch purchase request display totals', () => {
     };
     assert.equal(
       hqReviewPreviewLineAmount(reviewed, { draftApprovedQuantity: 2, decisionAction: 'APPROVE' }),
-      72490.5,
+      67870.14,
     );
-    assert.notEqual(roundMoney(33935.07 * 2), 72490.5);
+  });
+
+  it('approved reducer line persists commercial 2 × 1963.59 = 3927.18 not FIFO 630.15', () => {
+    const line = {
+      quantity: 10,
+      approvedQuantity: 2,
+      branchPurchasePriceKgs: 1963.59,
+      totalAmount: 630.15,
+      approvedLineTotalKgs: 630.15,
+      lineStatus: 'APPROVED',
+    };
+    assert.equal(hqReviewLineAmount(line), 3927.18);
+    assert.equal(
+      branchOrderLineTotal(line, { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true }),
+      3927.18,
+    );
+    assert.notEqual(hqReviewLineAmount(line), 630.15);
   });
 
   it('multiple rows calculate independently before HQ review', () => {

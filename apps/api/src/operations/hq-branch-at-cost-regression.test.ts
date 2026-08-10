@@ -74,18 +74,36 @@ describe('HQ Branch at-cost permanent invariant', () => {
       true,
     );
 
+    // Сумма заказа is commercial (approvedQty × frozen branch unit price), not FIFO cost.
+    const commercialLineTotals = lines.map((line) =>
+      roundDisplayMoney(line.unitDisplay * line.quantity),
+    );
+    const commercialOrderTotal = sumDisplayMoneyTotals(commercialLineTotals);
     const payableTotals = sanitized.items.map((item) =>
       Number((item as { totalAmount?: number }).totalAmount ?? 0),
     );
-    const parity = reconcileHqBranchTransferCostParity({
+    assert.equal(sumDisplayMoneyTotals(payableTotals), commercialOrderTotal);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), commercialOrderTotal);
+    assert.notEqual(commercialOrderTotal, HQ_INVENTORY_TOTAL);
+
+    // FIFO transfer-cost invariant remains on cost fields / payable helper (not Сумма).
+    const fifoPayableTotals = lines.map((line) =>
+      resolveBranchPurchaseLinePayableAmount({
+        branchType: BranchType.HQ_BRANCH,
+        quantity: line.quantity,
+        estimatedLineProductCostKgs: line.totalCostKgs,
+        unitPriceKgs: line.unitDisplay,
+        hasPricingPolicy: true,
+      }),
+    );
+    const costParity = reconcileHqBranchTransferCostParity({
       fifoLineCosts: lines.map((line) => line.totalCostKgs),
-      payableLineTotals: payableTotals,
-      orderTotalKgs: Number(sanitized.totalEstimatedAmount ?? 0),
+      payableLineTotals: fifoPayableTotals,
+      orderTotalKgs: HQ_INVENTORY_TOTAL,
     });
-    assert.equal(parity.ok, true);
-    assert.equal(parity.expectedKgs, HQ_INVENTORY_TOTAL);
-    assert.equal(parity.actualKgs, HQ_INVENTORY_TOTAL);
-    assert.equal(parity.differenceKgs, 0);
+    assert.equal(costParity.ok, true);
+    assert.equal(costParity.expectedKgs, HQ_INVENTORY_TOTAL);
+    assert.equal(costParity.differenceKgs, 0);
   });
 
   it('Case 2 — fractional unit cost: display rounding must not alter authoritative line total', () => {

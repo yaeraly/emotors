@@ -8,9 +8,9 @@ import {
 } from './branch-purchase-totals-repair.util';
 import { sanitizeBranchPurchaseRequest, toBranchPurchaseRequestResponse } from './branch-purchase-request.presenter';
 
-/** Stale DB pattern: FIFO line 72490.50 vs rounded display unit×qty 67870.14 (Δ 4620.36). */
-const STALE_LINE_TOTAL = 67870.14;
-const AUTHORITATIVE_FIFO_LINE = 72490.5;
+/** Stale DB pattern: FIFO cost leaked into totals vs commercial qty × branch price. */
+const COMMERCIAL_LINE_TOTAL = 67870.14; // 2 × 33935.07
+const STALE_FIFO_LINE = 72490.5;
 const DISPLAY_UNIT = 33935.07;
 const EFFECTIVE_QTY = 2;
 
@@ -20,7 +20,7 @@ function buildStaleHqBranchReviewedOrder() {
     requestNumber: 'BPR-STALE-PARITY',
     status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
     reviewedAt: new Date(),
-    totalEstimatedAmount: STALE_LINE_TOTAL,
+    totalEstimatedAmount: STALE_FIFO_LINE, // stale FIFO order total after wrong approve
     transportCostKgs: 0,
     branch: { branchType: 'HQ_BRANCH' },
     items: [
@@ -33,10 +33,10 @@ function buildStaleHqBranchReviewedOrder() {
         approvedQuantity: EFFECTIVE_QTY,
         lineStatus: 'APPROVED',
         unit: 'pcs',
-        estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_LINE,
+        estimatedLineProductCostKgs: STALE_FIFO_LINE,
         resolvedBranchPriceKgs: DISPLAY_UNIT,
-        totalAmount: STALE_LINE_TOTAL,
-        approvedLineTotalKgs: STALE_LINE_TOTAL,
+        totalAmount: STALE_FIFO_LINE, // stale FIFO line total
+        approvedLineTotalKgs: STALE_FIFO_LINE,
         hasPricingPolicyAtSubmit: true,
       },
     ],
@@ -45,13 +45,13 @@ function buildStaleHqBranchReviewedOrder() {
 
 describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)', () => {
   it('SUBMITTED_TO_HQ create/list/detail use commercial qty × branch price', () => {
-    const createFormTotal = STALE_LINE_TOTAL; // 2 × 33935.07
+    const createFormTotal = COMMERCIAL_LINE_TOTAL; // 2 × 33935.07
     const request = {
       id: 'cmsmxivrr0055zueq2pl50udj',
       requestNumber: 'BPR-SUBMITTED-LIST',
       status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
       reviewedAt: null,
-      totalEstimatedAmount: AUTHORITATIVE_FIFO_LINE, // stale FIFO header after wrong submit
+      totalEstimatedAmount: STALE_FIFO_LINE, // stale FIFO header after wrong submit
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -62,9 +62,9 @@ describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)
           productName: 'Редуктор 23 зуб 5 кг',
           quantity: EFFECTIVE_QTY,
           unit: 'pcs',
-          estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_LINE,
+          estimatedLineProductCostKgs: STALE_FIFO_LINE,
           resolvedBranchPriceKgs: DISPLAY_UNIT,
-          totalAmount: AUTHORITATIVE_FIFO_LINE, // stale FIFO line total
+          totalAmount: STALE_FIFO_LINE, // stale FIFO line total
           hasPricingPolicyAtSubmit: true,
         },
       ],
@@ -73,38 +73,38 @@ describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)
     assert.equal(parity.hqSalesTotalKgs, createFormTotal);
     assert.equal(parity.branchManagerTotalKgs, createFormTotal);
     assert.equal(parity.lineSumKgs, createFormTotal);
-    assert.notEqual(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_LINE);
+    assert.notEqual(parity.branchManagerTotalKgs, STALE_FIFO_LINE);
   });
 
-  it('explains 4620.36 as rounded unit×qty minus authoritative FIFO line total', () => {
-    const rounded = roundDisplayMoney(DISPLAY_UNIT * EFFECTIVE_QTY);
-    assert.equal(rounded, STALE_LINE_TOTAL);
-    assert.equal(roundDisplayMoney(AUTHORITATIVE_FIFO_LINE - rounded), 4620.36);
+  it('explains 4620.36 as FIFO minus commercial unit×qty (FIFO must not be Сумма)', () => {
+    const commercial = roundDisplayMoney(DISPLAY_UNIT * EFFECTIVE_QTY);
+    assert.equal(commercial, COMMERCIAL_LINE_TOTAL);
+    assert.equal(roundDisplayMoney(STALE_FIFO_LINE - commercial), 4620.36);
   });
 
-  it('presenter aligns HQ Sales and Branch Manager totals after review', () => {
+  it('presenter aligns HQ Sales and Branch Manager totals after review (commercial)', () => {
     const request = buildStaleHqBranchReviewedOrder();
     const parity = assertBranchPurchaseRequestTotalParity(request);
 
-    assert.equal(parity.hqSalesTotalKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(parity.lineSumKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.notEqual(parity.hqSalesTotalKgs, STALE_LINE_TOTAL);
+    assert.equal(parity.hqSalesTotalKgs, COMMERCIAL_LINE_TOTAL);
+    assert.equal(parity.branchManagerTotalKgs, COMMERCIAL_LINE_TOTAL);
+    assert.equal(parity.lineSumKgs, COMMERCIAL_LINE_TOTAL);
+    assert.notEqual(parity.hqSalesTotalKgs, STALE_FIFO_LINE);
   });
 
-  it('sanitized branch line total uses presenter FIFO not requested×display unit', () => {
+  it('sanitized branch line total uses commercial qty × branch price not FIFO', () => {
     const sanitized = sanitizeBranchPurchaseRequest(buildStaleHqBranchReviewedOrder(), true);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(sanitized.totalEstimatedAmount, AUTHORITATIVE_FIFO_LINE);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, COMMERCIAL_LINE_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, COMMERCIAL_LINE_TOTAL);
   });
 
-  it('full HQ Sales response uses same authoritative line total', () => {
+  it('full HQ Sales response uses same authoritative commercial line total', () => {
     const full = toBranchPurchaseRequestResponse(buildStaleHqBranchReviewedOrder());
-    assert.equal((full.items[0] as { totalAmount?: number }).totalAmount, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(full.totalEstimatedAmount, AUTHORITATIVE_FIFO_LINE);
+    assert.equal((full.items[0] as { totalAmount?: number }).totalAmount, COMMERCIAL_LINE_TOTAL);
+    assert.equal(full.totalEstimatedAmount, COMMERCIAL_LINE_TOTAL);
   });
 
-  it('repair persists authoritative totals from order-line snapshots', async () => {
+  it('repair persists commercial totals from order-line price snapshots', async () => {
     const request = buildStaleHqBranchReviewedOrder();
     const updates: Array<{ id: string; totalAmount: number; approvedLineTotalKgs: number | null }> = [];
     const tx = {
@@ -135,13 +135,13 @@ describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)
     };
 
     const result = await repairBranchPurchaseRequestDerivedTotalsInTx(tx, request.id);
-    assert.equal(result.previousOrderTotalKgs, STALE_LINE_TOTAL);
-    assert.equal(result.repairedOrderTotalKgs, AUTHORITATIVE_FIFO_LINE);
+    assert.equal(result.previousOrderTotalKgs, STALE_FIFO_LINE);
+    assert.equal(result.repairedOrderTotalKgs, COMMERCIAL_LINE_TOTAL);
     assert.equal(result.lineRepairs.length, 1);
-    assert.equal(result.lineRepairs[0]?.previousKgs, STALE_LINE_TOTAL);
-    assert.equal(result.lineRepairs[0]?.repairedKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(Number(request.totalEstimatedAmount), AUTHORITATIVE_FIFO_LINE);
-    assert.equal(Number(request.items[0]?.totalAmount), AUTHORITATIVE_FIFO_LINE);
+    assert.equal(result.lineRepairs[0]?.previousKgs, STALE_FIFO_LINE);
+    assert.equal(result.lineRepairs[0]?.repairedKgs, COMMERCIAL_LINE_TOTAL);
+    assert.equal(Number(request.totalEstimatedAmount), COMMERCIAL_LINE_TOTAL);
+    assert.equal(Number(request.items[0]?.totalAmount), COMMERCIAL_LINE_TOTAL);
   });
 
   it('price snapshot on line is preserved — catalog repricing does not change order unit', () => {

@@ -46,23 +46,24 @@ export function sumBranchPurchaseCommercialLineTotalsKgs(
   );
 }
 
-/** Authoritative branch line total: displayed quantity × CEO branch unit price. */
+/**
+ * Authoritative branch line Сумма: displayed quantity × CEO branch unit price.
+ * Commercial total always wins when the frozen branch price is known.
+ * FIFO/landed cost must not replace Сумма (kept separately as product cost).
+ */
 export function resolveBranchPurchaseBranchLineTotalKgs(item: {
   quantity: number;
   branchPurchasePriceKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
   totalAmount?: unknown;
-  /** HQ internal branch: use authoritative FIFO/landed line total, not rounded unit × qty. */
+  /** @deprecated Ignored for Сумма — commercial qty × branch price is authoritative. */
   transferAtCost?: boolean;
 }): number {
-  const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
-  if (item.transferAtCost && stored > 0) {
-    return stored;
-  }
   const commercial = resolveBranchPurchaseCommercialLineTotalKgs(item);
   if (commercial > 0) {
     return commercial;
   }
+  const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
   return stored > 0 ? stored : 0;
 }
 

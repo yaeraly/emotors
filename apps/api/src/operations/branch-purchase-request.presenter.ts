@@ -3,10 +3,7 @@ import { canManageOwnBranchProductRequest } from '../rbac/rbac';
 import type { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.util';
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
-import {
-  resolveBranchPurchaseEstimatedAmountKgs,
-  shouldTransferBranchPurchaseAtCost,
-} from './branch-purchase-estimated-amount.util';
+import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 import {
   resolveBranchPurchaseBranchUnitPriceKgs,
   resolveBranchPurchaseCommercialLineTotalKgs,
@@ -126,7 +123,6 @@ export function toBranchPurchaseRequestResponse<T extends {
   branchType?: string | null;
 }>(request: T) {
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
-  const transferAtCost = shouldTransferBranchPurchaseAtCost(branchType);
   const orderedItems = sortBranchPurchaseRequestItems(request.items);
   const items = orderedItems.map((rawItem) => {
     const item = toBranchPurchaseRequestItemResponse(
@@ -173,23 +169,11 @@ export function toBranchPurchaseRequestResponse<T extends {
           : 0;
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
+  // Authoritative Сумма заказа = SUM of commercial line totals (effectiveQty × branch price).
+  // Never substitute FIFO product cost into the order total shown as Сумма заказа.
   const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
-  const hasReviewedLine = items.some((item) => {
-    const status = (item as { lineStatus?: string | null }).lineStatus;
-    return Boolean(status && status !== 'PENDING_REVIEW');
-  });
-  // Before HQ Sales review: order total = commercial create-form sum (qty × branch price).
-  // After review for HQ_BRANCH: keep FIFO себестоимость payable as estimated amount.
-  const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType,
-    totalProductCostKgs: transferAtCost && hasReviewedLine ? totalProductCostKgs : 0,
-    lineProductCosts:
-      transferAtCost && hasReviewedLine
-        ? items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0))
-        : [],
-    storedEstimatedAmountKgs:
-      computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount),
-  });
+  const totalEstimatedAmount =
+    computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount);
 
   return {
     ...request,
@@ -397,8 +381,8 @@ export function sanitizeBranchPurchaseRequest<T extends {
   );
   const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
 
-  // HQ_BRANCH: before HQ Sales review match Create Order (qty × branch price);
-  // after review keep FIFO payable totals from `full`.
+  // HQ_BRANCH: always commercial Сумма (effectiveQty × frozen branch price) for branch users.
+  // FIFO cost fields are stripped; never exposed as line/order Сумма.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
