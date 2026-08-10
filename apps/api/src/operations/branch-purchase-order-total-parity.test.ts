@@ -172,17 +172,18 @@ describe('BPR-1786349778733 order total parity (FIFO payable authoritative)', ()
     assert.equal(drifted.differenceKgs, -4620.36);
   });
 
-  it('partial approval uses approved qty FIFO snapshot only', () => {
+  it('partial approval scales saved submit line total by approved qty', () => {
     const lineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
       quantity: 10,
       approvedQuantity: 6,
       lineStatus: 'PARTIALLY_APPROVED',
       resolvedBranchPriceKgs: DISPLAY_UNIT,
-      estimatedLineProductCostKgs: 40000,
+      totalAmount: 10000,
+      estimatedLineProductCostKgs: 10000,
       hasPricingPolicyAtReview: true,
       branchType: 'HQ_BRANCH',
     });
-    assert.equal(lineTotal, 40000);
+    assert.equal(lineTotal, 6000);
     assert.notEqual(lineTotal, roundDisplayMoney(DISPLAY_UNIT * 6));
   });
 

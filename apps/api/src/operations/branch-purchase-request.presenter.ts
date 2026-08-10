@@ -4,7 +4,6 @@ import type { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.util';
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import {
-  resolveBranchPurchaseEstimatedAmountKgs,
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import {
@@ -140,6 +139,8 @@ export function toBranchPurchaseRequestResponse<T extends {
       lineStatus: (item as { lineStatus?: string | null }).lineStatus,
       resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
       branchPurchasePriceKgs: (item as { branchPurchasePriceKgs?: unknown }).branchPurchasePriceKgs,
+      totalAmount: item.totalAmount,
+      approvedLineTotalKgs: item.approvedLineTotalKgs,
       estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
       hasPricingPolicyAtReview:
         (item as { hasPricingPolicyAtReview?: boolean | null }).hasPricingPolicyAtReview ??
@@ -175,15 +176,10 @@ export function toBranchPurchaseRequestResponse<T extends {
           : 0;
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
-  // Shared authoritative order total: HQ_BRANCH = Σ FIFO payable; else Σ commercial lines.
+  // approvedOrderTotal = SUM(authoritative line totals) — consumed by all downstream roles.
   const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
-  const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType,
-    totalProductCostKgs: transferAtCost ? totalProductCostKgs : computedOrderTotal,
-    lineProductCosts: items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
-    storedEstimatedAmountKgs:
-      computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount),
-  });
+  const totalEstimatedAmount =
+    computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount);
 
   return {
     ...request,

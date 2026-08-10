@@ -5,6 +5,7 @@ import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
   resolveBranchPurchaseReviewedLineAmountKgs,
+  resolveBranchPurchaseSavedOrderLineUnitPriceKgs,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 
@@ -167,19 +168,33 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
     );
   });
 
-  it('approved HQ_BRANCH line uses FIFO payable 630.15 not commercial 2 × 1963.59', () => {
+  it('approved HQ_BRANCH line uses saved submit unit × approved qty (72490.50 not catalog 67870.14)', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
-        quantity: 10,
+        quantity: 2,
         approvedQuantity: 2,
         lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
-        resolvedBranchPriceKgs: 1963.59,
-        estimatedLineProductCostKgs: 630.15,
+        resolvedBranchPriceKgs: 33935.07,
+        totalAmount: 67870.14,
+        approvedLineTotalKgs: 67870.14,
+        estimatedLineProductCostKgs: 72490.5,
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      630.15,
+      72490.5,
     );
+  });
+
+  it('saved submit unit price is derived from submit line total not catalog price', () => {
+    const savedUnit = resolveBranchPurchaseSavedOrderLineUnitPriceKgs({
+      quantity: 2,
+      totalAmount: 72490.5,
+      resolvedBranchPriceKgs: 33935.07,
+      estimatedLineProductCostKgs: 72490.5,
+      branchType: 'HQ_BRANCH',
+    });
+    assert.equal(savedUnit, 36245.25);
+    assert.notEqual(savedUnit, 33935.07);
   });
 });
 

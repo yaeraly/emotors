@@ -10,8 +10,6 @@ import {
 import type { AuthUser } from '../auth/auth.types';
 import { addBookingHours, BRANCH_CONFIRMATION_BOOKING_HOURS } from '../inventory/hq-stock-booking.constants';
 import type { HqStockBookingService } from '../inventory/hq-stock-booking.service';
-import { sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import { resolveBranchPurchaseEstimatedAmountKgs } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseFifoLineCost } from './branch-purchase-fifo-cost.util';
 import {
   branchPurchaseRequestItemsInclude,
@@ -19,7 +17,6 @@ import {
 } from './branch-purchase-request-items-order.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
-  resolveBranchPurchaseHqReviewEffectiveQuantity,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 import {
@@ -53,6 +50,8 @@ export type BranchPurchaseRequestItemRow = {
   hqPhysicalStock: number | null;
   estimatedUnitCost: Prisma.Decimal | number | null;
   resolvedBranchPriceKgs: Prisma.Decimal | number | null;
+  totalAmount?: Prisma.Decimal | number | null;
+  approvedLineTotalKgs?: Prisma.Decimal | number | null;
 };
 
 export type AppliedBranchPurchaseLineReview = {
@@ -183,6 +182,8 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
       approvedQuantity: true,
       quantity: true,
       lineStatus: true,
+      totalAmount: true,
+      approvedLineTotalKgs: true,
       estimatedLineProductCostKgs: true,
       resolvedBranchPriceKgs: true,
       hasPricingPolicyAtReview: true,
@@ -195,6 +196,8 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
     quantity: row.quantity,
     approvedQuantity: row.approvedQuantity,
     lineStatus: row.lineStatus,
+    totalAmount: row.totalAmount,
+    approvedLineTotalKgs: row.approvedLineTotalKgs,
     resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
     estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
     hasPricingPolicyAtReview: row.hasPricingPolicyAtReview ?? row.hasPricingPolicyAtSubmit,
@@ -208,26 +211,15 @@ export async function recalculateBranchPurchaseRequestReviewTotalsInTx(
     await tx.branchPurchaseRequestItem.update({
       where: { id: row.id },
       data: {
-        // Authoritative Сумма: HQ_BRANCH = saved FIFO payable; else qty × frozen branch price.
+        // Authoritative approved line total = effectiveQty × saved submit unit price snapshot.
         totalAmount: lineAmount,
         approvedLineTotalKgs: reviewed && lineAmount > 0 ? lineAmount : null,
       },
     });
   }
 
-  const orderLineSumKgs = sumBranchPurchaseHqReviewLineAmountsKgs(lineInputs);
-  const reviewedProductCostKgs = sumDisplayMoneyTotals(
-    refreshedItems.map((row) => {
-      const qty = resolveBranchPurchaseHqReviewEffectiveQuantity(row);
-      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
-    }),
-  );
-  // HQ_BRANCH order total must equal Σ FIFO line costs (never commercial unit×qty).
-  const orderTotalKgs = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType,
-    totalProductCostKgs: reviewedProductCostKgs,
-    storedEstimatedAmountKgs: orderLineSumKgs,
-  });
+  // approvedOrderTotal = SUM(authoritative approved line totals) — single source for all roles.
+  const orderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(lineInputs);
 
   await tx.branchPurchaseRequest.update({
     where: { id: requestId },
@@ -313,6 +305,8 @@ export async function applyBranchPurchaseLineReviewInTx(
     approvedQuantity: resolved.approvedQuantity,
     lineStatus: resolved.lineStatus,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    totalAmount: item.totalAmount,
+    approvedLineTotalKgs: item.approvedLineTotalKgs,
     estimatedLineProductCostKgs,
     hasPricingPolicyAtReview: hasPricingPolicy,
     branchType: reviewBranch?.branchType,

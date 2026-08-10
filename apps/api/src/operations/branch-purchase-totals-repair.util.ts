@@ -1,9 +1,7 @@
 import { BranchPurchaseRequestStatus } from '@prisma/client';
-import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import { resolveBranchPurchaseEstimatedAmountKgs } from './branch-purchase-estimated-amount.util';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
-  resolveBranchPurchaseHqReviewEffectiveQuantity,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
 import {
@@ -70,12 +68,15 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
   const previousOrderTotalKgs = roundDisplayMoney(Number(request.totalEstimatedAmount ?? 0));
 
   const lineRepairs: Array<{ itemId: string; previousKgs: number; repairedKgs: number }> = [];
+  const repairedLineAmounts = new Map<string, number>();
 
   for (const row of items) {
     const lineInput = {
       quantity: Number(row.quantity ?? 0),
       approvedQuantity: row.approvedQuantity as number | null | undefined,
       lineStatus: row.lineStatus as string | null | undefined,
+      totalAmount: row.totalAmount,
+      approvedLineTotalKgs: row.approvedLineTotalKgs,
       resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
       estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
       hasPricingPolicyAtReview:
@@ -99,37 +100,24 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
         approvedLineTotalKgs: reviewed && repairedKgs > 0 ? repairedKgs : null,
       },
     });
+    repairedLineAmounts.set(String(row.id), repairedKgs);
   }
 
-  const refreshedItems = items.map((row) => ({
-    quantity: Number(row.quantity ?? 0),
-    approvedQuantity: row.approvedQuantity as number | null | undefined,
-    lineStatus: row.lineStatus as string | null | undefined,
-    resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
-    estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
-    hasPricingPolicyAtReview:
-      (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
-      (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
-    branchType,
-  }));
-
-  const orderLineSum = sumBranchPurchaseHqReviewLineAmountsKgs(refreshedItems);
-  const productCostKgs = sumDisplayMoneyTotals(
-    items.map((row) => {
-      const qty = resolveBranchPurchaseHqReviewEffectiveQuantity({
-        quantity: Number(row.quantity ?? 0),
-        approvedQuantity: row.approvedQuantity as number | null | undefined,
-        lineStatus: row.lineStatus as string | null | undefined,
-      });
-      return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
-    }),
+  const repairedOrderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(
+    items.map((row) => ({
+      quantity: Number(row.quantity ?? 0),
+      approvedQuantity: row.approvedQuantity as number | null | undefined,
+      lineStatus: row.lineStatus as string | null | undefined,
+      totalAmount: repairedLineAmounts.get(String(row.id)) ?? row.totalAmount,
+      approvedLineTotalKgs: repairedLineAmounts.get(String(row.id)) ?? row.approvedLineTotalKgs,
+      resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+      estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
+      hasPricingPolicyAtReview:
+        (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
+        (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
+      branchType,
+    })),
   );
-  // HQ_BRANCH: order total = Σ saved FIFO line costs; never commercial unit×qty.
-  const repairedOrderTotalKgs = resolveBranchPurchaseEstimatedAmountKgs({
-    branchType,
-    totalProductCostKgs: productCostKgs,
-    storedEstimatedAmountKgs: orderLineSum,
-  });
 
   await tx.branchPurchaseRequest.update({
     where: { id: requestId },
