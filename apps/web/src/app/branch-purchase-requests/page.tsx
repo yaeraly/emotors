@@ -100,7 +100,7 @@ type DraftLine = {
   weightKg: number;
   branchPurchasePriceKgs: number | null;
   wholesalePriceKgs: number | null;
-  /** Authoritative backend line total (FIFO / payable). Never recompute from unit×qty. */
+  /** Optional backend payable/FIFO total — Branch Sales UI totals use qty × branch price instead. */
   authoritativeLineTotalKgs: number | null;
   pricingPending: boolean;
   priceResolving: boolean;
@@ -112,7 +112,9 @@ type DraftLine = {
 
 function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
   if (!line.productId) return '—';
-  if (line.priceResolving) {
+  const branchPrice = parseBranchMoney(line.branchPurchasePriceKgs);
+  // Keep a known Цена для филиала visible while qty-triggered refresh runs.
+  if (line.priceResolving && branchPrice == null) {
     return (
       <span className="inline-flex items-center gap-1 text-slate-500">
         <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
@@ -120,7 +122,6 @@ function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
       </span>
     );
   }
-  const branchPrice = parseBranchMoney(line.branchPurchasePriceKgs);
   if (line.pricingPending || branchPrice == null) {
     return t('branchProductRequest.priceNotConfigured');
   }
@@ -168,8 +169,7 @@ function linesFromRequest(request: BranchPurchaseRequest): DraftLine[] {
       weightKg: item.weightKg ?? 0,
       branchPurchasePriceKgs: branchPrice,
       wholesalePriceKgs: branchPrice,
-      authoritativeLineTotalKgs:
-        item.totalAmount != null && Number(item.totalAmount) > 0 ? Number(item.totalAmount) : null,
+      authoritativeLineTotalKgs: null,
       pricingPending: branchPrice == null,
       priceResolving: false,
       branchStock: item.currentBranchStock ?? 0,
@@ -777,20 +777,14 @@ function BranchPurchaseRequestsPageInner() {
                   : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
                     ? Boolean(entry.hasPricingPolicy)
                     : branchPrice != null;
-            const lineTotalFromApi =
-              typeof entry === 'object' && entry != null && entry.lineTotalKgs != null
-                ? Number(entry.lineTotalKgs)
-                : null;
+            // Branch Sales Сумма = qty × displayed branch price. Do not store FIFO
+            // lineTotalKgs as the row total — it can disagree with Цена для филиала
+            // (e.g. 630.15 vs 2 × 1963.59).
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
-              // Prefer live API line total; keep prior authoritative total when API omits it
-              // (HQ at-cost must not fall back to rounded unit × qty).
-              authoritativeLineTotalKgs:
-                lineTotalFromApi != null && Number.isFinite(lineTotalFromApi) && lineTotalFromApi > 0
-                  ? lineTotalFromApi
-                  : line.authoritativeLineTotalKgs,
+              authoritativeLineTotalKgs: null,
               pricingPending: !hasPricing,
               priceResolving: false,
             };

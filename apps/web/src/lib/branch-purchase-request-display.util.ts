@@ -17,7 +17,7 @@ export type DraftFormLinePricing = {
   productId?: string;
   quantity: string | number;
   branchPurchasePriceKgs?: number | null;
-  /** Authoritative FIFO/payable line total from backend — never recompute as unit×qty for HQ at-cost. */
+  /** Optional backend FIFO/payable total; Branch Sales create/draft UI ignores this when branch price is known. */
   authoritativeLineTotalKgs?: number | null;
   pricingPending?: boolean;
   priceResolving?: boolean;
@@ -126,10 +126,16 @@ function parseDraftFormQuantity(quantity: string | number): number {
   return Number.isFinite(qty) && qty > 0 ? qty : 0;
 }
 
-/** Branch price shown in the draft form row (matches formatBranchPrice inputs). */
+/**
+ * Branch price shown in the draft/create form row (matches formatBranchPrice inputs).
+ * Keep a known price while a background refresh runs so qty edits update Сумма immediately.
+ */
 export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | null {
   if (!line.productId) return null;
-  if (line.priceResolving || line.pricingPending) return null;
+  if (line.pricingPending) return null;
+  if (line.priceResolving && (line.branchPurchasePriceKgs == null || Number(line.branchPurchasePriceKgs) <= 0)) {
+    return null;
+  }
   const raw = line.branchPurchasePriceKgs;
   if (raw == null) return null;
   const price = Number(raw);
@@ -138,24 +144,25 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
 }
 
 /**
- * Row total for NEW/DRAFT form (restore 0007a11 architecture):
- * Prefer backend FIFO/payable `authoritativeLineTotalKgs` / `lineTotalKgs`.
- * Only fall back to quantity × displayed branch price when no authoritative total exists
- * (franchise create flow before prices load). Never rebuild HQ at-cost totals from rounded units.
+ * Row total for NEW/DRAFT create form:
+ * displayed quantity × displayed Цена для филиала.
+ * Do not use FIFO/landed `authoritativeLineTotalKgs` here — that field can disagree with the
+ * unit price shown in the same row (e.g. 630.15 vs 2 × 1963.59).
  */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
+  const price = getDraftFormBranchPrice(line);
+  const qty = parseDraftFormQuantity(line.quantity);
+  if (price != null && qty > 0) {
+    return roundMoney(qty * price);
+  }
   const authoritative = line.authoritativeLineTotalKgs;
   if (authoritative != null && Number.isFinite(Number(authoritative)) && Number(authoritative) > 0) {
     return roundMoney(Number(authoritative));
   }
-  const price = getDraftFormBranchPrice(line);
-  if (price == null) return 0;
-  const qty = parseDraftFormQuantity(line.quantity);
-  if (qty <= 0) return 0;
-  return roundMoney(qty * price);
+  return 0;
 }
 
-/** Bottom total for NEW/DRAFT form: sum of authoritative/derived line totals. */
+/** Bottom total for NEW/DRAFT form: sum of current row totals (qty × branch price). */
 export function draftFormOrderTotal(lines: DraftFormLinePricing[]): number {
   return roundMoney(lines.reduce((sum, line) => sum + draftFormLineTotal(line), 0));
 }

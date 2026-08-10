@@ -293,7 +293,7 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('returns zero while branch price is still resolving', () => {
+  it('keeps known branch price while a background refresh is resolving', () => {
     assert.equal(
       draftFormLineTotal({
         productId: 'p1',
@@ -301,7 +301,47 @@ describe('branch purchase request draft form totals', () => {
         branchPurchasePriceKgs: 12000,
         priceResolving: true,
       }),
-      0,
+      24000,
+    );
+  });
+
+  it('create form: qty 2 times branch price 1963.59 is 3927.18 not FIFO 630.15', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '2',
+        branchPurchasePriceKgs: 1963.59,
+        authoritativeLineTotalKgs: 630.15,
+      }),
+      3927.18,
+    );
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '1',
+        branchPurchasePriceKgs: 1963.59,
+      }),
+      1963.59,
+    );
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'p1',
+        quantity: '3',
+        branchPurchasePriceKgs: 1963.59,
+      }),
+      5890.77,
+    );
+  });
+
+  it('updates create-form line total immediately when quantity changes', () => {
+    const price = 1963.59;
+    assert.equal(
+      draftFormLineTotal({ productId: 'p1', quantity: '1', branchPurchasePriceKgs: price }),
+      1963.59,
+    );
+    assert.equal(
+      draftFormLineTotal({ productId: 'p1', quantity: '2', branchPurchasePriceKgs: price }),
+      3927.18,
     );
   });
 
@@ -320,50 +360,29 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('prefers authoritative backend line total over unit×qty for HQ at-cost', () => {
-    const line = { quantity: 11, totalCostKgs: 162317.33, unit: 14756.12 };
-    const roundedUnitTotal = roundMoney(line.unit * line.quantity);
-    assert.notEqual(roundedUnitTotal, line.totalCostKgs);
-    assert.equal(
-      draftFormLineTotal({
-        productId: 'p1',
-        quantity: String(line.quantity),
-        branchPurchasePriceKgs: line.unit,
-        authoritativeLineTotalKgs: line.totalCostKgs,
-      }),
-      line.totalCostKgs,
-    );
-    assert.equal(
-      draftFormLineTotal({
-        productId: 'p1',
-        quantity: String(line.quantity),
-        branchPurchasePriceKgs: line.unit,
-        authoritativeLineTotalKgs: null,
-      }),
-      roundedUnitTotal,
-    );
-  });
-
-  it('order total uses authoritative FIFO lines so 914369.08 unit×qty drift is avoided', () => {
-    const driftedUnitLine = roundMoney(14756.12 * 11);
+  it('order total equals sum of qty × branch price rows', () => {
     assert.equal(
       draftFormOrderTotal([
         {
           productId: 'p1',
-          quantity: '11',
-          branchPurchasePriceKgs: 14756.12,
-          authoritativeLineTotalKgs: 162317.33,
+          quantity: '2',
+          branchPurchasePriceKgs: 1963.59,
+          authoritativeLineTotalKgs: 630.15,
         },
         {
           productId: 'p2',
-          quantity: '11',
-          branchPurchasePriceKgs: 14756.12,
-          authoritativeLineTotalKgs: 162317.33,
+          quantity: '1',
+          branchPurchasePriceKgs: 10000,
+          authoritativeLineTotalKgs: 999,
+        },
+        {
+          productId: 'p3',
+          quantity: '1',
+          branchPurchasePriceKgs: 2500,
         },
       ]),
-      roundMoney(162317.33 + 162317.33),
+      16427.18,
     );
-    assert.notEqual(driftedUnitLine, 162317.33);
   });
 });
 
