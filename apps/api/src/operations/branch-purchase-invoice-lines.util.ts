@@ -62,13 +62,18 @@ export function resolveBranchPurchaseApprovedInvoiceLine(
     branchUnit != null && quantity > 0 ? roundDisplayMoney(branchUnit * quantity) : 0;
 
   let lineTotal = computedLineTotal;
+  // HQ_BRANCH markup 0%: payable/transfer total is exact FIFO inventory cost only.
+  // Never replace FIFO with commercial display unit × qty (causes ±0.72 / ±0.19 drift).
+  const isHqBranchAtCost =
+    item.branchType === 'HQ_BRANCH' || item.branchType === 'HQ_INTERNAL_BRANCH';
   if (
+    !isHqBranchAtCost &&
     branchLineTotal > 0 &&
     fifoLineCost > 0 &&
     Math.abs(computedLineTotal - fifoLineCost) <= 0.009 &&
     branchLineTotal > computedLineTotal + 0.009
   ) {
-    // FIFO/product cost was incorrectly used as payable line total — restore approved branch price × qty.
+    // Non-HQ branches: restore approved branch price × qty when FIFO was wrongly stored as payable.
     lineTotal = branchLineTotal;
   }
 

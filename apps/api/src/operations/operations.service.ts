@@ -2077,10 +2077,16 @@ export class OperationsService {
         }
 
         const unitCost = fifoCost.estimatedUnitCost;
-        const unitPrice = Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs);
         const lineCost = fifoCost.estimatedLineProductCostKgs;
-        const linePrice =
-          item.approvedLineTotalKgs != null
+        const atCost = shouldTransferBranchPurchaseAtCost(branch?.branchType);
+        const unitPrice = atCost
+          ? unitCost
+          : Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs);
+        // HQ_BRANCH: selling/transfer price = exact FIFO line cost (markup 0%).
+        // Never rebuild as rounded display unit × quantity.
+        const linePrice = atCost
+          ? lineCost
+          : item.approvedLineTotalKgs != null
             ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
             : roundDisplayMoney(unitPrice * quantity);
         lineCosts.push(lineCost);

@@ -10,24 +10,42 @@ import {
   sumHqBranchTransferLineCosts,
 } from './hq-branch-transfer-cost.util';
 
-const HQ_INVENTORY_TOTAL = 914369.8;
+const HQ_BATCH_1_TOTAL = 914369.8;
+const HQ_BATCH_2_TOTAL = 822036.2;
 
 describe('HQ Branch transfer cost — Decimal authoritative path', () => {
   it('Test 1 — authoritative sum 914369.80 must not drift via display unit × qty', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
-    const lineCosts = distributeRoundedAmounts(rawShares, HQ_INVENTORY_TOTAL);
+    const lineCosts = distributeRoundedAmounts(rawShares, HQ_BATCH_1_TOTAL);
     const lines = lineCosts.map((transferLineCostKgs) => ({
       transferLineCostKgs,
       quantity,
     }));
     const drift = measureUnitTimesQtyDriftKgs(lines);
-    assert.equal(drift.authoritativeSum, HQ_INVENTORY_TOTAL);
-    assert.notEqual(drift.unitTimesQtySum, HQ_INVENTORY_TOTAL);
+    assert.equal(drift.authoritativeSum, HQ_BATCH_1_TOTAL);
+    assert.notEqual(drift.unitTimesQtySum, HQ_BATCH_1_TOTAL);
     assert.ok(Math.abs(drift.driftKgs) > 0);
     assert.equal(
       sumHqBranchTransferLineCosts(lines.map((line) => line.transferLineCostKgs)),
-      HQ_INVENTORY_TOTAL,
+      HQ_BATCH_1_TOTAL,
+    );
+  });
+
+  it('Test 1b — batch 2 authoritative sum 822036.20 is preserved (not +0.19 unit×qty drift)', () => {
+    const quantity = 10;
+    const rawShares = Array.from({ length: 55 }, (_, index) => 12000.45 + (index % 13) * 0.27);
+    const lineCosts = distributeRoundedAmounts(rawShares, HQ_BATCH_2_TOTAL);
+    const lines = lineCosts.map((transferLineCostKgs) => ({
+      transferLineCostKgs,
+      quantity,
+    }));
+    const drift = measureUnitTimesQtyDriftKgs(lines);
+    assert.equal(drift.authoritativeSum, HQ_BATCH_2_TOTAL);
+    assert.notEqual(drift.unitTimesQtySum, HQ_BATCH_2_TOTAL);
+    assert.equal(
+      sumHqBranchTransferLineCosts(lines.map((line) => line.transferLineCostKgs)),
+      HQ_BATCH_2_TOTAL,
     );
   });
 

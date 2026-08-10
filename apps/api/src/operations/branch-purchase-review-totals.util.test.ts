@@ -168,7 +168,7 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
     );
   });
 
-  it('approved HQ_BRANCH line uses saved submit unit × approved qty (72490.50 not catalog 67870.14)', () => {
+  it('approved HQ_BRANCH line uses FIFO inventory cost (72490.50 not catalog 67870.14)', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 2,
@@ -182,6 +182,23 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
         hasPricingPolicyAtReview: true,
       }),
       72490.5,
+    );
+  });
+
+  it('HQ_BRANCH rejects drifted unit×qty totalAmount in favor of FIFO line cost', () => {
+    assert.equal(
+      computeBranchPurchaseHqReviewLineAmountKgs({
+        quantity: 11,
+        approvedQuantity: 11,
+        lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
+        resolvedBranchPriceKgs: 14756.12,
+        totalAmount: 162317.32, // unit×qty drift
+        approvedLineTotalKgs: 162317.32,
+        estimatedLineProductCostKgs: 162317.33, // exact FIFO
+        branchType: 'HQ_BRANCH',
+        hasPricingPolicyAtReview: true,
+      }),
+      162317.33,
     );
   });
 

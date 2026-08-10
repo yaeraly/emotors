@@ -6,9 +6,8 @@ import {
   sumBranchPurchaseApprovedInvoiceTotalKgs,
 } from './branch-purchase-invoice-lines.util';
 
-/** BPR-1786349778733 reducer pattern — FIFO cost must not become invoice unit price. */
 describe('branch purchase approved invoice lines', () => {
-  it('restores reducer line to 2 × 1963.59 = 3927.18 when FIFO cost was stored as line total', () => {
+  it('HQ_BRANCH uses exact FIFO line cost, never display unit × qty (reducer)', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-reducer',
       sku: 'RED-18',
@@ -18,17 +17,36 @@ describe('branch purchase approved invoice lines', () => {
       lineStatus: 'APPROVED',
       branchPurchasePriceKgs: 1963.59,
       resolvedBranchPriceKgs: 1963.59,
-      totalAmount: 630.15,
-      approvedLineTotalKgs: 630.15,
-      estimatedLineProductCostKgs: 630.15,
+      totalAmount: 3927.18,
+      approvedLineTotalKgs: 3927.18,
+      estimatedLineProductCostKgs: 3927.18,
       branchType: 'HQ_BRANCH',
     });
 
     assert.equal(line.quantity, 2);
-    assert.equal(line.unitPrice, 1963.59);
     assert.equal(line.lineTotal, 3927.18);
-    assert.notEqual(line.unitPrice, 315.08);
-    assert.notEqual(line.lineTotal, 630.15);
+    assert.equal(line.unitPrice, 1963.59);
+  });
+
+  it('HQ_BRANCH ignores commercial unit×qty when FIFO snapshot differs (China batch drift)', () => {
+    const line = resolveBranchPurchaseApprovedInvoiceLine({
+      productId: 'prod-main',
+      sku: 'MAIN',
+      productName: 'Main assembly',
+      quantity: 11,
+      approvedQuantity: 11,
+      lineStatus: 'APPROVED',
+      branchPurchasePriceKgs: 14756.12,
+      resolvedBranchPriceKgs: 14756.12,
+      // Drifted unit×qty stored on line
+      totalAmount: 162317.32,
+      approvedLineTotalKgs: 162317.32,
+      estimatedLineProductCostKgs: 162317.33,
+      branchType: 'HQ_BRANCH',
+    });
+
+    assert.equal(line.lineTotal, 162317.33);
+    assert.notEqual(line.lineTotal, 162317.32);
   });
 
   it('keeps HQ_BRANCH FIFO payable line when branch commercial unit×qty would drift total', () => {
@@ -51,17 +69,17 @@ describe('branch purchase approved invoice lines', () => {
     assert.notEqual(line.lineTotal, 67870.14);
   });
 
-  it('invoice total equals sum of approved BPR line snapshots', () => {
+  it('invoice total equals sum of approved BPR FIFO line snapshots', () => {
     const items = [
       {
-        productId: 'prod-reducer',
+        productId: 'prod-a',
         quantity: 2,
         approvedQuantity: 2,
         lineStatus: 'APPROVED',
         branchPurchasePriceKgs: 1963.59,
-        totalAmount: 630.15,
-        approvedLineTotalKgs: 630.15,
-        estimatedLineProductCostKgs: 630.15,
+        totalAmount: 3927.18,
+        approvedLineTotalKgs: 3927.18,
+        estimatedLineProductCostKgs: 3927.18,
         branchType: 'HQ_BRANCH',
       },
       {

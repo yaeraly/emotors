@@ -2,9 +2,71 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BranchInvoiceStatus } from '@prisma/client';
 import { sanitizeAccountantInvoice } from './branch-accountant-invoice.presenter';
+import { resolveAccountantInvoiceWorkflowStatus } from './branch-accountant-invoice.presenter';
+import {
+  BranchInvoicePaymentType,
+  BranchOrderInstallmentStatus,
+  BranchPaymentConfirmationStatus,
+} from '@prisma/client';
+
+describe('resolveAccountantInvoiceWorkflowStatus', () => {
+  it('returns PENDING_ACCOUNTANT_REVIEW for new branch invoices', () => {
+    expect(
+      resolveAccountantInvoiceWorkflowStatus({
+        status: BranchInvoiceStatus.ISSUED,
+        sentToBranchAt: new Date(),
+        sentToCashierAt: null,
+        paymentType: null,
+      }),
+    ).toBe('PENDING_ACCOUNTANT_REVIEW');
+  });
+
+  it('returns INSTALLMENT_APPROVAL_PENDING when installment is pending', () => {
+    expect(
+      resolveAccountantInvoiceWorkflowStatus({
+        status: BranchInvoiceStatus.ISSUED,
+        sentToBranchAt: new Date(),
+        paymentType: BranchInvoicePaymentType.INSTALLMENT,
+        branchOrderInstallment: { status: BranchOrderInstallmentStatus.PENDING },
+      }),
+    ).toBe('INSTALLMENT_APPROVAL_PENDING');
+  });
+
+  it('returns WAITING_FOR_PAYMENT after cashier handoff', () => {
+    expect(
+      resolveAccountantInvoiceWorkflowStatus({
+        status: BranchInvoiceStatus.ISSUED,
+        sentToBranchAt: new Date(),
+        sentToCashierAt: new Date(),
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+      }),
+    ).toBe('WAITING_FOR_PAYMENT');
+  });
+
+  it('returns PAYMENT_SUBMITTED when payment awaits confirmation', () => {
+    expect(
+      resolveAccountantInvoiceWorkflowStatus({
+        status: BranchInvoiceStatus.ISSUED,
+        sentToBranchAt: new Date(),
+        sentToCashierAt: new Date(),
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+        payments: [{ confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION }],
+      }),
+    ).toBe('PAYMENT_SUBMITTED');
+  });
+});
+
+// Minimal jest-like expect for older tests that used it.
+function expect(actual: unknown) {
+  return {
+    toBe(expected: unknown) {
+      assert.equal(actual, expected);
+    },
+  };
+}
 
 describe('sanitizeAccountantInvoice BPR-linked prices', () => {
-  it('uses approved BPR snapshots instead of distribution FIFO unit cost for line prices', () => {
+  it('uses approved BPR FIFO snapshots instead of distribution FIFO reservation unit cost', () => {
     const invoice = sanitizeAccountantInvoice({
       id: 'inv-1',
       invoiceNumber: 'INV-001',
@@ -45,9 +107,9 @@ describe('sanitizeAccountantInvoice BPR-linked prices', () => {
               lineStatus: 'APPROVED',
               branchPurchasePriceKgs: 1963.59,
               resolvedBranchPriceKgs: 1963.59,
-              totalAmount: 630.15,
-              approvedLineTotalKgs: 630.15,
-              estimatedLineProductCostKgs: 630.15,
+              totalAmount: 3927.18,
+              approvedLineTotalKgs: 3927.18,
+              estimatedLineProductCostKgs: 3927.18,
             },
             {
               productId: 'prod-other',

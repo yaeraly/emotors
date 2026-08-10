@@ -1,11 +1,13 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import {
+  allocateProportionalCost,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
 import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branch-display.util';
+import { resolveHqBranchTransferLineCostKgs } from './hq-branch-transfer-cost.util';
 
 export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
   quantity: number;
@@ -67,7 +69,7 @@ export function resolveBranchPurchaseSavedOrderLineUnitPriceKgs(item: {
 
 /**
  * Submit-time line total snapshot frozen on the order line.
- * HQ_BRANCH: payable line total at create (estimatedLineProductCostKgs / totalAmount), not catalog unit×qty.
+ * HQ_BRANCH: authoritative FIFO/inventory line cost only — never catalog/display unit × qty.
  */
 export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
   quantity: number;
@@ -79,7 +81,9 @@ export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
 }): number {
   const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
   const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
-  const fifoSnapshot = roundDisplayMoney(Number(item.estimatedLineProductCostKgs ?? 0));
+  const fifoSnapshot = resolveHqBranchTransferLineCostKgs({
+    fifoLineCostKgs: item.estimatedLineProductCostKgs as number | string | null | undefined,
+  });
   const catalogUnit = resolveBranchPurchaseBranchUnitPriceKgs({
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
@@ -88,12 +92,11 @@ export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
     catalogUnit != null && requestedQty > 0 ? roundDisplayMoney(catalogUnit * requestedQty) : 0;
 
   if (shouldTransferBranchPurchaseAtCost(item.branchType)) {
-    // Repair path: totalAmount may have been overwritten by wrong catalog unit×qty (67870.14).
-    if (fifoSnapshot > 0 && (storedTotal <= 0 || (catalogTotal > 0 && storedTotal === catalogTotal && fifoSnapshot !== catalogTotal))) {
-      return fifoSnapshot;
-    }
-    if (storedTotal > 0) return storedTotal;
-    return fifoSnapshot;
+    // HQ_BRANCH accounting source of truth is FIFO/inventory line cost.
+    // Never prefer drifted totalAmount rebuilt as rounded display unit × quantity.
+    if (fifoSnapshot > 0) return fifoSnapshot;
+    if (storedTotal > 0 && storedTotal !== catalogTotal) return storedTotal;
+    return 0;
   }
 
   return storedTotal > 0 ? storedTotal : 0;
@@ -102,10 +105,10 @@ export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
 /**
  * Authoritative approved line total for every BPR lifecycle stage.
  *
- *   approvedLineTotal = effectiveQuantity × savedOrderLineUnitPrice
+ * HQ_BRANCH: exact FIFO/inventory line cost for the effective quantity (markup 0%).
+ * Never reconstruct as rounded display unit × quantity (914369.80 → 914369.08 drift).
  *
- * where savedOrderLineUnitPrice is frozen from submit line total (never live catalog/FIFO re-read).
- * Downstream roles (HQ Sales, Branch Sales, Branch Accountant, invoice) must consume this result.
+ * Other branches: approvedLineTotal / submit snapshot scaled by effective qty.
  */
 export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   quantity: number;
@@ -124,9 +127,46 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
     return 0;
   }
 
+  const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
+
+  if (shouldTransferBranchPurchaseAtCost(item.branchType)) {
+    const fifoSnapshot = resolveHqBranchTransferLineCostKgs({
+      fifoLineCostKgs: item.estimatedLineProductCostKgs as number | string | null | undefined,
+    });
+    if (fifoSnapshot > 0) {
+      if (requestedQty > 0 && effectiveQuantity !== requestedQty) {
+        const scaled = roundDisplayMoney(
+          allocateProportionalCost(fifoSnapshot, requestedQty, effectiveQuantity),
+        );
+        const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
+        const persistedApproved =
+          item.approvedLineTotalKgs != null
+            ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
+            : null;
+
+        // After review/confirm, FIFO + approvedLineTotal are stored for approved qty.
+        if (persistedApproved != null && Math.abs(fifoSnapshot - persistedApproved) <= 0.009) {
+          return fifoSnapshot;
+        }
+        // Submit-time FIFO still covers requested qty (equals stored full-line total) → scale.
+        if (storedTotal > 0 && Math.abs(fifoSnapshot - storedTotal) <= 0.009) {
+          return scaled;
+        }
+        // Fresh FIFO preview for approved qty during HQ review apply.
+        return fifoSnapshot;
+      }
+      return fifoSnapshot;
+    }
+
+    if (isReviewedBranchPurchaseLineStatus(item.lineStatus) && item.approvedLineTotalKgs != null) {
+      const persisted = roundDisplayMoney(Number(item.approvedLineTotalKgs));
+      if (persisted > 0) return persisted;
+    }
+    return 0;
+  }
+
   if (isReviewedBranchPurchaseLineStatus(item.lineStatus) && item.approvedLineTotalKgs != null) {
     const persisted = roundDisplayMoney(Number(item.approvedLineTotalKgs));
-    const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
     const submitLineTotal = resolveBranchPurchaseSavedSubmitLineTotalKgs(item);
     const expectedFromSnapshot =
       submitLineTotal > 0 && requestedQty > 0
@@ -137,7 +177,6 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
     }
   }
 
-  const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
   const submitLineTotal = resolveBranchPurchaseSavedSubmitLineTotalKgs(item);
   if (submitLineTotal > 0 && requestedQty > 0) {
     return roundDisplayMoney((submitLineTotal * effectiveQuantity) / requestedQty);
