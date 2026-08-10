@@ -23,13 +23,15 @@ import { translateStatus } from '@/lib/translate-status';
 import { formatKgs, roundMoney } from '@/lib/money';
 import { formatProductUnit } from '@/lib/product-unit';
 import {
+  branchOrderLineTotal,
+  branchOrderTotal,
   formatFrozenBranchPrice,
   formatLineTotalKgs,
   formatOrderTotalKgs,
+  getBranchOrderDisplayQuantity,
   hqReviewLineAmount,
   hqReviewOrderAmount,
   requestLineTotal,
-  requestOrderTotal,
 } from '@/lib/branch-purchase-request-display.util';
 
 type LineReviewAction = 'APPROVE' | 'PARTIAL' | 'REJECT' | 'REMOVE';
@@ -585,6 +587,17 @@ export default function BranchPurchaseRequestDetailPage() {
 
   const reviewable = useMemo(() => request && isSubmittedStatus(request.status), [request]);
   const reviewed = useMemo(() => request && (Boolean(request.reviewedAt) || isReviewedStatus(request.status)), [request]);
+  const branchOrderTotalOptions = useMemo(
+    () =>
+      request
+        ? {
+            requestStatus: request.status,
+            reviewed: Boolean(reviewed),
+            totalEstimatedAmount: request.totalEstimatedAmount,
+          }
+        : undefined,
+    [request, reviewed],
+  );
   const approvedItemCount = useMemo(
     () => request?.items.filter((item) => (item.approvedQuantity ?? 0) > 0).length ?? 0,
     [request],
@@ -779,14 +792,21 @@ export default function BranchPurchaseRequestDetailPage() {
                 {formatKgs(hqSalesView ? hqReviewOrderAmount(request.items) : request.totalEstimatedAmount)} KGS
               </p>
             </div>
-          ) : !branchSalesManagerView ? (
+          ) : branchSalesManagerView ? (
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalAmount')}</p>
               <p className="mt-1 font-semibold text-slate-900">
-                {formatKgs(requestOrderTotal(request.items))} KGS
+                {formatKgs(branchOrderTotal(request.items, branchOrderTotalOptions))} KGS
               </p>
             </div>
-          ) : null}
+          ) : (
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalAmount')}</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {formatKgs(branchOrderTotal(request.items, branchOrderTotalOptions))} KGS
+              </p>
+            </div>
+          )}
           {request.note ? (
             <div className="md:col-span-3">
               <p className="text-xs font-bold uppercase text-slate-400">{t('crm.notes')}</p>
@@ -815,16 +835,17 @@ export default function BranchPurchaseRequestDetailPage() {
                   const branchPriceLabel = formatFrozenBranchPrice(item, t);
                   const showKgsSuffix =
                     branchPriceLabel !== t('branchProductRequest.pricingPending');
+                  const displayQuantity = getBranchOrderDisplayQuantity(item, { reviewed: Boolean(reviewed) });
                   return (
                   <tr key={item.id}>
                     <td className="px-4 py-3 font-semibold text-slate-900">{item.productName}</td>
-                    <td className="px-4 py-3 tabular-nums">{item.quantity}</td>
+                    <td className="px-4 py-3 tabular-nums">{displayQuantity}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {branchPriceLabel}
                       {showKgsSuffix ? ' KGS' : null}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                      {formatLineTotalKgs(item)} KGS
+                      {formatLineTotalKgs(item, branchOrderTotalOptions)} KGS
                     </td>
                   </tr>
                   );
@@ -836,7 +857,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     {t('branchProductRequest.totalAmount')}
                   </td>
                   <td className="px-4 py-3 text-right text-base font-bold tabular-nums text-slate-900">
-                    {formatOrderTotalKgs(request.items)} KGS
+                    {formatOrderTotalKgs(request.items, branchOrderTotalOptions)} KGS
                   </td>
                 </tr>
               </tfoot>
@@ -863,7 +884,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{item.sku}</td>
                     <td className="px-3 py-2">{item.quantity}</td>
                     <td className="px-3 py-2">{formatFrozenBranchPrice(item, t)}</td>
-                    <td className="px-3 py-2">{formatKgs(item.totalAmount ?? requestLineTotal(item))}</td>
+                    <td className="px-3 py-2">{formatKgs(item.totalAmount ?? branchOrderLineTotal(item, branchOrderTotalOptions))}</td>
                     <td className="px-3 py-2">
                       {translateStatus(t, item.lineStatus ?? request.status, 'branchRequestLine')}
                     </td>

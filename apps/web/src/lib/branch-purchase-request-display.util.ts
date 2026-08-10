@@ -23,10 +23,31 @@ export type DraftFormLinePricing = {
   priceResolving?: boolean;
 };
 
+export function isPendingHqSalesReviewRequest(status?: string | null): boolean {
+  return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
+}
+
 /** Quantity shown in Branch Sales Manager order-detail rows. */
 export function getDisplayQuantity(item: BranchPurchaseRequestLinePricing): number {
   return item.quantity;
 }
+
+/** Effective quantity for branch order display after HQ Sales review. */
+export function getBranchOrderDisplayQuantity(
+  item: BranchPurchaseRequestLinePricing,
+  options?: { reviewed?: boolean },
+): number {
+  if (options?.reviewed) {
+    return hqReviewEffectiveQuantity(item);
+  }
+  return getDisplayQuantity(item);
+}
+
+export type BranchOrderTotalOptions = {
+  requestStatus?: string | null;
+  reviewed?: boolean;
+  totalEstimatedAmount?: number | null;
+};
 
 /** CEO-approved branch price frozen on the line (never wholesale/retail/cost). */
 export function getFrozenBranchPrice(item: BranchPurchaseRequestLinePricing): number | null {
@@ -95,12 +116,8 @@ export function hqReviewOrderAmount(items: BranchPurchaseRequestLinePricing[]): 
   return roundMoney(items.reduce((sum, item) => sum + hqReviewLineAmount(item), 0));
 }
 
-/**
- * Branch Sales Manager row total: displayed quantity × displayed branch price.
- * Keeps Сумма aligned with Количество and Цена для филиала on the same row.
- * Draft/HQ at-cost authoritative FIFO totals live in `draftFormLineTotal` instead.
- */
-export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number {
+/** Pre–HQ Sales review branch view: requested qty × displayed branch price. */
+export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePricing): number {
   const price = getFrozenBranchPrice(item);
   const qty = getDisplayQuantity(item);
   if (price != null && qty > 0) {
@@ -116,9 +133,52 @@ export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number
   return 0;
 }
 
-/** Order total: sum of authoritative/derived row totals. */
-export function requestOrderTotal(items: BranchPurchaseRequestLinePricing[]): number {
-  return roundMoney(items.reduce((sum, item) => sum + requestLineTotal(item), 0));
+/**
+ * Authoritative branch order line total — same rules as HQ Sales after review.
+ * Before HQ Sales review, branch view uses requested qty × displayed branch price.
+ */
+export function branchOrderLineTotal(
+  item: BranchPurchaseRequestLinePricing,
+  options?: BranchOrderTotalOptions,
+): number {
+  const pendingHqReview =
+    options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
+  if (pendingHqReview && !options?.reviewed) {
+    return pendingBranchReviewLineTotal(item);
+  }
+  return hqReviewLineAmount(item);
+}
+
+/** Authoritative branch order total — matches HQ Sales and API `totalEstimatedAmount`. */
+export function branchOrderTotal(
+  items: BranchPurchaseRequestLinePricing[],
+  options?: BranchOrderTotalOptions,
+): number {
+  const pendingHqReview =
+    options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
+  if (!pendingHqReview && options?.reviewed) {
+    const header = options.totalEstimatedAmount;
+    if (header != null && Number.isFinite(Number(header)) && Number(header) > 0) {
+      return roundMoney(Number(header));
+    }
+  }
+  return roundMoney(items.reduce((sum, item) => sum + branchOrderLineTotal(item, options), 0));
+}
+
+/** @deprecated Prefer branchOrderLineTotal with request context. */
+export function requestLineTotal(
+  item: BranchPurchaseRequestLinePricing,
+  options?: BranchOrderTotalOptions,
+): number {
+  return branchOrderLineTotal(item, options);
+}
+
+/** @deprecated Prefer branchOrderTotal with request context. */
+export function requestOrderTotal(
+  items: BranchPurchaseRequestLinePricing[],
+  options?: BranchOrderTotalOptions,
+): number {
+  return branchOrderTotal(items, options);
 }
 
 function parseDraftFormQuantity(quantity: string | number): number {
@@ -179,10 +239,16 @@ export function formatFrozenBranchPrice(
   return formatKgsLocalized(price);
 }
 
-export function formatLineTotalKgs(item: BranchPurchaseRequestLinePricing): string {
-  return formatKgsLocalized(requestLineTotal(item));
+export function formatLineTotalKgs(
+  item: BranchPurchaseRequestLinePricing,
+  options?: BranchOrderTotalOptions,
+): string {
+  return formatKgsLocalized(branchOrderLineTotal(item, options));
 }
 
-export function formatOrderTotalKgs(items: BranchPurchaseRequestLinePricing[]): string {
-  return formatKgsLocalized(requestOrderTotal(items));
+export function formatOrderTotalKgs(
+  items: BranchPurchaseRequestLinePricing[],
+  options?: BranchOrderTotalOptions,
+): string {
+  return formatKgsLocalized(branchOrderTotal(items, options));
 }

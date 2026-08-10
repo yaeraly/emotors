@@ -30,10 +30,10 @@ describe('branch sales manager ui cleanup', () => {
   });
 
   it('order detail uses authoritative formatLineTotalKgs helpers', () => {
-    assert.match(detailPage, /formatLineTotalKgs\(item\)/);
+    assert.match(detailPage, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
     assert.match(detailPage, /formatFrozenBranchPrice\(item, t\)/);
-    assert.match(detailPage, /formatOrderTotalKgs\(request\.items\)/);
-    // Totals come from formatLineTotalKgs (prefers backend totalAmount), not raw formatKgs.
+    assert.match(detailPage, /formatOrderTotalKgs\(request\.items, branchOrderTotalOptions\)/);
+    assert.match(detailPage, /branchOrderTotal\(request\.items, branchOrderTotalOptions\)/);
     assert.doesNotMatch(detailPage, /formatKgs\(item\.totalAmount\)/);
   });
 
@@ -54,9 +54,9 @@ describe('branch sales manager ui cleanup', () => {
     assert.doesNotMatch(bsmTable, /inventory\.sku/);
     assert.doesNotMatch(bsmTable, /item\.sku/);
     assert.match(bsmTable, /item\.productName/);
-    assert.match(bsmTable, /item\.quantity/);
-    assert.match(bsmTable, /formatLineTotalKgs\(item\)/);
-    assert.match(bsmTable, /formatOrderTotalKgs\(request\.items\)/);
+    assert.match(bsmTable, /getBranchOrderDisplayQuantity\(item, \{ reviewed \}\)/);
+    assert.match(bsmTable, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
+    assert.match(bsmTable, /formatOrderTotalKgs\(request\.items, branchOrderTotalOptions\)/);
   });
 
   it('hides repeated customer history subtitle for branch sales manager', () => {
@@ -92,6 +92,13 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(formTable, /line\.quantity/);
     assert.match(formTable, /draftFormLineTotal\(line\)/);
     assert.match(formTable, /formatBranchPrice\(line, t\)/);
+  });
+
+  it('branch order detail derives reviewed totals from authoritative backend fields', () => {
+    assert.match(detailPage, /branchOrderTotalOptions/);
+    assert.match(detailPage, /branchOrderTotal\(request\.items, branchOrderTotalOptions\)/);
+    assert.match(detailPage, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
+    assert.match(detailPage, /getBranchOrderDisplayQuantity/);
   });
 
   it('create and draft product table derives totals from quantity times branch price', () => {

@@ -477,19 +477,24 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   }
 
-  // Franchise/Dealer: CEO branch price × quantity (4330b1f) — repairs stale zero totals.
+  // Franchise/Dealer: CEO branch price × quantity before review; authoritative persisted totals after review.
   const branchItems = request.items.map((item) => {
     const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
       branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
       resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
     });
-    const lineTotal = resolveBranchPurchaseBranchLineTotalKgs({
-      quantity: item.quantity,
-      branchPurchasePriceKgs: branchUnitPrice,
-      resolvedBranchPriceKgs: branchUnitPrice,
-      totalAmount: fullItem?.totalAmount ?? item.totalAmount,
-    });
+    const authoritativeLineTotal =
+      fullItem?.totalAmount != null ? Number(fullItem.totalAmount) : Number(item.totalAmount ?? 0);
+    const lineTotal =
+      pendingHqSalesReview || !reviewed
+        ? resolveBranchPurchaseBranchLineTotalKgs({
+            quantity: item.quantity,
+            branchPurchasePriceKgs: branchUnitPrice,
+            resolvedBranchPriceKgs: branchUnitPrice,
+            totalAmount: 0,
+          })
+        : roundDisplayMoney(authoritativeLineTotal);
     return {
       id: item.id,
       productId: item.productId,
@@ -538,13 +543,19 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
-  const branchOrderTotal = sumBranchPurchaseBranchLineTotalsKgs(branchItems);
+  const branchOrderTotal =
+    reviewed && !pendingHqSalesReview
+      ? roundDisplayMoney(
+          branchItems.reduce((sum, item) => sum + Number((item as { totalAmount?: number }).totalAmount ?? 0), 0),
+        )
+      : sumBranchPurchaseBranchLineTotalsKgs(branchItems);
 
   return {
     ...full,
     branchDisplayStatus,
     partialFulfillmentMessage,
-    totalEstimatedAmount: branchOrderTotal > 0 ? branchOrderTotal : full.totalEstimatedAmount,
+    totalEstimatedAmount:
+      branchOrderTotal > 0 ? branchOrderTotal : full.totalEstimatedAmount,
     totalProductCostKgs: undefined,
     authoritativeTransferCostKgs: undefined,
     items: branchItems,

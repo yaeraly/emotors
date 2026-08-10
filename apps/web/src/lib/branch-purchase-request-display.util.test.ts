@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  branchOrderLineTotal,
+  branchOrderTotal,
   draftFormLineTotal,
   draftFormOrderTotal,
   getDisplayQuantity,
@@ -16,31 +18,78 @@ import { roundMoney } from './money';
 const t = (key: string) => key;
 
 describe('branch purchase request display totals', () => {
-  it('uses display quantity times branch price for line total', () => {
-    const total = requestLineTotal({
-      quantity: 5,
-      branchPurchasePriceKgs: 12000,
-      totalAmount: 0,
-    });
+  it('uses display quantity times branch price for pending HQ review', () => {
+    const total = requestLineTotal(
+      {
+        quantity: 5,
+        branchPurchasePriceKgs: 12000,
+        totalAmount: 0,
+      },
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 60000);
   });
 
   it('pending HQ review: line total is quantity times branch price not FIFO cost', () => {
-    const total = requestLineTotal({
-      quantity: 2,
-      branchPurchasePriceKgs: 1963.59,
-      totalAmount: 630.15,
-    });
+    const total = requestLineTotal(
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 1963.59,
+        totalAmount: 630.15,
+      },
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 3927.18);
     assert.notEqual(total, 630.15);
   });
 
+  it('reviewed order uses authoritative line total not rounded unit×qty', () => {
+    const line = {
+      quantity: 2,
+      approvedQuantity: 2,
+      branchPurchasePriceKgs: 33935.07,
+      totalAmount: 72490.5,
+      approvedLineTotalKgs: 72490.5,
+      lineStatus: 'APPROVED',
+    };
+    const roundedUnitTotal = roundMoney(line.branchPurchasePriceKgs * line.quantity);
+    assert.equal(roundedUnitTotal, 67870.14);
+    assert.notEqual(roundedUnitTotal, line.totalAmount);
+    assert.equal(
+      branchOrderLineTotal(line, { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true }),
+      72490.5,
+    );
+    assert.equal(
+      hqReviewLineAmount(line),
+      72490.5,
+    );
+  });
+
+  it('reviewed HQ Sales and Branch Manager order totals match', () => {
+    const items = [
+      {
+        quantity: 2,
+        approvedQuantity: 2,
+        branchPurchasePriceKgs: 33935.07,
+        totalAmount: 72490.5,
+        approvedLineTotalKgs: 72490.5,
+        lineStatus: 'APPROVED',
+      },
+    ];
+    const options = { requestStatus: 'PENDING_BRANCH_CONFIRMATION', reviewed: true, totalEstimatedAmount: 72490.5 };
+    assert.equal(hqReviewOrderAmount(items), 72490.5);
+    assert.equal(branchOrderTotal(items, options), 72490.5);
+  });
+
   it('does not silently stay zero when branch price exists but totalAmount is zero', () => {
-    const total = requestLineTotal({
-      quantity: 3,
-      branchPurchasePriceKgs: 4500,
-      totalAmount: 0,
-    });
+    const total = requestLineTotal(
+      {
+        quantity: 3,
+        branchPurchasePriceKgs: 4500,
+        totalAmount: 0,
+      },
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 13500);
   });
 
@@ -55,11 +104,14 @@ describe('branch purchase request display totals', () => {
   });
 
   it('falls back to qty × branch price only when totalAmount is missing/zero', () => {
-    const total = requestLineTotal({
-      quantity: 5,
-      branchPurchasePriceKgs: 12000,
-      totalAmount: 0,
-    });
+    const total = requestLineTotal(
+      {
+        quantity: 5,
+        branchPurchasePriceKgs: 12000,
+        totalAmount: 0,
+      },
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 60000);
   });
 
@@ -86,30 +138,39 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('uses display quantity for line total', () => {
+  it('uses display quantity for pending HQ review line total', () => {
     assert.equal(getDisplayQuantity({ quantity: 5 }), 5);
     assert.equal(
-      requestLineTotal({
-        quantity: 5,
-        branchPurchasePriceKgs: 12000,
-      }),
+      requestLineTotal(
+        {
+          quantity: 5,
+          branchPurchasePriceKgs: 12000,
+        },
+        { requestStatus: 'SUBMITTED' },
+      ),
       60000,
     );
   });
 
-  it('sums line totals for order total', () => {
-    const total = requestOrderTotal([
-      { quantity: 2, branchPurchasePriceKgs: 1000, totalAmount: 0 },
-      { quantity: 1, branchPurchasePriceKgs: 500, totalAmount: 0 },
-    ]);
+  it('sums pending HQ review line totals for order total', () => {
+    const total = requestOrderTotal(
+      [
+        { quantity: 2, branchPurchasePriceKgs: 1000, totalAmount: 0 },
+        { quantity: 1, branchPurchasePriceKgs: 500, totalAmount: 0 },
+      ],
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 2500);
   });
 
-  it('order total ignores stale header totalEstimatedAmount and sums rows', () => {
-    const total = requestOrderTotal([
-      { quantity: 5, branchPurchasePriceKgs: 12000, totalAmount: 0 },
-      { quantity: 2, branchPurchasePriceKgs: 12500, totalAmount: 0 },
-    ]);
+  it('order total ignores stale header totalEstimatedAmount and sums rows before review', () => {
+    const total = requestOrderTotal(
+      [
+        { quantity: 5, branchPurchasePriceKgs: 12000, totalAmount: 0 },
+        { quantity: 2, branchPurchasePriceKgs: 12500, totalAmount: 0 },
+      ],
+      { requestStatus: 'SUBMITTED' },
+    );
     assert.equal(total, 85000);
   });
 
@@ -247,13 +308,16 @@ describe('branch purchase request display totals', () => {
     );
   });
 
-  it('multiple rows calculate independently', () => {
+  it('multiple rows calculate independently before HQ review', () => {
     assert.equal(
-      requestOrderTotal([
-        { quantity: 5, branchPurchasePriceKgs: 12000 },
-        { quantity: 1, branchPurchasePriceKgs: 25000 },
-        { quantity: 3, branchPurchasePriceKgs: 5000 },
-      ]),
+      requestOrderTotal(
+        [
+          { quantity: 5, branchPurchasePriceKgs: 12000 },
+          { quantity: 1, branchPurchasePriceKgs: 25000 },
+          { quantity: 3, branchPurchasePriceKgs: 5000 },
+        ],
+        { requestStatus: 'SUBMITTED' },
+      ),
       100000,
     );
   });

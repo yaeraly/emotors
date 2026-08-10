@@ -176,6 +176,69 @@ describe('branch purchase branch display totals', () => {
     );
   });
 
+  it('sanitized reviewed franchise order matches HQ Sales approved line totals', () => {
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
+        totalEstimatedAmount: 25000,
+        transportCostKgs: 0,
+        branch: { branchType: 'FRANCHISE' },
+        items: [
+          {
+            id: 'line-1',
+            productId: 'prod-1',
+            sku: 'SKU-1',
+            productName: 'Контроллер',
+            quantity: 10,
+            approvedQuantity: 8,
+            lineStatus: 'PARTIALLY_APPROVED',
+            unit: 'pcs',
+            resolvedBranchPriceKgs: 2500,
+            totalAmount: 25000,
+          },
+        ],
+      },
+      true,
+    );
+
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 20000);
+    assert.equal(sanitized.totalEstimatedAmount, 20000);
+    assert.notEqual(sanitized.totalEstimatedAmount, 25000);
+  });
+
+  it('sanitized reviewed HQ branch order keeps FIFO line total not rounded unit×qty', () => {
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
+        totalEstimatedAmount: 67870.14,
+        transportCostKgs: 0,
+        branch: { branchType: 'HQ_BRANCH' },
+        items: [
+          {
+            id: 'line-1',
+            productId: 'prod-1',
+            sku: 'SKU-1',
+            productName: 'Редуктор 18 зуб 4.3 кг',
+            quantity: 2,
+            approvedQuantity: 2,
+            lineStatus: 'APPROVED',
+            unit: 'pcs',
+            estimatedLineProductCostKgs: 72490.5,
+            resolvedBranchPriceKgs: 33935.07,
+            totalAmount: 67870.14,
+          },
+        ],
+      },
+      true,
+    );
+
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 72490.5);
+    assert.equal(sanitized.totalEstimatedAmount, 72490.5);
+    assert.notEqual(sanitized.totalEstimatedAmount, 67870.14);
+  });
+
   it('sanitized HQ branch draft repairs 914369.08-style unit×qty totals to FIFO 914369.80', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
