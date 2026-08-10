@@ -8,6 +8,7 @@ import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
 } from '../pricing/product-cost-precision.util';
+import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 
 export type ConfirmedDistributionLineInput = {
   productId: string;
@@ -38,11 +39,16 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       | 'productId'
       | 'sku'
       | 'productName'
+      | 'quantity'
       | 'approvedQuantity'
+      | 'lineStatus'
       | 'resolvedBranchPriceKgs'
       | 'approvedLineTotalKgs'
+      | 'totalAmount'
       | 'estimatedUnitCost'
       | 'estimatedLineProductCostKgs'
+      | 'hasPricingPolicyAtReview'
+      | 'hasPricingPolicyAtSubmit'
       | 'pricingPolicyVersionId'
       | 'pricingProfileId'
       | 'appliedRuleType'
@@ -53,6 +59,7 @@ export function buildDistributionLinesFromConfirmedRequestItems(
     >
   >,
   productsById: Map<string, Pick<Product, 'id' | 'sku' | 'name' | 'finalCostKgs'>>,
+  options?: { branchType?: string | null },
 ): ConfirmedDistributionLineInput[] {
   const lines: ConfirmedDistributionLineInput[] = [];
 
@@ -65,14 +72,15 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       throw new Error(`Product not found: ${item.productId}`);
     }
 
-    const unitPrice = Number(item.resolvedBranchPriceKgs ?? 0);
+    const approvedLine = resolveBranchPurchaseApprovedInvoiceLine({
+      ...item,
+      branchType: options?.branchType ?? null,
+    });
+    const unitPrice = approvedLine.unitPrice;
     if (unitPrice <= 0) {
       throw new Error(`Approved price missing for product ${item.sku}`);
     }
-    const linePrice =
-      item.approvedLineTotalKgs != null
-        ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
-        : roundDisplayMoney(unitPrice * quantity);
+    const linePrice = approvedLine.lineTotal;
 
     const authoritativeLineCost =
       item.estimatedLineProductCostKgs != null && Number(item.estimatedLineProductCostKgs) > 0

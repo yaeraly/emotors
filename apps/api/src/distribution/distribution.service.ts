@@ -86,6 +86,10 @@ import {
   validateBranchOrderInstallmentAmounts,
 } from './branch-order-installment.util';
 import { resolveBranchPurchaseRequestStatusForPaymentEvent } from './branch-purchase-payment-status-sync.util';
+import {
+  buildDistributionOrderItemPricePatches,
+  sumBranchPurchaseApprovedInvoiceTotalKgs,
+} from '../operations/branch-purchase-invoice-lines.util';
 import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibility.util';
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
@@ -377,15 +381,16 @@ export class DistributionService {
           });
           if ('totalCostKgs' in reserved) {
             const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
-            const totalPrice = roundDisplayMoney(Number(reserved.totalPriceKgs ?? 0));
+            const preservedUnitPrice = Number(item.unitPrice);
+            const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
             await tx.branchDistributionOrderItem.update({
               where: { id: item.id },
               data: {
                 unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
-                unitPrice: item.quantity > 0 ? deriveDisplayUnitCost(totalPrice, item.quantity) : 0,
                 totalCost,
-                totalPrice,
-                profit: roundDisplayMoney(totalPrice - totalCost),
+                unitPrice: preservedUnitPrice,
+                totalPrice: preservedTotalPrice,
+                profit: roundDisplayMoney(preservedTotalPrice - totalCost),
               },
             });
           }
@@ -393,6 +398,41 @@ export class DistributionService {
           throw new BadRequestException(
             error instanceof Error ? error.message : `FIFO reservation failed for SKU ${item.sku}`,
           );
+        }
+      }
+
+      const linkedPurchaseRequest = await tx.branchPurchaseRequest.findFirst({
+        where: { convertedOrderId: order.id, deletedAt: null },
+        include: {
+          items: { orderBy: { position: 'asc' } },
+          branch: { select: { branchType: true } },
+        },
+      });
+      if (linkedPurchaseRequest) {
+        const branchType = linkedPurchaseRequest.branch?.branchType ?? null;
+        const bprItems = linkedPurchaseRequest.items.map((row) => ({
+          ...row,
+          branchType,
+        }));
+        const orderItemsForPatch = await tx.branchDistributionOrderItem.findMany({
+          where: { orderId: order.id },
+          select: { id: true, productId: true, unitCost: true, totalCost: true },
+        });
+        const patches = buildDistributionOrderItemPricePatches(bprItems, orderItemsForPatch);
+        for (const patch of patches) {
+          const target = orderItemsForPatch.find((row) => row.productId === patch.productId);
+          if (!target) continue;
+          await tx.branchDistributionOrderItem.update({
+            where: { id: target.id },
+            data: {
+              quantity: patch.quantity,
+              unitPrice: patch.unitPrice,
+              totalPrice: patch.totalPrice,
+              unitCost: patch.unitCost,
+              totalCost: patch.totalCost,
+              profit: patch.profit,
+            },
+          });
         }
       }
 
@@ -5015,7 +5055,26 @@ export class DistributionService {
     });
     if (existing) return this.toInvoiceResponse(existing);
 
-    const totalAmount = this.roundMoney(Number(order.totalAmount));
+    const linkedPurchaseRequest = await tx.branchPurchaseRequest.findFirst({
+      where: { convertedOrderId: order.id, deletedAt: null },
+      include: {
+        items: { orderBy: { position: 'asc' } },
+        branch: { select: { branchType: true } },
+      },
+    });
+    const authoritativeTotal = linkedPurchaseRequest
+      ? sumBranchPurchaseApprovedInvoiceTotalKgs(
+          linkedPurchaseRequest.items.map((row) => ({
+            ...row,
+            branchType: linkedPurchaseRequest.branch?.branchType ?? null,
+          })),
+        )
+      : null;
+    const totalAmount = this.roundMoney(
+      authoritativeTotal != null && authoritativeTotal > 0
+        ? authoritativeTotal
+        : Number(order.totalAmount),
+    );
     const issuedAt = new Date();
     const invoice = await tx.branchInvoice.create({
       data: {

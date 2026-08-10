@@ -139,7 +139,10 @@ export class BranchAccountantService {
     }
     const linkedRequest = await this.prisma.branchPurchaseRequest.findFirst({
       where: { convertedOrderId: invoice.distributionOrderId, deletedAt: null },
-      select: { id: true, requestNumber: true },
+      include: {
+        items: { orderBy: { position: 'asc' } },
+        branch: { select: { branchType: true } },
+      },
     });
     return {
       ...invoice,

@@ -1552,28 +1552,17 @@ export class OperationsService {
         }
 
         fifoLineCosts.push(fifoCost.estimatedLineProductCostKgs);
-        const payableLineAmount = resolveBranchPurchaseLinePayableAmount({
-          branchType: branch?.branchType,
-          quantity: approvedQuantity,
-          estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
-          unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
-          hasPricingPolicy: true,
-        });
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
             estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
             estimatedUnitCost: fifoCost.estimatedUnitCost,
-            totalAmount: payableLineAmount,
-            approvedLineTotalKgs: payableLineAmount,
           },
         });
         itemsWithFifoCosts.push({
           ...item,
           estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
           estimatedUnitCost: fifoCost.estimatedUnitCost,
-          totalAmount: payableLineAmount,
-          approvedLineTotalKgs: payableLineAmount,
         });
       }
 
@@ -1627,6 +1616,7 @@ export class OperationsService {
         builtLines = buildDistributionLinesFromConfirmedRequestItems(
           itemsWithFifoCosts as typeof existing.items,
           productsById,
+          { branchType: branch?.branchType },
         );
       } catch (error) {
         if (error instanceof Error && error.message.includes('Approved price missing')) {

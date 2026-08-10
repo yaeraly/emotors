@@ -17,6 +17,11 @@ import {
   resolveRetailInstallmentRemainingDebt,
   resolveRetailInstallmentRequiredPayment,
 } from '../sales/sale-installment-invoice.util';
+import {
+  buildBranchPurchaseApprovedInvoiceLines,
+  sumBranchPurchaseApprovedInvoiceTotalKgs,
+  type BranchPurchaseInvoiceLineSource,
+} from '../operations/branch-purchase-invoice-lines.util';
 
 export type AccountantInvoiceWorkflowStatus =
   | 'PENDING_ACCOUNTANT_REVIEW'
@@ -83,6 +88,45 @@ export function sanitizeAccountantInvoice(invoice: any) {
   const order = invoice.distributionOrder;
   const sale = invoice.sale;
   const linkedRequest = order?.branchPurchaseRequest ?? null;
+  const linkedRequestItems = (linkedRequest?.items ?? []) as BranchPurchaseInvoiceLineSource[];
+  const linkedBranchType = linkedRequest?.branch?.branchType ?? null;
+  const bprInvoiceLines =
+    linkedRequestItems.length > 0
+      ? buildBranchPurchaseApprovedInvoiceLines(
+          linkedRequestItems.map((item) => ({
+            ...item,
+            branchType: linkedBranchType,
+          })),
+        )
+      : [];
+  const bprInvoiceTotal =
+    bprInvoiceLines.length > 0
+      ? sumBranchPurchaseApprovedInvoiceTotalKgs(
+          linkedRequestItems.map((item) => ({
+            ...item,
+            branchType: linkedBranchType,
+          })),
+        )
+      : null;
+  const orderItemsByProductId = new Map<string, any>(
+    (order?.items ?? []).map((item: any) => [item.productId, item]),
+  );
+  const invoiceItemsFromBpr =
+    bprInvoiceLines.length > 0
+      ? bprInvoiceLines.map((line) => {
+          const orderItem = orderItemsByProductId.get(line.productId);
+          return {
+            id: orderItem?.id ?? line.productId,
+            productId: line.productId,
+            sku: line.sku ?? orderItem?.productSku ?? orderItem?.sku,
+            productName: line.productName ?? orderItem?.productName,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            lineTotal: line.lineTotal,
+            unit: orderItem?.product?.unit ?? orderItem?.unit ?? null,
+          };
+        })
+      : null;
   const installment = invoice.branchOrderInstallment
     ? (() => {
         const totalAmount = Number(invoice.branchOrderInstallment.totalAmount);
@@ -219,7 +263,7 @@ export function sanitizeAccountantInvoice(invoice: any) {
     workflowStatus,
     paymentType: invoice.paymentType ?? null,
     status: invoice.status,
-    totalAmount: Number(invoice.totalAmount),
+    totalAmount: bprInvoiceTotal ?? Number(invoice.totalAmount),
     paidAmount: Number(invoice.paidAmount),
     debtAmount: remainingAmount,
     remainingAmount,
@@ -228,8 +272,8 @@ export function sanitizeAccountantInvoice(invoice: any) {
     issuedAt: invoice.issuedAt,
     sentToBranchAt: invoice.sentToBranchAt,
     sentToCashierAt: invoice.sentToCashierAt,
-    itemCount: order?.items?.length ?? sale?.items?.length ?? 0,
-    items: (order?.items ?? sale?.items ?? []).map((item: any) => ({
+    itemCount: invoiceItemsFromBpr?.length ?? order?.items?.length ?? sale?.items?.length ?? 0,
+    items: invoiceItemsFromBpr ?? (order?.items ?? sale?.items ?? []).map((item: any) => ({
       id: item.id,
       productId: item.productId,
       sku: item.productSku ?? item.sku,
