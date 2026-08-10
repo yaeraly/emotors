@@ -54,7 +54,7 @@ export function resolveBranchPurchaseRequestStatusForPaymentEvent(
   }
 }
 
-/** Repair helper: stale BPR still awaiting payment while installment is already rejected. */
+/** Repair helper: stale BPR not yet REJECTED while HQ CEO installment decision is REJECTED. */
 export function shouldRepairBprStatusForRejectedInstallment(input: {
   bprStatus: BranchPurchaseRequestStatus | string;
   installmentStatus?: BranchOrderInstallmentStatus | string | null;
@@ -63,12 +63,17 @@ export function shouldRepairBprStatusForRejectedInstallment(input: {
     input.installmentStatus === BranchOrderInstallmentStatus.REJECTED ||
     input.installmentStatus === 'REJECTED';
   if (!installmentRejected) return false;
-  return (
-    input.bprStatus === BranchPurchaseRequestStatus.PENDING_PAYMENT ||
-    input.bprStatus === 'PENDING_PAYMENT' ||
-    input.bprStatus === BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL ||
-    input.bprStatus === 'PENDING_INSTALLMENT_APPROVAL' ||
-    input.bprStatus === BranchPurchaseRequestStatus.PAYMENT_REJECTED ||
-    input.bprStatus === 'PAYMENT_REJECTED'
-  );
+
+  if (
+    input.bprStatus === BranchPurchaseRequestStatus.REJECTED ||
+    input.bprStatus === 'REJECTED' ||
+    input.bprStatus === BranchPurchaseRequestStatus.CANCELLED ||
+    input.bprStatus === 'CANCELLED' ||
+    input.bprStatus === BranchPurchaseRequestStatus.COMPLETED ||
+    input.bprStatus === 'COMPLETED'
+  ) {
+    return false;
+  }
+
+  return true;
 }

@@ -3995,6 +3995,46 @@ export class DistributionService {
         data: {
           userId: user.id,
           role: user.role,
+          action: 'HQ_CEO_BPR_REJECTED',
+          entity: 'BranchPurchaseRequest',
+          entityId: linkedRequest.id,
+          metadata: {
+            bprId: linkedRequest.id,
+            installmentId: installment?.id ?? null,
+            oldStatus,
+            newStatus: nextStatus,
+            decisionBy: user.id,
+            timestamp: new Date().toISOString(),
+            trigger: 'INSTALLMENT_REJECTED',
+            distributionOrderId,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BPR_STATUS_CHANGED',
+          entity: 'BranchPurchaseRequest',
+          entityId: linkedRequest.id,
+          metadata: {
+            bprId: linkedRequest.id,
+            installmentId: installment?.id ?? null,
+            oldStatus,
+            newStatus: nextStatus,
+            decisionBy: user.id,
+            timestamp: new Date().toISOString(),
+            trigger: 'INSTALLMENT_REJECTED',
+            distributionOrderId,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
           action: 'BRANCH_ORDER_REJECTED',
           entity: 'BranchPurchaseRequest',
           entityId: linkedRequest.id,
