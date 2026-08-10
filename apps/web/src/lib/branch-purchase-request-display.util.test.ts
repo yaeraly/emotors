@@ -523,43 +523,57 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('create form: prefers authoritative FIFO lineTotal when present', () => {
+  it('Желмаян Контроллер: 25 × 2466.47 = 61661.75 (not FIFO 51795.79)', () => {
     assert.equal(
       draftFormLineTotal({
-        productId: 'p1',
+        productId: 'ctrl-70h',
+        quantity: '25',
+        branchPurchasePriceKgs: 2466.47,
+        // Hidden FIFO/cost total must NOT replace displayed branch-price × qty.
+        authoritativeLineTotalKgs: 51795.79,
+      }),
+      61661.75,
+    );
+    assert.notEqual(
+      draftFormLineTotal({
+        productId: 'ctrl-70h',
+        quantity: '25',
+        branchPurchasePriceKgs: 2466.47,
+        authoritativeLineTotalKgs: 51795.79,
+      }),
+      51795.79,
+    );
+  });
+
+  it('Редуктор regression: 2 × 1963.59 = 3927.18', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'reducer',
         quantity: '2',
         branchPurchasePriceKgs: 1963.59,
         authoritativeLineTotalKgs: 630.15,
       }),
-      630.15,
-    );
-    assert.equal(
-      draftFormLineTotal({
-        productId: 'p1',
-        quantity: '1',
-        branchPurchasePriceKgs: 1963.59,
-      }),
-      1963.59,
-    );
-    assert.equal(
-      draftFormLineTotal({
-        productId: 'p1',
-        quantity: '3',
-        branchPurchasePriceKgs: 1963.59,
-      }),
-      5890.77,
+      3927.18,
     );
   });
 
   it('updates create-form line total immediately when quantity changes', () => {
-    const price = 1963.59;
+    const price = 2466.47;
     assert.equal(
       draftFormLineTotal({ productId: 'p1', quantity: '1', branchPurchasePriceKgs: price }),
-      1963.59,
+      2466.47,
     );
     assert.equal(
       draftFormLineTotal({ productId: 'p1', quantity: '2', branchPurchasePriceKgs: price }),
-      3927.18,
+      4932.94,
+    );
+    assert.equal(
+      draftFormLineTotal({ productId: 'p1', quantity: '10', branchPurchasePriceKgs: price }),
+      24664.7,
+    );
+    assert.equal(
+      draftFormLineTotal({ productId: 'p1', quantity: '25', branchPurchasePriceKgs: price }),
+      61661.75,
     );
   });
 
@@ -578,28 +592,23 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('order total equals sum of authoritative rows when lineTotalKgs present', () => {
+  it('order total equals SUM of displayed branch-price × qty rows', () => {
     assert.equal(
       draftFormOrderTotal([
         {
-          productId: 'p1',
+          productId: 'ctrl-70h',
+          quantity: '25',
+          branchPurchasePriceKgs: 2466.47,
+          authoritativeLineTotalKgs: 51795.79,
+        },
+        {
+          productId: 'reducer',
           quantity: '2',
           branchPurchasePriceKgs: 1963.59,
           authoritativeLineTotalKgs: 630.15,
         },
-        {
-          productId: 'p2',
-          quantity: '1',
-          branchPurchasePriceKgs: 10000,
-          authoritativeLineTotalKgs: 999,
-        },
-        {
-          productId: 'p3',
-          quantity: '1',
-          branchPurchasePriceKgs: 2500,
-        },
       ]),
-      4129.15,
+      65588.93,
     );
   });
 });

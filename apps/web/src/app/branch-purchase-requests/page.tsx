@@ -777,15 +777,13 @@ function BranchPurchaseRequestsPageInner() {
                   : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
                     ? Boolean(entry.hasPricingPolicy)
                     : branchPrice != null;
-            // Prefer backend lineTotalKgs (HQ_BRANCH FIFO payable) so create → BA stays identical.
-            const authoritativeLineTotalKgs = parseBranchMoney(
-              typeof entry === 'object' && entry != null ? entry.lineTotalKgs ?? null : null,
-            );
+            // Create-form Сумма must use displayed Цена для филиала × qty.
+            // Do not store FIFO lineTotalKgs as a create-form total override.
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
-              authoritativeLineTotalKgs,
+              authoritativeLineTotalKgs: null,
               pricingPending: !hasPricing,
               priceResolving: false,
             };

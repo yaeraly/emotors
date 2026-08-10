@@ -21,6 +21,10 @@ describe('branch sales manager ui cleanup', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const detailPage = readFileSync(join(root, 'app/branch-purchase-requests/[id]/page.tsx'), 'utf8');
   const listPage = readFileSync(join(root, 'app/branch-purchase-requests/page.tsx'), 'utf8');
+  const displayUtil = readFileSync(
+    join(root, 'lib/branch-purchase-request-display.util.ts'),
+    'utf8',
+  );
   const customersPage = readFileSync(join(root, 'app/customers/page.tsx'), 'utf8');
   const salesPage = readFileSync(join(root, 'app/sales/page.tsx'), 'utf8');
   const myBonusesPage = readFileSync(join(root, 'app/sales/my-bonuses/page.tsx'), 'utf8');
@@ -101,11 +105,17 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /getBranchOrderDisplayQuantity/);
   });
 
-  it('create and draft product table prefers authoritative lineTotalKgs when present', () => {
+  it('create and draft product table line Сумма uses displayed Цена для филиала × quantity', () => {
     assert.match(listPage, /draftFormLineTotal\(line\)/);
     assert.match(listPage, /draftFormOrderTotal\(lines\)/);
-    assert.match(listPage, /authoritativeLineTotalKgs/);
-    assert.match(listPage, /lineTotalKgs/);
+    assert.match(listPage, /formatBranchPrice\(line, t\)/);
+    assert.match(listPage, /Create-form Сумма must use displayed Цена для филиала × qty/);
+    assert.match(listPage, /Do not store FIFO lineTotalKgs as a create-form total override/);
+    assert.match(displayUtil, /return roundMoney\(qty \* price\)/);
+    assert.doesNotMatch(
+      displayUtil,
+      /export function draftFormLineTotal[\s\S]*authoritativeLineTotalKgs[\s\S]*return/,
+    );
   });
 
   it('create order form hides branch and branch warehouse selectors for branch sales manager', () => {

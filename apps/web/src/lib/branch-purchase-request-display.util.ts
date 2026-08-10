@@ -287,19 +287,12 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
 
 /**
  * Row total for NEW/DRAFT create form.
- * Prefer backend authoritative lineTotalKgs when present (HQ_BRANCH FIFO payable).
- * Otherwise: displayed quantity × displayed Цена для филиала.
+ *
+ * Invariant: Displayed Количество × Displayed Цена для филиала = Displayed Сумма.
+ * Uses the same raw numeric branch price shown in the price column — never FIFO/cost
+ * lineTotalKgs (that produced 25 × hidden 2071.83 = 51795.79 instead of 25 × 2466.47).
  */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
-  const authoritative = line.authoritativeLineTotalKgs;
-  if (
-    !line.priceResolving &&
-    authoritative != null &&
-    Number.isFinite(Number(authoritative)) &&
-    Number(authoritative) > 0
-  ) {
-    return roundMoney(Number(authoritative));
-  }
   const price = getDraftFormBranchPrice(line);
   const qty = parseDraftFormQuantity(line.quantity);
   if (price != null && qty > 0) {
@@ -308,7 +301,7 @@ export function draftFormLineTotal(line: DraftFormLinePricing): number {
   return 0;
 }
 
-/** Bottom total for NEW/DRAFT form: sum of current authoritative row totals. */
+/** Bottom total for NEW/DRAFT form: sum of displayed row totals. */
 export function draftFormOrderTotal(lines: DraftFormLinePricing[]): number {
   return roundMoney(lines.reduce((sum, line) => sum + draftFormLineTotal(line), 0));
 }
