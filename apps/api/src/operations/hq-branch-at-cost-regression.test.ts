@@ -48,10 +48,11 @@ describe('HQ Branch at-cost permanent invariant', () => {
     );
     assert.notEqual(driftedUnitTimesQty, HQ_INVENTORY_TOTAL);
 
+    // After HQ Sales review, Branch Sales must show FIFO payable (not create-form unit×qty).
     const sanitized = sanitizeBranchPurchaseRequest(
       {
-        status: BranchPurchaseRequestStatus.DRAFT,
-        reviewedAt: null,
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
         totalEstimatedAmount: driftedUnitTimesQty,
         transportCostKgs: 0,
         branch: { branchType: BranchType.HQ_BRANCH },
@@ -61,6 +62,8 @@ describe('HQ Branch at-cost permanent invariant', () => {
           sku: line.sku,
           productName: line.sku,
           quantity: line.quantity,
+          approvedQuantity: line.quantity,
+          lineStatus: 'APPROVED',
           unit: 'pcs',
           estimatedLineProductCostKgs: line.totalCostKgs,
           resolvedBranchPriceKgs: line.unitDisplay,

@@ -44,13 +44,14 @@ function buildStaleHqBranchReviewedOrder() {
 }
 
 describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)', () => {
-  it('SUBMITTED_TO_HQ list parity matches HQ Sales submitted total', () => {
+  it('SUBMITTED_TO_HQ create/list/detail use commercial qty × branch price', () => {
+    const createFormTotal = STALE_LINE_TOTAL; // 2 × 33935.07
     const request = {
       id: 'cmsmxivrr0055zueq2pl50udj',
       requestNumber: 'BPR-SUBMITTED-LIST',
       status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
       reviewedAt: null,
-      totalEstimatedAmount: AUTHORITATIVE_FIFO_LINE,
+      totalEstimatedAmount: AUTHORITATIVE_FIFO_LINE, // stale FIFO header after wrong submit
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -58,21 +59,21 @@ describe('branch purchase order total parity (cmsmxivrr0055zueq2pl50udj pattern)
           id: 'line-reducer',
           productId: 'prod-reducer',
           sku: 'RED-18',
-          productName: 'Редуктор 18 зуб 4.3 кг',
+          productName: 'Редуктор 23 зуб 5 кг',
           quantity: EFFECTIVE_QTY,
           unit: 'pcs',
           estimatedLineProductCostKgs: AUTHORITATIVE_FIFO_LINE,
           resolvedBranchPriceKgs: DISPLAY_UNIT,
-          totalAmount: AUTHORITATIVE_FIFO_LINE,
+          totalAmount: AUTHORITATIVE_FIFO_LINE, // stale FIFO line total
           hasPricingPolicyAtSubmit: true,
         },
       ],
     };
     const parity = assertBranchPurchaseRequestTotalParity(request);
-    assert.equal(parity.hqSalesTotalKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.equal(parity.lineSumKgs, AUTHORITATIVE_FIFO_LINE);
-    assert.notEqual(parity.branchManagerTotalKgs, STALE_LINE_TOTAL);
+    assert.equal(parity.hqSalesTotalKgs, createFormTotal);
+    assert.equal(parity.branchManagerTotalKgs, createFormTotal);
+    assert.equal(parity.lineSumKgs, createFormTotal);
+    assert.notEqual(parity.branchManagerTotalKgs, AUTHORITATIVE_FIFO_LINE);
   });
 
   it('explains 4620.36 as rounded unit×qty minus authoritative FIFO line total', () => {

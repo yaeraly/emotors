@@ -9,6 +9,8 @@ import {
 } from './branch-purchase-estimated-amount.util';
 import {
   resolveBranchPurchaseBranchUnitPriceKgs,
+  resolveBranchPurchaseCommercialLineTotalKgs,
+  sumBranchPurchaseCommercialLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 import { computeBranchPurchaseHqReviewLineAmountKgs } from './branch-purchase-review-totals.util';
@@ -172,10 +174,19 @@ export function toBranchPurchaseRequestResponse<T extends {
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
   const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
+  const hasReviewedLine = items.some((item) => {
+    const status = (item as { lineStatus?: string | null }).lineStatus;
+    return Boolean(status && status !== 'PENDING_REVIEW');
+  });
+  // Before HQ Sales review: order total = commercial create-form sum (qty × branch price).
+  // After review for HQ_BRANCH: keep FIFO себестоимость payable as estimated amount.
   const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
     branchType,
-    totalProductCostKgs: transferAtCost ? totalProductCostKgs : computedOrderTotal,
-    lineProductCosts: items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+    totalProductCostKgs: transferAtCost && hasReviewedLine ? totalProductCostKgs : 0,
+    lineProductCosts:
+      transferAtCost && hasReviewedLine
+        ? items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0))
+        : [],
     storedEstimatedAmountKgs:
       computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount),
   });
@@ -384,8 +395,10 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const transferAtCost = shouldTransferBranchPurchaseAtCost(
     request.branch?.branchType ?? request.branchType ?? null,
   );
+  const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
 
-  // HQ_BRANCH at-cost: branch list/detail must mirror HQ Sales submitted totals from `full`.
+  // HQ_BRANCH: before HQ Sales review match Create Order (qty × branch price);
+  // after review keep FIFO payable totals from `full`.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
@@ -393,9 +406,14 @@ export function sanitizeBranchPurchaseRequest<T extends {
           branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
         });
-        const lineTotal = roundDisplayMoney(
-          Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
-        );
+        const lineTotal =
+          pendingHqSalesReview || !reviewed
+            ? resolveBranchPurchaseCommercialLineTotalKgs({
+                quantity: item.quantity,
+                branchPurchasePriceKgs: branchUnitPrice,
+                resolvedBranchPriceKgs: branchUnitPrice,
+              })
+            : roundDisplayMoney(Number(fullItem?.totalAmount ?? item.totalAmount ?? 0));
         return {
           id: item.id,
           productId: item.productId,
@@ -444,25 +462,42 @@ export function sanitizeBranchPurchaseRequest<T extends {
         };
       });
 
+    const branchOrderTotal =
+      pendingHqSalesReview || !reviewed
+        ? sumBranchPurchaseCommercialLineTotalsKgs(
+            sanitizedItems.map((item) => ({
+              quantity: item.quantity,
+              branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+            })),
+          )
+        : full.totalEstimatedAmount;
+
     return {
       ...full,
       branchDisplayStatus,
       partialFulfillmentMessage,
-      totalEstimatedAmount: full.totalEstimatedAmount,
+      totalEstimatedAmount: branchOrderTotal,
       totalProductCostKgs: undefined,
       authoritativeTransferCostKgs: undefined,
       items: sanitizedItems,
     };
   }
 
-  // Franchise/Dealer: mirror HQ Sales submitted/reviewed totals from `full`.
+  // Franchise/Dealer: commercial qty × branch price before review; reviewed totals from `full`.
   const branchItems = request.items.map((item) => {
     const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
       branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
       resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
     });
-    const lineTotal = roundDisplayMoney(Number(fullItem?.totalAmount ?? item.totalAmount ?? 0));
+    const lineTotal =
+      pendingHqSalesReview || !reviewed
+        ? resolveBranchPurchaseCommercialLineTotalKgs({
+            quantity: item.quantity,
+            branchPurchasePriceKgs: branchUnitPrice,
+            resolvedBranchPriceKgs: branchUnitPrice,
+          })
+        : roundDisplayMoney(Number(fullItem?.totalAmount ?? item.totalAmount ?? 0));
     return {
       id: item.id,
       productId: item.productId,
@@ -511,11 +546,23 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
+  const branchOrderTotal =
+    pendingHqSalesReview || !reviewed
+      ? sumBranchPurchaseCommercialLineTotalsKgs(
+          branchItems.map((item) => ({
+            quantity: item.quantity,
+            branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+          })),
+        )
+      : roundDisplayMoney(
+          branchItems.reduce((sum, item) => sum + Number((item as { totalAmount?: number }).totalAmount ?? 0), 0),
+        );
+
   return {
     ...full,
     branchDisplayStatus,
     partialFulfillmentMessage,
-    totalEstimatedAmount: full.totalEstimatedAmount,
+    totalEstimatedAmount: branchOrderTotal > 0 ? branchOrderTotal : full.totalEstimatedAmount,
     totalProductCostKgs: undefined,
     authoritativeTransferCostKgs: undefined,
     items: branchItems,

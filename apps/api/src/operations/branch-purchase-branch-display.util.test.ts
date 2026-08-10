@@ -143,14 +143,15 @@ describe('branch purchase branch display totals', () => {
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
   });
 
-  it('sanitized SUBMITTED_TO_HQ list total matches HQ Sales submitted FIFO total', () => {
-    const submittedTotal = 72490.5;
-    const displayUnit = 33935.07;
-    const wrongUnitTimesQty = 67870.14;
+  it('sanitized SUBMITTED_TO_HQ list total matches create-form qty × branch price', () => {
+    const displayUnit = 1963.59;
+    const qty = 2;
+    const createFormLineTotal = 3927.18;
+    const fifoCost = 630.15;
     const request = {
       status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
       reviewedAt: null,
-      totalEstimatedAmount: submittedTotal,
+      totalEstimatedAmount: fifoCost,
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -158,22 +159,67 @@ describe('branch purchase branch display totals', () => {
           id: 'line-1',
           productId: 'prod-1',
           sku: 'SKU-1',
-          productName: 'Редуктор 18 зуб 4.3 кг',
-          quantity: 2,
+          productName: 'Редуктор 23 зуб 5 кг',
+          quantity: qty,
           unit: 'pcs',
-          estimatedLineProductCostKgs: submittedTotal,
+          estimatedLineProductCostKgs: fifoCost,
           resolvedBranchPriceKgs: displayUnit,
-          totalAmount: submittedTotal,
+          totalAmount: fifoCost,
         },
       ],
     };
     const full = toBranchPurchaseRequestResponse(request);
     const sanitized = sanitizeBranchPurchaseRequest(request, true);
 
-    assert.equal(full.totalEstimatedAmount, submittedTotal);
-    assert.equal(sanitized.totalEstimatedAmount, submittedTotal);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, submittedTotal);
-    assert.notEqual(sanitized.totalEstimatedAmount, wrongUnitTimesQty);
+    assert.equal(full.totalEstimatedAmount, createFormLineTotal);
+    assert.equal(sanitized.totalEstimatedAmount, createFormLineTotal);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, createFormLineTotal);
+    assert.equal(
+      (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
+      displayUnit,
+    );
+    assert.notEqual(sanitized.totalEstimatedAmount, fifoCost);
+  });
+
+  it('sanitized multi-line SUBMITTED order keeps create-form commercial total', () => {
+    // Create form: commercial qty×price sum; FIFO/stale header must not win.
+    const commercialTotal = 72490.5;
+    const staleFifoHeader = 67870.14;
+    const request = {
+      status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
+      reviewedAt: null,
+      totalEstimatedAmount: staleFifoHeader,
+      transportCostKgs: 0,
+      branch: { branchType: 'HQ_BRANCH' },
+      items: [
+        {
+          id: 'line-a',
+          productId: 'prod-a',
+          sku: 'A',
+          productName: 'A',
+          quantity: 2,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: 1000,
+          resolvedBranchPriceKgs: 1963.59,
+          totalAmount: 1000,
+        },
+        {
+          id: 'line-b',
+          productId: 'prod-b',
+          sku: 'B',
+          productName: 'B',
+          quantity: 1,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: 500,
+          resolvedBranchPriceKgs: commercialTotal - 3927.18,
+          totalAmount: 500,
+        },
+      ],
+    };
+    const sanitized = sanitizeBranchPurchaseRequest(request, true);
+    assert.equal(sanitized.totalEstimatedAmount, commercialTotal);
+    assert.notEqual(sanitized.totalEstimatedAmount, staleFifoHeader);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 3927.18);
   });
 
   it('sanitized reviewed franchise order matches HQ Sales approved line totals', () => {
@@ -239,7 +285,7 @@ describe('branch purchase branch display totals', () => {
     assert.notEqual(sanitized.totalEstimatedAmount, 67870.14);
   });
 
-  it('sanitized HQ branch draft repairs 914369.08-style unit×qty totals to FIFO 914369.80', () => {
+  it('sanitized HQ branch after review repairs 914369.08-style unit×qty totals to FIFO 914369.80', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
     const lineTotals = distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL);
@@ -256,9 +302,9 @@ describe('branch purchase branch display totals', () => {
 
     const sanitized = sanitizeBranchPurchaseRequest(
       {
-        status: BranchPurchaseRequestStatus.DRAFT,
-        reviewedAt: null,
-        // Simulate BPR-1786197962954-style drifted header/line totals.
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
+        // Simulate BPR-1786197962954-style drifted header/line totals after HQ review.
         totalEstimatedAmount: driftedHeader,
         transportCostKgs: 0,
         branch: { branchType: 'HQ_BRANCH' },
@@ -268,6 +314,8 @@ describe('branch purchase branch display totals', () => {
           sku: `SKU-${index}`,
           productName: `SKU-${index}`,
           quantity: line.quantity,
+          approvedQuantity: line.quantity,
+          lineStatus: 'APPROVED',
           unit: 'pcs',
           estimatedLineProductCostKgs: line.totalCostKgs,
           resolvedBranchPriceKgs: line.unit,

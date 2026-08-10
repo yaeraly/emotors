@@ -114,6 +114,10 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
   }));
 
   const orderLineSum = sumBranchPurchaseHqReviewLineAmountsKgs(refreshedItems);
+  const hasReviewedLine = items.some((row) => {
+    const status = row.lineStatus as string | null | undefined;
+    return Boolean(status && status !== 'PENDING_REVIEW');
+  });
   const productCostKgs = sumDisplayMoneyTotals(
     items.map((row) => {
       const qty = resolveBranchPurchaseHqReviewEffectiveQuantity({
@@ -124,9 +128,11 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
       return qty > 0 ? Number(row.estimatedLineProductCostKgs ?? 0) : 0;
     }),
   );
+  // Before HQ Sales review: persist commercial create-form total (qty × branch price).
+  // After review for HQ_BRANCH: keep FIFO себестоимость payable.
   const repairedOrderTotalKgs = resolveBranchPurchaseEstimatedAmountKgs({
     branchType,
-    totalProductCostKgs: productCostKgs,
+    totalProductCostKgs: hasReviewedLine ? productCostKgs : 0,
     storedEstimatedAmountKgs: orderLineSum,
   });
 

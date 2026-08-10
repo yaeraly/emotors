@@ -139,6 +139,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       items: lines.map((line) => ({
         quantity: line.quantity,
         approvedQuantity: line.quantity,
+        lineStatus: 'APPROVED',
         estimatedLineProductCostKgs: line.totalCostKgs,
         totalAmount: roundDisplayMoney(
           deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,
@@ -187,6 +188,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
           productName: line.sku,
           quantity: line.quantity,
           approvedQuantity: line.quantity,
+          lineStatus: 'APPROVED',
           estimatedLineProductCostKgs: line.totalCostKgs,
           totalAmount: roundDisplayMoney(
             deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,

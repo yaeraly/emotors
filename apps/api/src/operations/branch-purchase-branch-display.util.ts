@@ -17,6 +17,35 @@ export function resolveBranchPurchaseBranchDisplayQuantity(item: { quantity: num
   return Math.max(0, Number(item.quantity ?? 0));
 }
 
+/**
+ * Create-form / pre–HQ Sales commercial line total:
+ * requestedQuantity × frozen order-line Цена для филиала.
+ */
+export function resolveBranchPurchaseCommercialLineTotalKgs(item: {
+  quantity: number;
+  branchPurchasePriceKgs?: unknown;
+  resolvedBranchPriceKgs?: unknown;
+}): number {
+  const quantity = resolveBranchPurchaseBranchDisplayQuantity(item);
+  const unitPrice = resolveBranchPurchaseBranchUnitPriceKgs(item);
+  if (unitPrice != null && quantity > 0) {
+    return roundDisplayMoney(unitPrice * quantity);
+  }
+  return 0;
+}
+
+export function sumBranchPurchaseCommercialLineTotalsKgs(
+  items: Array<{
+    quantity: number;
+    branchPurchasePriceKgs?: unknown;
+    resolvedBranchPriceKgs?: unknown;
+  }>,
+): number {
+  return roundDisplayMoney(
+    items.reduce((sum, item) => sum + resolveBranchPurchaseCommercialLineTotalKgs(item), 0),
+  );
+}
+
 /** Authoritative branch line total: displayed quantity × CEO branch unit price. */
 export function resolveBranchPurchaseBranchLineTotalKgs(item: {
   quantity: number;
@@ -30,10 +59,9 @@ export function resolveBranchPurchaseBranchLineTotalKgs(item: {
   if (item.transferAtCost && stored > 0) {
     return stored;
   }
-  const quantity = resolveBranchPurchaseBranchDisplayQuantity(item);
-  const unitPrice = resolveBranchPurchaseBranchUnitPriceKgs(item);
-  if (unitPrice != null && quantity > 0) {
-    return roundDisplayMoney(unitPrice * quantity);
+  const commercial = resolveBranchPurchaseCommercialLineTotalKgs(item);
+  if (commercial > 0) {
+    return commercial;
   }
   return stored > 0 ? stored : 0;
 }

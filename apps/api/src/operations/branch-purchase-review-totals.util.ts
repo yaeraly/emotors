@@ -51,6 +51,15 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
   });
+  const status = item.lineStatus ?? BranchPurchaseRequestLineStatus.PENDING_REVIEW;
+  const pendingReview =
+    status === BranchPurchaseRequestLineStatus.PENDING_REVIEW || status === 'PENDING_REVIEW';
+
+  // Before HQ Sales decides: same commercial total as Create Order (qty × branch unit price).
+  // FIFO payable applies only after line review for HQ_BRANCH at-cost transfers.
+  if (pendingReview && unitPrice != null && item.hasPricingPolicyAtReview !== false) {
+    return roundDisplayMoney(unitPrice * effectiveQuantity);
+  }
 
   return resolveBranchPurchaseLinePayableAmount({
     branchType: item.branchType,
