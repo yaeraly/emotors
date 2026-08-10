@@ -143,6 +143,39 @@ describe('branch purchase branch display totals', () => {
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
   });
 
+  it('sanitized pending HQ review uses requested qty times branch price not FIFO cost', () => {
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.SUBMITTED,
+        reviewedAt: null,
+        totalEstimatedAmount: 630.15,
+        transportCostKgs: 0,
+        branch: { branchType: 'HQ_BRANCH' },
+        items: [
+          {
+            id: 'line-1',
+            productId: 'prod-1',
+            sku: 'SKU-1',
+            productName: 'Редуктор 18 зуб 4.3 кг',
+            quantity: 2,
+            unit: 'pcs',
+            estimatedLineProductCostKgs: 630.15,
+            resolvedBranchPriceKgs: 1963.59,
+            totalAmount: 630.15,
+          },
+        ],
+      },
+      true,
+    );
+
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 3927.18);
+    assert.equal(sanitized.totalEstimatedAmount, 3927.18);
+    assert.equal(
+      (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
+      1963.59,
+    );
+  });
+
   it('sanitized HQ branch draft repairs 914369.08-style unit×qty totals to FIFO 914369.80', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);

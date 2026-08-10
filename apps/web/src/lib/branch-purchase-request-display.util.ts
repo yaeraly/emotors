@@ -96,11 +96,16 @@ export function hqReviewOrderAmount(items: BranchPurchaseRequestLinePricing[]): 
 }
 
 /**
- * Row total: prefer backend authoritative `totalAmount` (FIFO/payable for HQ_BRANCH,
- * or repaired qty×price for franchise). Never rebuild HQ at-cost totals from rounded
- * display unit × quantity — that recreates 914369.08-style drift.
+ * Branch Sales Manager row total: displayed quantity × displayed branch price.
+ * Keeps Сумма aligned with Количество and Цена для филиала on the same row.
+ * Draft/HQ at-cost authoritative FIFO totals live in `draftFormLineTotal` instead.
  */
 export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number {
+  const price = getFrozenBranchPrice(item);
+  const qty = getDisplayQuantity(item);
+  if (price != null && qty > 0) {
+    return roundMoney(price * qty);
+  }
   const authoritative =
     item.totalAmount != null && Number.isFinite(Number(item.totalAmount))
       ? Number(item.totalAmount)
@@ -108,9 +113,7 @@ export function requestLineTotal(item: BranchPurchaseRequestLinePricing): number
   if (authoritative != null && authoritative > 0) {
     return roundMoney(authoritative);
   }
-  const price = getFrozenBranchPrice(item);
-  if (price == null) return 0;
-  return roundMoney(getDisplayQuantity(item) * price);
+  return 0;
 }
 
 /** Order total: sum of authoritative/derived row totals. */

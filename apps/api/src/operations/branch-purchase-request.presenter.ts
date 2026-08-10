@@ -24,6 +24,13 @@ export function isBranchOnlyRequestUser(user: AuthUser, canViewAll: boolean) {
   return canManageOwnBranchProductRequest(user) && !canViewAll;
 }
 
+export function isPendingHqSalesReviewStatus(status: BranchPurchaseRequestStatus): boolean {
+  return (
+    status === BranchPurchaseRequestStatus.SUBMITTED ||
+    status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ
+  );
+}
+
 const REVIEWED_REQUEST_STATUSES = new Set<BranchPurchaseRequestStatus>([
   BranchPurchaseRequestStatus.APPROVED,
   BranchPurchaseRequestStatus.PARTIALLY_APPROVED,
@@ -379,24 +386,28 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const transferAtCost = shouldTransferBranchPurchaseAtCost(
     request.branch?.branchType ?? request.branchType ?? null,
   );
+  const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
 
   // HQ_BRANCH at-cost (restore 0007a11): keep FIFO payable totals from `full`.
   // Never rebuild Сумма as rounded unit × qty (regression from 4330b1f → 914369.08).
+  // Before HQ Sales review, Branch Sales detail must show requested qty × branch price.
   if (transferAtCost) {
-    return {
-      ...full,
-      branchDisplayStatus,
-      partialFulfillmentMessage,
-      totalEstimatedAmount: full.totalEstimatedAmount,
-      totalProductCostKgs: undefined,
-      authoritativeTransferCostKgs: undefined,
-      items: request.items.map((item) => {
+    const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
         const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
           branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
         });
         const fifoLineTotal = fullItem?.totalAmount ?? item.totalAmount;
+        const lineTotal = pendingHqSalesReview
+          ? resolveBranchPurchaseBranchLineTotalKgs({
+              quantity: item.quantity,
+              branchPurchasePriceKgs: branchUnitPrice,
+              resolvedBranchPriceKgs: branchUnitPrice,
+              totalAmount: 0,
+              transferAtCost: false,
+            })
+          : fifoLineTotal;
         return {
           id: item.id,
           productId: item.productId,
@@ -413,11 +424,11 @@ export function sanitizeBranchPurchaseRequest<T extends {
           unit: item.unit,
           note: item.note,
           branchPurchasePriceKgs: branchUnitPrice,
-          totalAmount: fifoLineTotal,
+          totalAmount: lineTotal,
           approvedLineTotalKgs: reviewed
             ? (fullItem?.approvedLineTotalKgs ??
               (item.approvedQuantity != null && Number(item.approvedQuantity) > 0
-                ? fifoLineTotal
+                ? lineTotal
                 : undefined))
             : undefined,
           weightKg: undefined,
@@ -443,7 +454,26 @@ export function sanitizeBranchPurchaseRequest<T extends {
           priceResolvedAt: undefined,
           resolvedBranchPriceKgs: undefined,
         };
-      }),
+      });
+
+    const branchOrderTotal = pendingHqSalesReview
+      ? sumBranchPurchaseBranchLineTotalsKgs(
+          sanitizedItems.map((item) => ({
+            quantity: item.quantity,
+            branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+            totalAmount: 0,
+          })),
+        )
+      : full.totalEstimatedAmount;
+
+    return {
+      ...full,
+      branchDisplayStatus,
+      partialFulfillmentMessage,
+      totalEstimatedAmount: branchOrderTotal,
+      totalProductCostKgs: undefined,
+      authoritativeTransferCostKgs: undefined,
+      items: sanitizedItems,
     };
   }
 

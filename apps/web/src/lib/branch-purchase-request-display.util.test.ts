@@ -16,13 +16,23 @@ import { roundMoney } from './money';
 const t = (key: string) => key;
 
 describe('branch purchase request display totals', () => {
-  it('calculates line total as quantity times branch price', () => {
+  it('uses display quantity times branch price for line total', () => {
     const total = requestLineTotal({
       quantity: 5,
       branchPurchasePriceKgs: 12000,
       totalAmount: 0,
     });
     assert.equal(total, 60000);
+  });
+
+  it('pending HQ review: line total is quantity times branch price not FIFO cost', () => {
+    const total = requestLineTotal({
+      quantity: 2,
+      branchPurchasePriceKgs: 1963.59,
+      totalAmount: 630.15,
+    });
+    assert.equal(total, 3927.18);
+    assert.notEqual(total, 630.15);
   });
 
   it('does not silently stay zero when branch price exists but totalAmount is zero', () => {
@@ -34,15 +44,14 @@ describe('branch purchase request display totals', () => {
     assert.equal(total, 13500);
   });
 
-  it('prefers authoritative backend totalAmount over rounded unit × qty (HQ at-cost)', () => {
-    // FIFO line 162317.33 vs display unit 14756.12 × 11 = 162317.32
+  it('falls back to backend totalAmount only when branch price is unavailable', () => {
     const total = requestLineTotal({
-      quantity: 11,
-      branchPurchasePriceKgs: 14756.12,
-      totalAmount: 162317.33,
+      quantity: 5,
+      branchPurchasePriceKgs: undefined,
+      resolvedBranchPriceKgs: null,
+      totalAmount: 60000,
     });
-    assert.equal(total, 162317.33);
-    assert.notEqual(total, roundMoney(14756.12 * 11));
+    assert.equal(total, 60000);
   });
 
   it('falls back to qty × branch price only when totalAmount is missing/zero', () => {
