@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { BottomRightToast, useBottomRightToast } from '@/components/BottomRightToast';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
 import {
@@ -209,6 +210,22 @@ function buildLineDecisionsFromItems(items: RequestItem[], hqStockLoaded: boolea
   return Object.fromEntries(items.map((item) => [item.id, lineDecisionFromItem(item, hqStockLoaded)]));
 }
 
+function lineReviewSuccessMessage(
+  t: (key: string) => string,
+  action: LineReviewAction,
+): string {
+  if (action === 'APPROVE') {
+    return t('branchProductRequest.lineReviewApproved');
+  }
+  if (action === 'REJECT') {
+    return t('branchProductRequest.lineReviewRejected');
+  }
+  if (action === 'REMOVE') {
+    return t('branchProductRequest.lineReviewRemoved');
+  }
+  return t('branchProductRequest.lineReviewSaved');
+}
+
 
 function hqDetailThClass(compact: boolean) {
   return compact ? 'px-2 py-1.5 text-[10px] whitespace-nowrap' : 'px-4 py-3';
@@ -263,6 +280,8 @@ export default function BranchPurchaseRequestDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submittingLineId, setSubmittingLineId] = useState<string | null>(null);
   const [lineDecisions, setLineDecisions] = useState<Record<string, LineDecision>>({});
+  const { toast: lineReviewToast, showSuccess: showLineReviewSuccess, showError: showLineReviewError } =
+    useBottomRightToast();
 
   function localizeBranchRequestError(message: string) {
     if (message.includes('NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH')) return t('branchHqRouting.noWarehouseAssigned');
@@ -404,7 +423,11 @@ export default function BranchPurchaseRequestDetailPage() {
     if (resolvedDecision.action === 'APPROVE') {
       const validationError = validateApprovedQuantityForApprove(t, item, resolvedDecision.approvedQuantity);
       if (validationError) {
-        setError(validationError);
+        if (hqSalesView) {
+          showLineReviewError(validationError);
+        } else {
+          setError(validationError);
+        }
         return;
       }
     }
@@ -413,7 +436,12 @@ export default function BranchPurchaseRequestDetailPage() {
       (resolvedDecision.action === 'REJECT' || resolvedDecision.action === 'REMOVE') &&
       !resolvedDecision.publicComment.trim()
     ) {
-      setError(t('branchProductRequest.commentRequired'));
+      const commentError = t('branchProductRequest.commentRequired');
+      if (hqSalesView) {
+        showLineReviewError(commentError);
+      } else {
+        setError(commentError);
+      }
       return;
     }
 
@@ -430,9 +458,18 @@ export default function BranchPurchaseRequestDetailPage() {
       );
       setRequest(detail);
       setLineDecisions(buildLineDecisionsFromItems(detail.items, detail.hqStockStatus !== 'unavailable'));
-      setSuccess(t('branchProductRequest.lineReviewSaved'));
+      if (hqSalesView) {
+        showLineReviewSuccess(lineReviewSuccessMessage(t, resolvedDecision.action));
+      } else {
+        setSuccess(t('branchProductRequest.lineReviewSaved'));
+      }
     } catch (err) {
-      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+      const message = localizeBranchRequestError(err instanceof Error ? err.message : t('common.error'));
+      if (hqSalesView) {
+        showLineReviewError(message || t('branchProductRequest.lineReviewSaveFailed'));
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmittingLineId(null);
     }
@@ -443,7 +480,11 @@ export default function BranchPurchaseRequestDetailPage() {
       const decision = lineDecisions[item.id] ?? defaultLineDecision(item, request?.hqStockStatus !== 'unavailable');
       const validationError = validateApprovedQuantityForApprove(t, item, decision.approvedQuantity);
       if (validationError) {
-        setError(validationError);
+        if (hqSalesView) {
+          showLineReviewError(validationError);
+        } else {
+          setError(validationError);
+        }
         return;
       }
       const approvedQty = parseApprovedQuantityInput(decision.approvedQuantity);
@@ -738,6 +779,7 @@ export default function BranchPurchaseRequestDetailPage() {
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
+        <BottomRightToast toast={lineReviewToast} />
 
         {branchOnlyView && reviewed ? (
           <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">
