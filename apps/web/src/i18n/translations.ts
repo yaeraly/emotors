@@ -3935,7 +3935,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchProductRequest.availableForRequest': 'Доступно для заявки',
     'branchProductRequest.confirmOrder': 'Согласовать заказ',
     'branchProductRequest.declineOrder': 'Отказаться',
-    'branchProductRequest.branchConfirmed': 'Заказ согласован филиалом',
+    'branchProductRequest.branchConfirmed': 'Заказ согласован',
     'branchProductRequest.branchDeclined': 'Заказ отклонён филиалом',
     'branchProductRequest.approvedQuantity': 'Одобрено',
     'branchProductRequest.missingQuantity': 'Недостача',

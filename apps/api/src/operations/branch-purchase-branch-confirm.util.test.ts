@@ -145,4 +145,61 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     assert.ok(source.includes('Insufficient FIFO stock for SKU'));
     assert.ok(source.includes('previewFifoAllocation'));
   });
+
+  it('partial approval uses approvedQuantity not requested quantity (10 requested, 6 approved)', () => {
+    const partialItem = {
+      ...approvedItem,
+      quantity: 10,
+      approvedQuantity: 6,
+      lineStatus: 'PARTIALLY_APPROVED' as const,
+      resolvedBranchPriceKgs: 1000,
+      approvedLineTotalKgs: 6000,
+      totalAmount: 6000,
+      estimatedLineProductCostKgs: 4500,
+    };
+    const lines = buildBranchPurchaseCommercialAgreementLines(
+      [partialItem],
+      new Map([[product.id, product]]),
+    );
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].quantity, 6);
+    assert.equal(lines[0].totalPrice, 6000);
+    assert.notEqual(lines[0].quantity, partialItem.quantity);
+  });
+
+  it('HQ Branch agreement line cost may differ from stored FIFO snapshot — must not block confirm', () => {
+    const hqItem = {
+      ...approvedItem,
+      resolvedBranchPriceKgs: 36245.25,
+      approvedLineTotalKgs: 72490.5,
+      totalAmount: 72490.5,
+      estimatedLineProductCostKgs: 63148.89,
+      estimatedUnitCost: 31574.45,
+    };
+    const lines = buildBranchPurchaseCommercialAgreementLines(
+      [hqItem],
+      new Map([[product.id, product]]),
+      { branchType: 'HQ_BRANCH' },
+    );
+    const storedInventory = sumPersistedApprovedInventoryCostKgs([hqItem]);
+    const agreementInventory = sumBranchPurchaseCommercialAgreementInventoryCostKgs(lines);
+    assert.equal(storedInventory, 63148.89);
+    assert.equal(agreementInventory, 72490.5);
+    assert.notEqual(storedInventory, agreementInventory);
+  });
+
+  it('confirmBranchPurchaseRequest does not run FIFO cost reconciliation', () => {
+    const operationsServicePath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'operations.service.ts',
+    );
+    const source = readFileSync(operationsServicePath, 'utf8');
+    const confirmStart = source.indexOf('async confirmBranchPurchaseRequest(');
+    const confirmEnd = source.indexOf('async declineBranchPurchaseRequest(', confirmStart);
+    assert.ok(confirmStart >= 0 && confirmEnd > confirmStart);
+    const confirmBlock = source.slice(confirmStart, confirmEnd);
+    assert.doesNotMatch(confirmBlock, /BRANCH_ORDER_COST_MISMATCH_MESSAGE/);
+    assert.doesNotMatch(confirmBlock, /compareAuthoritativeCostTotals/);
+    assert.doesNotMatch(confirmBlock, /BRANCH_ORDER_COST_RECONCILIATION_FAILED/);
+  });
 });

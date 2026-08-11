@@ -77,10 +77,6 @@ import {
 } from '../procurement/procurement-receive-inventory-reconcile.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
 import { deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import {
-  compareAuthoritativeCostTotals,
-  BRANCH_ORDER_COST_MISMATCH_MESSAGE,
-} from '../pricing/cost-reconciliation.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
@@ -95,11 +91,8 @@ import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-ite
 import { branchPurchaseRequestItemsInclude } from './branch-purchase-request-items-order.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
 import {
-  allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot,
   buildBranchPurchaseCommercialAgreementLines,
-  sumBranchPurchaseCommercialAgreementInventoryCostKgs,
   sumBranchPurchaseCommercialAgreementTotalKgs,
-  sumPersistedApprovedInventoryCostKgs,
 } from './branch-purchase-branch-confirm.util';
 import { sumHqBranchDistributionOrderTotals } from '../distribution/hq-branch-distribution-profit.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
@@ -1601,30 +1594,6 @@ export class OperationsService {
       }
       if (!builtLines.length) {
         throw new BadRequestException('Order has no approved items');
-      }
-
-      const storedInventoryTotal = sumPersistedApprovedInventoryCostKgs(existing.items);
-      const orderInventoryCostTotal = sumBranchPurchaseCommercialAgreementInventoryCostKgs(builtLines);
-      if (
-        allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot(builtLines) &&
-        storedInventoryTotal > 0
-      ) {
-        const reconciliation = compareAuthoritativeCostTotals(
-          storedInventoryTotal,
-          orderInventoryCostTotal,
-          'branch purchase confirm',
-        );
-        if (!reconciliation.ok) {
-          this.logger.error({
-            message: 'BRANCH_ORDER_COST_RECONCILIATION_FAILED',
-            branchPurchaseRequestNumber: existing.requestNumber,
-            warehouseId: assignedHqWarehouseId,
-            expectedTotal: reconciliation.expectedKgs,
-            actualTotal: reconciliation.actualKgs,
-            differenceKgs: reconciliation.differenceKgs,
-          });
-          throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
-        }
       }
 
       const totalAmount = sumBranchPurchaseCommercialAgreementTotalKgs(builtLines);
