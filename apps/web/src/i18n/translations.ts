@@ -531,6 +531,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchProductRequest.commentRequired': 'Комментарий талап кылынат',
     'branchProductRequest.approvedQuantityRequired': 'Утвердилүү үчүн сан көрсөтүңүз.',
     'branchProductRequest.approvedQuantityExceedsRequested': 'Утвердилген сан суралган санынан ашпоосу керек.',
+    'branchProductRequest.approvedQuantityExceedsHqAvailable':
+      'HQ складында товар жетишсиз. Бар: {{hqAvailable}}.',
     'branchRequestLine.status.PENDING_REVIEW': 'Каралууда',
     'branchRequestLine.status.APPROVED': 'Бекитилди',
     'branchRequestLine.status.PARTIALLY_APPROVED': 'Жарым-жартылай бекитилди',
@@ -3958,6 +3960,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchProductRequest.commentRequired': 'Требуется комментарий',
     'branchProductRequest.approvedQuantityRequired': 'Укажите количество для утверждения.',
     'branchProductRequest.approvedQuantityExceedsRequested': 'Утверждаемое количество не может превышать запрошенное.',
+    'branchProductRequest.approvedQuantityExceedsHqAvailable':
+      'Недостаточно товара на складе HQ. Доступно: {{hqAvailable}}.',
     'branchRequestLine.status.PENDING_REVIEW': 'На проверке',
     'branchRequestLine.status.APPROVED': 'Утверждено',
     'branchRequestLine.status.PARTIALLY_APPROVED': 'Частично утверждено',
@@ -7648,6 +7652,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchProductRequest.commentRequired': 'Comment is required',
     'branchProductRequest.approvedQuantityRequired': 'Enter a quantity to approve.',
     'branchProductRequest.approvedQuantityExceedsRequested': 'Approved quantity cannot exceed requested quantity.',
+    'branchProductRequest.approvedQuantityExceedsHqAvailable':
+      'Insufficient HQ warehouse stock. Available: {{hqAvailable}}.',
     'branchRequestLine.status.PENDING_REVIEW': 'Pending review',
     'branchRequestLine.status.APPROVED': 'Approved',
     'branchRequestLine.status.PARTIALLY_APPROVED': 'Partially approved',

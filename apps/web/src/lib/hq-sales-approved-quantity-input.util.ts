@@ -17,10 +17,30 @@ export function parseApprovedQuantityChange(raw: string): ApprovedQuantityInput 
   return Number.isFinite(qty) ? qty : '';
 }
 
+/** Same limit as backend approval: general HQ available + active booking for this line. */
+export function resolveHqAvailableForApprovalLine(item: {
+  availableForThisRequest?: number | null;
+  hqAvailableStock?: number | null;
+  bookedQuantity?: number | null;
+}): number {
+  return item.availableForThisRequest ?? (item.hqAvailableStock ?? 0) + (item.bookedQuantity ?? 0);
+}
+
+export function formatApprovedQuantityExceedsHqAvailableMessage(
+  t: (key: string) => string,
+  hqAvailable: number,
+): string {
+  return t('branchProductRequest.approvedQuantityExceedsHqAvailable').replace(
+    '{{hqAvailable}}',
+    String(hqAvailable),
+  );
+}
+
 export function validateApprovedQuantityForApprove(
   t: (key: string) => string,
   item: { quantity: number },
   approvedQuantity: ApprovedQuantityInput,
+  hqAvailable: number,
 ): string | null {
   const qty = parseApprovedQuantityInput(approvedQuantity);
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -28,6 +48,9 @@ export function validateApprovedQuantityForApprove(
   }
   if (qty > item.quantity) {
     return t('branchProductRequest.approvedQuantityExceedsRequested');
+  }
+  if (qty > hqAvailable) {
+    return formatApprovedQuantityExceedsHqAvailableMessage(t, hqAvailable);
   }
   return null;
 }

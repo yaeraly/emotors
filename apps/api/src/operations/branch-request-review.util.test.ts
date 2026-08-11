@@ -142,6 +142,52 @@ describe('resolveLineReview booking availability', () => {
       /INVALID_APPROVED_QUANTITY/,
     );
   });
+
+  it('allows approval up to min(requested, HQ available): request 10, available 6, approve 6', () => {
+    const result = resolveLineReview(
+      { id: 'line-1', action: 'APPROVE', approvedQuantity: 6 },
+      {
+        requestedQuantity: 10,
+        availableQuantity: 6,
+        bookedQuantity: 0,
+        hasPricingPolicy: true,
+      },
+    );
+
+    assert.equal(result.lineStatus, BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED);
+    assert.equal(result.approvedQuantity, 6);
+  });
+
+  it('blocks approval above HQ available: request 10, available 6, approve 7', () => {
+    assert.throws(
+      () =>
+        resolveLineReview(
+          { id: 'line-1', action: 'APPROVE', approvedQuantity: 7 },
+          {
+            requestedQuantity: 10,
+            availableQuantity: 6,
+            bookedQuantity: 0,
+            hasPricingPolicy: true,
+          },
+        ),
+      /APPROVED_QUANTITY_EXCEEDS_AVAILABLE/,
+    );
+  });
+
+  it('allows approval when request is lower than HQ available: request 5, available 20, approve 5', () => {
+    const result = resolveLineReview(
+      { id: 'line-1', action: 'APPROVE', approvedQuantity: 5 },
+      {
+        requestedQuantity: 5,
+        availableQuantity: 20,
+        bookedQuantity: 0,
+        hasPricingPolicy: true,
+      },
+    );
+
+    assert.equal(result.lineStatus, BranchPurchaseRequestLineStatus.APPROVED);
+    assert.equal(result.approvedQuantity, 5);
+  });
 });
 
 describe('deriveRequestStatusFromLines', () => {

@@ -248,6 +248,7 @@ export async function applyBranchPurchaseLineReviewInTx(
 ): Promise<AppliedBranchPurchaseLineReview & { unchanged?: boolean }> {
   const generalAvailable = context.stockMap.get(item.productId) ?? 0;
   const bookedQuantity = context.bookedMap.get(item.id) ?? item.bookedQuantity ?? 0;
+  const hqAvailableForApproval = Math.max(generalAvailable, 0) + Math.max(bookedQuantity, 0);
   const hasPricingPolicy = context.pricingAvailability.get(item.id) ?? false;
 
   let resolved;
@@ -260,7 +261,7 @@ export async function applyBranchPurchaseLineReviewInTx(
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'APPROVED_QUANTITY_EXCEEDS_AVAILABLE') {
-      throw new Error(`APPROVED_QUANTITY_EXCEEDS_AVAILABLE:${item.sku}`);
+      throw new Error(`APPROVED_QUANTITY_EXCEEDS_AVAILABLE:${hqAvailableForApproval}`);
     }
     throw error;
   }

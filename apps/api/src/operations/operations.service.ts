@@ -1362,8 +1362,11 @@ export class OperationsService {
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.startsWith('APPROVED_QUANTITY_EXCEEDS_AVAILABLE:')) {
+          const available = Number(error.message.slice('APPROVED_QUANTITY_EXCEEDS_AVAILABLE:'.length));
           throw new BadRequestException(
-            `На складе HQ недостаточно товара для утверждения указанного количества (${item.sku})`,
+            Number.isFinite(available)
+              ? `Недостаточно товара на складе HQ. Доступно: ${available}.`
+              : 'Недостаточно товара на складе HQ.',
           );
         }
         if (error.message.startsWith('PUBLIC_COMMENT_REQUIRED:')) {

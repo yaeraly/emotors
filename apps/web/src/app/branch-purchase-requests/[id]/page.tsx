@@ -39,6 +39,7 @@ import {
   approvedQuantityInputValue,
   parseApprovedQuantityChange,
   parseApprovedQuantityInput,
+  resolveHqAvailableForApprovalLine,
   validateApprovedQuantityForApprove,
   type ApprovedQuantityInput,
 } from '@/lib/hq-sales-approved-quantity-input.util';
@@ -142,7 +143,7 @@ function isReviewedStatus(status: string) {
 
 function availableForLine(item: RequestItem, hqStockLoaded: boolean) {
   if (!hqStockLoaded) return 0;
-  return item.availableForThisRequest ?? (item.hqAvailableStock ?? 0) + (item.bookedQuantity ?? 0);
+  return resolveHqAvailableForApprovalLine(item);
 }
 
 function formatHqStockCell(value: number | null | undefined, hqStockLoaded: boolean, t: (key: string) => string) {
@@ -418,7 +419,13 @@ export default function BranchPurchaseRequestDetailPage() {
           };
 
     if (resolvedDecision.action === 'APPROVE') {
-      const validationError = validateApprovedQuantityForApprove(t, item, resolvedDecision.approvedQuantity);
+      const hqAvailable = availableForLine(item, stockLoaded);
+      const validationError = validateApprovedQuantityForApprove(
+        t,
+        item,
+        resolvedDecision.approvedQuantity,
+        hqAvailable,
+      );
       if (validationError) {
         toast.error(validationError);
         return;
@@ -457,7 +464,13 @@ export default function BranchPurchaseRequestDetailPage() {
   function setLineAction(item: RequestItem, action: LineReviewAction) {
     if (action === 'APPROVE') {
       const decision = lineDecisions[item.id] ?? defaultLineDecision(item, request?.hqStockStatus !== 'unavailable');
-      const validationError = validateApprovedQuantityForApprove(t, item, decision.approvedQuantity);
+      const hqAvailable = availableForLine(item, request?.hqStockStatus !== 'unavailable');
+      const validationError = validateApprovedQuantityForApprove(
+        t,
+        item,
+        decision.approvedQuantity,
+        hqAvailable,
+      );
       if (validationError) {
         toast.error(validationError);
         return;
