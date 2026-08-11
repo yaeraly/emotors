@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
@@ -25,6 +25,7 @@ import { shouldShowReceivingBranchField, shouldHideTransportSectionAfterBranchRe
 import { buildHqDispatchSendPayload, shouldShowHqDispatchTransportFields } from '@/lib/hq-dispatch-form';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
+import { sortDistributionOrderItemsForPickingDisplay } from '@/lib/distribution-order-picking-display.util';
 
 import { toast } from '@/lib/toast';
 
@@ -97,6 +98,9 @@ export default function DistributionOrderDetailPage() {
           body: JSON.stringify({ picked }),
         }),
       );
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
       toast.success(picked ? t('distribution.itemPickedDone') : t('distribution.undoItemPick'));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'));
@@ -139,6 +143,15 @@ export default function DistributionOrderDetailPage() {
       (canEnterTransport || operatorView) &&
       !shouldHideTransportSectionAfterBranchReceipt(order.status),
   );
+  const pickingDisplayItems = useMemo(() => {
+    if (!order?.items?.length) {
+      return order?.items ?? [];
+    }
+    if (!showPickedColumn) {
+      return order.items;
+    }
+    return sortDistributionOrderItemsForPickingDisplay(order.items);
+  }, [order?.items, showPickedColumn]);
 
   const pageContent = (
     <>
@@ -328,7 +341,7 @@ export default function DistributionOrderDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {order.items?.map((item) => {
+                    {pickingDisplayItems?.map((item) => {
                       const isPicked = Boolean(item.pickedAt);
                       const canPickItem = showPickingControls && Number(item.quantity) > 0;
                       return (
