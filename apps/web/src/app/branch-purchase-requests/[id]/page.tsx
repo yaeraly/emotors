@@ -30,10 +30,13 @@ import {
   formatFrozenBranchPrice,
   formatLineTotalKgs,
   formatOrderTotalKgs,
+  getBranchSalesReviewApprovedQuantity,
+  getBranchSalesReviewRequestedQuantity,
   getBranchOrderDisplayQuantity,
   hqReviewPreviewLineAmount,
   hqReviewPreviewOrderAmount,
   requestLineTotal,
+  sortBranchSalesManagerReviewItemsPartialFirst,
   sumBranchPurchaseApprovedQuantity,
   sumBranchPurchaseRequestedQuantity,
   type HqReviewPreviewDraft,
@@ -658,6 +661,11 @@ export default function BranchPurchaseRequestDetailPage() {
     () => (request ? sumBranchPurchaseApprovedQuantity(request.items) : 0),
     [request],
   );
+  const branchSalesTableItems = useMemo(() => {
+    if (!request) return [];
+    if (!reviewed) return request.items;
+    return sortBranchSalesManagerReviewItemsPartialFirst(request.items);
+  }, [request, reviewed]);
 
   if (user && !canView) {
     return (
@@ -881,21 +889,22 @@ export default function BranchPurchaseRequestDetailPage() {
               <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">{t('sales.product')}</th>
-                  <th className="px-4 py-3">{t('distribution.quantity')}</th>
+                  <th className="px-4 py-3">{t('branchProductRequest.reviewTableRequest')}</th>
+                  <th className="px-4 py-3">{t('branchProductRequest.reviewTableApproved')}</th>
                   <th className="px-4 py-3 text-right">{t('branchProductRequest.branchPurchasePrice')}</th>
                   <th className="px-4 py-3 text-right">{t('branchProductRequest.totalAmount')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {request.items.map((item) => {
+                {branchSalesTableItems.map((item) => {
                   const branchPriceLabel = formatFrozenBranchPrice(item, t);
                   const showKgsSuffix =
                     branchPriceLabel !== t('branchProductRequest.pricingPending');
-                  const displayQuantity = getBranchOrderDisplayQuantity(item, { reviewed: Boolean(reviewed) });
                   return (
                   <tr key={item.id} className={reviewed ? branchSalesManagerReviewLineRowClass(item) : undefined}>
                     <td className="px-4 py-3 font-semibold text-slate-900">{item.productName}</td>
-                    <td className="px-4 py-3 tabular-nums">{displayQuantity}</td>
+                    <td className="px-4 py-3 tabular-nums">{getBranchSalesReviewRequestedQuantity(item)}</td>
+                    <td className="px-4 py-3 tabular-nums">{getBranchSalesReviewApprovedQuantity(item)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {branchPriceLabel}
                       {showKgsSuffix ? ' KGS' : null}
@@ -909,7 +918,7 @@ export default function BranchPurchaseRequestDetailPage() {
               </tbody>
               <tfoot className="border-t border-slate-200 bg-slate-50">
                 <tr>
-                  <td colSpan={3} className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <td colSpan={4} className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
                     {t('branchProductRequest.totalAmount')}
                   </td>
                   <td className="px-4 py-3 text-right text-base font-bold tabular-nums text-slate-900">

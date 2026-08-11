@@ -52,15 +52,21 @@ describe('branch sales manager ui cleanup', () => {
     assert.ok(bsmTableStart >= 0 && bsmTableEnd > bsmTableStart);
     const bsmTable = detailPage.slice(bsmTableStart, bsmTableEnd);
     assert.match(bsmTable, /t\('sales\.product'\)/);
-    assert.match(bsmTable, /t\('distribution\.quantity'\)/);
+    assert.match(bsmTable, /branchProductRequest\.reviewTableRequest/);
+    assert.match(bsmTable, /branchProductRequest\.reviewTableApproved/);
+    assert.doesNotMatch(bsmTable, /distribution\.quantity/);
     assert.match(bsmTable, /t\('branchProductRequest\.branchPurchasePrice'\)/);
     assert.match(bsmTable, /t\('branchProductRequest\.totalAmount'\)/);
     assert.doesNotMatch(bsmTable, /inventory\.sku/);
     assert.doesNotMatch(bsmTable, /item\.sku/);
     assert.match(bsmTable, /item\.productName/);
-    assert.match(bsmTable, /getBranchOrderDisplayQuantity\(item, \{ reviewed: Boolean\(reviewed\) \}\)/);
+    assert.match(bsmTable, /getBranchSalesReviewRequestedQuantity\(item\)/);
+    assert.match(bsmTable, /getBranchSalesReviewApprovedQuantity\(item\)/);
     assert.match(bsmTable, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
     assert.match(bsmTable, /formatOrderTotalKgs\(request\.items, branchOrderTotalOptions\)/);
+    assert.match(bsmTable, /branchSalesTableItems\.map/);
+    assert.match(detailPage, /sortBranchSalesManagerReviewItemsPartialFirst/);
+    assert.match(detailPage, /branchSalesTableItems = useMemo/);
   });
 
   it('hides repeated customer history subtitle for branch sales manager', () => {
@@ -256,6 +262,6 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(displayUtil, /isPartiallyApprovedBranchPurchaseLine/);
     assert.match(displayUtil, /bg-amber-50/);
     assert.match(displayUtil, /bg-red-50/);
-    assert.doesNotMatch(bsmTable, /request\.items\.sort/);
+    assert.match(displayUtil, /sortBranchSalesManagerReviewItemsPartialFirst/);
   });
 });

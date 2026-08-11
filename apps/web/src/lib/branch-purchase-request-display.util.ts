@@ -320,6 +320,33 @@ export function branchSalesManagerReviewLineRowClass(
   return '';
 }
 
+/** Stable sort: partially approved lines first, preserving original submission order within each group. */
+export function sortBranchSalesManagerReviewItemsPartialFirst<
+  T extends Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
+>(items: T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftPartial = isPartiallyApprovedBranchPurchaseLine(left.item) ? 0 : 1;
+      const rightPartial = isPartiallyApprovedBranchPurchaseLine(right.item) ? 0 : 1;
+      if (leftPartial !== rightPartial) return leftPartial - rightPartial;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
+}
+
+export function getBranchSalesReviewRequestedQuantity(
+  item: Pick<BranchPurchaseRequestLinePricing, 'quantity'>,
+): number {
+  return Math.max(Number(item.quantity ?? 0), 0);
+}
+
+export function getBranchSalesReviewApprovedQuantity(
+  item: Pick<BranchPurchaseRequestLinePricing, 'approvedQuantity'>,
+): number {
+  return Math.max(Number(item.approvedQuantity ?? 0), 0);
+}
+
 function parseDraftFormQuantity(quantity: string | number): number {
   const qty = Number(quantity);
   return Number.isFinite(qty) && qty > 0 ? qty : 0;

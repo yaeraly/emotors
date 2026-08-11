@@ -6,6 +6,8 @@ import {
   branchSalesManagerReviewLineRowClass,
   draftFormLineTotal,
   draftFormOrderTotal,
+  getBranchSalesReviewApprovedQuantity,
+  getBranchSalesReviewRequestedQuantity,
   getDisplayQuantity,
   getDraftFormBranchPrice,
   getFrozenBranchPrice,
@@ -16,6 +18,7 @@ import {
   isPartiallyApprovedBranchPurchaseLine,
   requestLineTotal,
   requestOrderTotal,
+  sortBranchSalesManagerReviewItemsPartialFirst,
   sumBranchPurchaseApprovedQuantity,
   sumBranchPurchaseRequestedQuantity,
 } from './branch-purchase-request-display.util';
@@ -722,5 +725,25 @@ describe('branch sales manager review quantity summary and row styling', () => {
       }),
       'bg-red-50',
     );
+  });
+
+  it('sorts partial approvals first while preserving original order within each group', () => {
+    const items = [
+      { id: 'a', quantity: 10, approvedQuantity: 10, lineStatus: 'APPROVED' },
+      { id: 'b', quantity: 10, approvedQuantity: 6, lineStatus: 'PARTIALLY_APPROVED' },
+      { id: 'c', quantity: 5, approvedQuantity: 5, lineStatus: 'APPROVED' },
+      { id: 'd', quantity: 8, approvedQuantity: 3, lineStatus: 'PARTIALLY_APPROVED' },
+      { id: 'e', quantity: 10, approvedQuantity: 0, lineStatus: 'REJECTED' },
+    ];
+    assert.deepEqual(
+      sortBranchSalesManagerReviewItemsPartialFirst(items).map((item) => item.id),
+      ['b', 'd', 'a', 'c', 'e'],
+    );
+  });
+
+  it('exposes requested and approved quantities from persisted line fields', () => {
+    assert.equal(getBranchSalesReviewRequestedQuantity({ quantity: 10 }), 10);
+    assert.equal(getBranchSalesReviewApprovedQuantity({ approvedQuantity: 6 }), 6);
+    assert.equal(getBranchSalesReviewApprovedQuantity({ approvedQuantity: null }), 0);
   });
 });
