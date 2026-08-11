@@ -292,6 +292,7 @@ export class DistributionService {
     if (!options?.skipPermissionCheck && !canManageDistributionOrders(user)) {
       throw new ForbiddenException('Недостаточно прав для утверждения заказа распределения');
     }
+    const financialOnlyApprove = options?.skipStockReservation === true;
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
@@ -307,7 +308,7 @@ export class DistributionService {
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
-      if (!options?.skipStockReservation) {
+      if (!financialOnlyApprove) {
         for (const item of order.items) {
           const inventoryProduct = await this.resolveSourceInventoryProduct(
             tx,
@@ -343,61 +344,64 @@ export class DistributionService {
         }
       }
 
-      // Always reserve HQ FIFO layers on approve so shipment consumes the same layers.
-      for (const item of order.items) {
-        const inventoryProduct = await this.resolveSourceInventoryProduct(
-          tx,
-          order.sourceWarehouseId,
-          item.productId,
-          item.sku,
-        );
-        const branch = await tx.branch.findUnique({
-          where: { id: order.branchId },
-          select: { branchType: true, hqToBranchMarkupPercent: true },
-        });
-        const product = await tx.product.findFirst({
-          where: { id: inventoryProduct.productId, deletedAt: null },
-          select: { hqBranchWholesaleMarkupPercent: true },
-        });
-        const productMarkup = Number(product?.hqBranchWholesaleMarkupPercent ?? 0);
-        const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
-        const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
-        const isHqOwnedBranch = branch
-          ? this.pricingFifoService.isHqBranchType(branch.branchType)
-          : false;
-        try {
-          const reserved = await this.pricingFifoService.reserveFifoForDistribution(tx, {
-            productId: inventoryProduct.productId,
-            warehouseId: order.sourceWarehouseId,
-            quantity: item.quantity,
-            isHqOwnedBranch,
-            branchPricing: branch
-              ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
-              : undefined,
-            distributionOrderId: order.id,
-            distributionOrderItemId: item.id,
-            userId: user.id,
-            userRole: user.role,
-          });
-          if ('totalCostKgs' in reserved) {
-            const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
-            const preservedUnitPrice = Number(item.unitPrice);
-            const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
-            await tx.branchDistributionOrderItem.update({
-              where: { id: item.id },
-              data: {
-                unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
-                totalCost,
-                unitPrice: preservedUnitPrice,
-                totalPrice: preservedTotalPrice,
-                profit: roundDisplayMoney(preservedTotalPrice - totalCost),
-              },
-            });
-          }
-        } catch (error) {
-          throw new BadRequestException(
-            error instanceof Error ? error.message : `FIFO reservation failed for SKU ${item.sku}`,
+      // Reserve HQ FIFO layers on warehouse approve so shipment consumes the same layers.
+      // Branch Accountant invoice creation passes skipStockReservation — financial only, no FIFO.
+      if (!financialOnlyApprove) {
+        for (const item of order.items) {
+          const inventoryProduct = await this.resolveSourceInventoryProduct(
+            tx,
+            order.sourceWarehouseId,
+            item.productId,
+            item.sku,
           );
+          const branch = await tx.branch.findUnique({
+            where: { id: order.branchId },
+            select: { branchType: true, hqToBranchMarkupPercent: true },
+          });
+          const product = await tx.product.findFirst({
+            where: { id: inventoryProduct.productId, deletedAt: null },
+            select: { hqBranchWholesaleMarkupPercent: true },
+          });
+          const productMarkup = Number(product?.hqBranchWholesaleMarkupPercent ?? 0);
+          const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
+          const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
+          const isHqOwnedBranch = branch
+            ? this.pricingFifoService.isHqBranchType(branch.branchType)
+            : false;
+          try {
+            const reserved = await this.pricingFifoService.reserveFifoForDistribution(tx, {
+              productId: inventoryProduct.productId,
+              warehouseId: order.sourceWarehouseId,
+              quantity: item.quantity,
+              isHqOwnedBranch,
+              branchPricing: branch
+                ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
+                : undefined,
+              distributionOrderId: order.id,
+              distributionOrderItemId: item.id,
+              userId: user.id,
+              userRole: user.role,
+            });
+            if ('totalCostKgs' in reserved) {
+              const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
+              const preservedUnitPrice = Number(item.unitPrice);
+              const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
+              await tx.branchDistributionOrderItem.update({
+                where: { id: item.id },
+                data: {
+                  unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
+                  totalCost,
+                  unitPrice: preservedUnitPrice,
+                  totalPrice: preservedTotalPrice,
+                  profit: roundDisplayMoney(preservedTotalPrice - totalCost),
+                },
+              });
+            }
+          } catch (error) {
+            throw new BadRequestException(
+              error instanceof Error ? error.message : `FIFO reservation failed for SKU ${item.sku}`,
+            );
+          }
         }
       }
 
@@ -450,24 +454,26 @@ export class DistributionService {
         },
       });
 
-      const fifoAllocations = await tx.distributionFifoAllocation.findMany({
-        where: {
-          distributionOrderItem: { orderId: order.id },
-          status: { in: ['RESERVED', 'CONSUMED'] },
-        },
-        select: { totalCostKgs: true },
-      });
-      const transferReconciliation = reconcileBranchTransferCost(
-        fifoAllocations.map((row) => Number(row.totalCostKgs)),
-        totalCostSum,
-        'branch distribution approve',
-      );
-      if (!transferReconciliation.ok) {
-        logBranchTransferReconciliationFailure(this.logger, transferReconciliation, {
-          orderId: order.id,
-          warehouseId: order.sourceWarehouseId,
+      if (!financialOnlyApprove) {
+        const fifoAllocations = await tx.distributionFifoAllocation.findMany({
+          where: {
+            distributionOrderItem: { orderId: order.id },
+            status: { in: ['RESERVED', 'CONSUMED'] },
+          },
+          select: { totalCostKgs: true },
         });
-        throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
+        const transferReconciliation = reconcileBranchTransferCost(
+          fifoAllocations.map((row) => Number(row.totalCostKgs)),
+          totalCostSum,
+          'branch distribution approve',
+        );
+        if (!transferReconciliation.ok) {
+          logBranchTransferReconciliationFailure(this.logger, transferReconciliation, {
+            orderId: order.id,
+            warehouseId: order.sourceWarehouseId,
+          });
+          throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
+        }
       }
 
       const updated = await tx.branchDistributionOrder.update({

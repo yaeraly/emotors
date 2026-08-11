@@ -251,6 +251,7 @@ export class BranchAccountantService {
       throw new BadRequestException('Счёт уже доступен бухгалтеру');
     }
 
+    // Financial invoice only — no inventory balance or FIFO reservation (warehouse stage handles stock).
     await this.distributionService.approve(user, order.id, {
       skipStockReservation: true,
       skipPermissionCheck: true,
