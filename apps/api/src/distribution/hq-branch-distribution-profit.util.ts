@@ -1,4 +1,6 @@
 import { shouldTransferBranchPurchaseAtCost } from '../operations/branch-purchase-estimated-amount.util';
+import { resolveBranchPurchaseApprovedInvoiceLine } from '../operations/branch-purchase-invoice-lines.util';
+import type { BranchPurchaseInvoiceLineSource } from '../operations/branch-purchase-invoice-lines.util';
 import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
@@ -31,9 +33,14 @@ export function applyHqBranchInternalDistributionProfit<T extends HqBranchDistri
     return line;
   }
 
-  const totalPrice = roundDisplayMoney(line.totalPrice);
   const quantity = Math.max(0, Number(line.quantity ?? 0));
-  const unitPrice = quantity > 0 ? deriveDisplayUnitCost(totalPrice, quantity) : roundDisplayMoney(line.unitPrice);
+  const unitPriceFromLine = roundDisplayMoney(Number(line.unitPrice ?? 0));
+  let totalPrice = roundDisplayMoney(Number(line.totalPrice ?? 0));
+  if (totalPrice <= 0 && unitPriceFromLine > 0 && quantity > 0) {
+    totalPrice = roundDisplayMoney(unitPriceFromLine * quantity);
+  }
+  const unitPrice =
+    quantity > 0 ? deriveDisplayUnitCost(totalPrice, quantity) : unitPriceFromLine;
 
   return {
     ...line,
@@ -44,6 +51,31 @@ export function applyHqBranchInternalDistributionProfit<T extends HqBranchDistri
     unitCost: unitPrice,
     profit: 0,
   };
+}
+
+/** Reconcile a distribution line from authoritative approved BPR commercial snapshot. */
+export function applyHqBranchDistributionLineFromApprovedBpr<
+  T extends HqBranchDistributionMoneyLine,
+>(line: T, bprItem: BranchPurchaseInvoiceLineSource, branchType?: string | null): T {
+  const approved = resolveBranchPurchaseApprovedInvoiceLine({
+    ...bprItem,
+    branchType: branchType ?? bprItem.branchType ?? null,
+  });
+  if (approved.quantity <= 0 || approved.lineTotal <= 0) {
+    return applyHqBranchInternalDistributionProfit(line, branchType);
+  }
+  return applyHqBranchInternalDistributionProfit(
+    {
+      ...line,
+      quantity: approved.quantity,
+      unitPrice: approved.unitPrice,
+      totalPrice: approved.lineTotal,
+      unitCost: line.unitCost,
+      totalCost: line.totalCost,
+      profit: line.profit,
+    },
+    branchType,
+  );
 }
 
 export function sumHqBranchDistributionOrderTotals(
@@ -75,7 +107,11 @@ export function normalizeHqBranchDistributionOrderResponse<T extends Record<stri
   const items = Array.isArray(order.items)
     ? order.items.map((raw) => {
         const item = raw as HqBranchDistributionMoneyLine & Record<string, unknown>;
-        return applyHqBranchInternalDistributionProfit(item, branchType);
+        const normalized = applyHqBranchInternalDistributionProfit(item, branchType);
+        return {
+          ...normalized,
+          transferCostKgs: normalized.unitCost,
+        };
       })
     : order.items;
 

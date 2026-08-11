@@ -1,5 +1,5 @@
 /**
- * Repair HQ Branch distribution order profit (HQ Office → HQ Branch internal transfer = 0 profit).
+ * Repair HQ Branch distribution order transfer cost + profit.
  *
  * Usage:
  *   cd apps/api && npx tsx scripts/repair-hq-branch-distribution-profit.ts DO-BPR-1786458007921
@@ -7,6 +7,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import {
+  applyHqBranchDistributionLineFromApprovedBpr,
   applyHqBranchInternalDistributionProfit,
   sumHqBranchDistributionOrderTotals,
 } from '../src/distribution/hq-branch-distribution-profit.util';
@@ -48,28 +49,52 @@ async function main() {
     console.log('Order ID:', order.id);
     console.log('Branch:', order.branch.name, branchType);
     console.log('Status:', order.status);
-    console.log('Before totalAmount:', Number(order.totalAmount));
-    console.log('Before totalCost:', Number(order.totalCost));
-    console.log('Before totalProfit:', Number(order.totalProfit));
 
     if (!shouldTransferBranchPurchaseAtCost(branchType)) {
       console.log('SKIP: receiving branch is not HQ_BRANCH');
       continue;
     }
 
-    const normalizedLines = order.items.map((item) =>
-      applyHqBranchInternalDistributionProfit(
-        {
-          quantity: item.quantity,
-          unitPrice: Number(item.unitPrice),
-          unitCost: Number(item.unitCost),
-          totalPrice: Number(item.totalPrice),
-          totalCost: Number(item.totalCost),
-          profit: Number(item.profit),
-        },
-        branchType,
-      ),
+    const bpr = await prisma.branchPurchaseRequest.findFirst({
+      where: { convertedOrderId: order.id, deletedAt: null },
+      include: { items: { orderBy: { position: 'asc' } } },
+    });
+
+    const bprItemsByProduct = new Map(
+      (bpr?.items ?? []).map((row) => [row.productId, { ...row, branchType }]),
     );
+
+    console.log('Linked BPR:', bpr?.requestNumber ?? 'none');
+    console.log('Before totalAmount:', Number(order.totalAmount));
+    console.log('Before totalCost:', Number(order.totalCost));
+    console.log('Before totalProfit:', Number(order.totalProfit));
+
+    const normalizedLines = order.items.map((item) => {
+      const bprItem = bprItemsByProduct.get(item.productId);
+      const before = {
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        unitCost: Number(item.unitCost),
+        totalPrice: Number(item.totalPrice),
+        totalCost: Number(item.totalCost),
+        profit: Number(item.profit),
+      };
+      const normalized = bprItem
+        ? applyHqBranchDistributionLineFromApprovedBpr(before, bprItem, branchType)
+        : applyHqBranchInternalDistributionProfit(before, branchType);
+
+      console.log(
+        [
+          item.productName ?? item.sku,
+          `qty=${item.quantity}`,
+          `unitPrice=${before.unitPrice}`,
+          `transferCost ${before.unitCost}→${normalized.unitCost}`,
+          `profit ${before.profit}→${normalized.profit}`,
+        ].join(' | '),
+      );
+
+      return normalized;
+    });
 
     const totals = sumHqBranchDistributionOrderTotals(normalizedLines, branchType);
     console.log('After totalAmount:', totals.totalAmount);
@@ -82,21 +107,13 @@ async function main() {
     }
 
     await prisma.$transaction(async (tx) => {
-      for (const item of order.items) {
-        const normalized = applyHqBranchInternalDistributionProfit(
-          {
-            quantity: item.quantity,
-            unitPrice: Number(item.unitPrice),
-            unitCost: Number(item.unitCost),
-            totalPrice: Number(item.totalPrice),
-            totalCost: Number(item.totalCost),
-            profit: Number(item.profit),
-          },
-          branchType,
-        );
+      for (let index = 0; index < order.items.length; index++) {
+        const item = order.items[index]!;
+        const normalized = normalizedLines[index]!;
         await tx.branchDistributionOrderItem.update({
           where: { id: item.id },
           data: {
+            quantity: normalized.quantity,
             unitPrice: normalized.unitPrice,
             unitCost: normalized.unitCost,
             totalPrice: normalized.totalPrice,

@@ -146,7 +146,7 @@ import { resolveMasterProductForReceivingInTx } from './branch-receiving-product
 import { sanitizeDistributionOrderForBranchCeo } from './branch-ceo-distribution.presenter';
 import {
   applyHqBranchInternalDistributionProfit,
-  normalizeHqBranchDistributionOrderResponse,
+  isHqBranchInternalDistribution,
   sumHqBranchDistributionOrderTotals,
 } from './hq-branch-distribution-profit.util';
 import {
@@ -5453,7 +5453,32 @@ export class DistributionService {
   private toResponse(order: any, user?: AuthUser) {
     const transportCostKgs = Number(order.transportCostKgs ?? 0);
     const totalShipmentWeightKg = Number(order.totalShipmentWeightKg ?? 0);
-    const items = order.items?.map((item: any) => {
+    const branchType = order.branch?.branchType ?? null;
+
+    const baseItems =
+      order.items?.map((item: any) => ({
+        ...item,
+        quantity: Number(item.quantity),
+        unitCost: Number(item.unitCost),
+        unitPrice: Number(item.unitPrice),
+        totalCost: Number(item.totalCost),
+        totalPrice: Number(item.totalPrice),
+        profit: Number(item.profit),
+      })) ?? [];
+
+    const normalizedItems = baseItems.map((item: (typeof baseItems)[number]) =>
+      applyHqBranchInternalDistributionProfit(item, branchType),
+    );
+
+    const orderMoney = isHqBranchInternalDistribution(branchType)
+      ? sumHqBranchDistributionOrderTotals(normalizedItems, branchType)
+      : {
+          totalAmount: Number(order.totalAmount),
+          totalCost: Number(order.totalCost),
+          totalProfit: Number(order.totalProfit),
+        };
+
+    const items = normalizedItems.map((item: any) => {
       const unitCost = Number(item.unitCost);
       const transportExpenseAllocation = Number(item.transportExpenseAllocation ?? 0);
       const transportCostPerUnit = Number(item.transportCostPerUnit ?? 0);
@@ -5495,9 +5520,9 @@ export class DistributionService {
 
     const response = {
       ...order,
-      totalAmount: Number(order.totalAmount),
-      totalCost: Number(order.totalCost),
-      totalProfit: Number(order.totalProfit),
+      totalAmount: orderMoney.totalAmount,
+      totalCost: orderMoney.totalCost,
+      totalProfit: orderMoney.totalProfit,
       transportCostKgs,
       totalShipmentWeightKg,
       shipmentWeightSummary: this.buildShipmentWeightSummary({ ...order, items }),
@@ -5522,7 +5547,7 @@ export class DistributionService {
     if (user && !canViewProductCost(user)) {
       return sanitizeDistributionOrderForBranchCeo(response);
     }
-    return normalizeHqBranchDistributionOrderResponse(response, order.branch?.branchType);
+    return response;
   }
 
   private sanitizeReceivingForUser(user: AuthUser, receiving: any) {

@@ -65,6 +65,50 @@ describe('HQ Branch internal distribution profit', () => {
     assert.equal(totals.totalProfit, 400);
   });
 
+  it('reducer regression: zero unit transfer cost with approved unit price shows 2873.58 and profit 0', () => {
+    const line = applyHqBranchInternalDistributionProfit(
+      {
+        quantity: 2,
+        unitPrice: 2873.58,
+        unitCost: 0,
+        totalPrice: 5747.16,
+        totalCost: 0,
+        profit: 5747.16,
+      },
+      BranchType.HQ_BRANCH,
+    );
+
+    assert.equal(line.unitCost, 2873.58);
+    assert.equal(line.unitPrice, 2873.58);
+    assert.equal(line.profit, 0);
+    assert.equal(line.totalPrice, 5747.16);
+    assert.equal(line.totalCost, 5747.16);
+  });
+
+  it('API response sets transferCostKgs from normalized unit cost (not stale zero)', () => {
+    const normalized = normalizeHqBranchDistributionOrderResponse(
+      {
+        items: [
+          {
+            quantity: 2,
+            unitPrice: 2873.58,
+            unitCost: 0,
+            totalPrice: 5747.16,
+            totalCost: 0,
+            profit: 5747.16,
+            transferCostKgs: 0,
+          },
+        ],
+      },
+      BranchType.HQ_BRANCH,
+    );
+
+    const item = (normalized.items as Array<{ unitCost: number; transferCostKgs: number; profit: number }>)[0];
+    assert.equal(item.unitCost, 2873.58);
+    assert.equal(item.transferCostKgs, 2873.58);
+    assert.equal(item.profit, 0);
+  });
+
   it('API response normalizes stale HQ Branch profit on read', () => {
     const normalized = normalizeHqBranchDistributionOrderResponse(
       {
