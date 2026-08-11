@@ -58,7 +58,7 @@ export function getFrozenBranchPrice(item: BranchPurchaseRequestLinePricing): nu
   const raw = item.branchPurchasePriceKgs ?? item.resolvedBranchPriceKgs;
   if (raw == null) return null;
   const price = Number(raw);
-  if (!Number.isFinite(price)) return null;
+  if (!Number.isFinite(price) || price <= 0) return null;
   if (price === 0 && item.hasPricingPolicyAtSubmit === false) return null;
   if (price === 0 && item.pricingPolicyAvailable === false) return null;
   return price;

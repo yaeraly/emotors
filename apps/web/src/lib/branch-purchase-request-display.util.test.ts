@@ -612,26 +612,21 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('DRAFT list/detail branchOrderTotal uses qty × branch price (72490.50 not stale 63148.89)', () => {
+  it('DRAFT list/detail branchOrderTotal uses qty × branch price (72490.50 not stale 72823.21)', () => {
     const items = [
       {
         quantity: 2,
-        branchPurchasePriceKgs: 27853.64,
-        totalAmount: 50000,
-      },
-      {
-        quantity: 1,
-        branchPurchasePriceKgs: 16783.22,
-        totalAmount: 13148.89,
+        branchPurchasePriceKgs: 36245.25,
+        totalAmount: 72823.21,
       },
     ];
     assert.equal(
-      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 63148.89 }),
+      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 72823.21 }),
       72490.5,
     );
     assert.notEqual(
-      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 63148.89 }),
-      63148.89,
+      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 72823.21 }),
+      72823.21,
     );
   });
 });

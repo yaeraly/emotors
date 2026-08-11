@@ -66,19 +66,26 @@ describe('branch purchase branch display totals', () => {
     );
   });
 
-  it('does not use wholesale when resolved branch price exists', () => {
+  it('prefers saved resolvedBranchPriceKgs over display/wholesale snapshots', () => {
     assert.equal(
       resolveBranchPurchaseBranchUnitPriceKgs({
         resolvedBranchPriceKgs: 15000,
         branchPurchasePriceKgs: 8000,
+        wholesalePriceKgs: 9000,
       }),
-      8000,
+      15000,
     );
     assert.equal(
       resolveBranchPurchaseBranchUnitPriceKgs({
         resolvedBranchPriceKgs: 15000,
       }),
       15000,
+    );
+    assert.equal(
+      resolveBranchPurchaseBranchUnitPriceKgs({
+        wholesalePriceKgs: 36245.25,
+      }),
+      36245.25,
     );
   });
 
@@ -327,13 +334,13 @@ describe('branch purchase branch display totals', () => {
     assert.notEqual(sanitized.totalEstimatedAmount, commercialHeader);
   });
 
-  it('draft HQ_BRANCH list/detail uses qty × branch price (not stale FIFO header 63148.89)', () => {
-    // Open-draft form shows qty × Цена для филиала = 72490.50.
-    // Stale list header stored FIFO/payable mix = 63148.89.
+  it('draft HQ_BRANCH list/detail uses qty × saved branch price (72490.50 not stale live-cost 72823.21)', () => {
+    // Open-draft / saved Цена для филиала: 2 × 36245.25 = 72490.50
+    // Stale list header from live FIFO/cost refresh: 2 × 36411.605 ≈ 72823.21
     const request = {
       status: BranchPurchaseRequestStatus.DRAFT,
       reviewedAt: null,
-      totalEstimatedAmount: 63148.89,
+      totalEstimatedAmount: 72823.21,
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -341,23 +348,13 @@ describe('branch purchase branch display totals', () => {
           id: 'line-1',
           productId: 'prod-1',
           sku: 'A',
-          productName: 'Line A',
+          productName: 'Редуктор 18 зуб 4.3 кг',
           quantity: 2,
           unit: 'pcs',
-          estimatedLineProductCostKgs: 50000,
-          resolvedBranchPriceKgs: 27853.64,
-          totalAmount: 50000,
-        },
-        {
-          id: 'line-2',
-          productId: 'prod-2',
-          sku: 'B',
-          productName: 'Line B',
-          quantity: 1,
-          unit: 'pcs',
-          estimatedLineProductCostKgs: 13148.89,
-          resolvedBranchPriceKgs: 16783.22,
-          totalAmount: 13148.89,
+          estimatedLineProductCostKgs: 72823.21,
+          resolvedBranchPriceKgs: 36245.25,
+          wholesalePriceKgs: 36245.25,
+          totalAmount: 72823.21,
         },
       ],
     };
@@ -373,35 +370,22 @@ describe('branch purchase branch display totals', () => {
     assert.equal(
       resolveBranchPurchaseDraftLineTotalKgs({
         quantity: 2,
-        estimatedLineProductCostKgs: 50000,
-        resolvedBranchPriceKgs: 27853.64,
+        estimatedLineProductCostKgs: 72823.21,
+        resolvedBranchPriceKgs: 36245.25,
+        wholesalePriceKgs: 36245.25,
+        totalAmount: 72823.21,
         branchType: 'HQ_BRANCH',
       }),
-      55707.28,
-    );
-    assert.equal(
-      resolveBranchPurchaseDraftLineTotalKgs({
-        quantity: 1,
-        estimatedLineProductCostKgs: 13148.89,
-        resolvedBranchPriceKgs: 16783.22,
-        totalAmount: 13148.89,
-        branchType: 'HQ_BRANCH',
-      }),
-      16783.22,
+      72490.5,
     );
     assert.equal(
       sumBranchPurchaseDraftLineTotalsKgs([
         {
           quantity: 2,
-          estimatedLineProductCostKgs: 50000,
-          resolvedBranchPriceKgs: 27853.64,
-          branchType: 'HQ_BRANCH',
-        },
-        {
-          quantity: 1,
-          estimatedLineProductCostKgs: 13148.89,
-          resolvedBranchPriceKgs: 16783.22,
-          totalAmount: 13148.89,
+          estimatedLineProductCostKgs: 72823.21,
+          resolvedBranchPriceKgs: 36245.25,
+          wholesalePriceKgs: 36245.25,
+          totalAmount: 72823.21,
           branchType: 'HQ_BRANCH',
         },
       ]),
@@ -410,11 +394,52 @@ describe('branch purchase branch display totals', () => {
     assert.equal(full.totalEstimatedAmount, 72490.5);
     assert.equal(sanitized.totalEstimatedAmount, 72490.5);
     assert.equal(lineSum, 72490.5);
-    assert.notEqual(sanitized.totalEstimatedAmount, 63148.89);
-    assert.notEqual(
-      Number(request.items[0]!.estimatedLineProductCostKgs) +
-        Number(request.items[1]!.estimatedLineProductCostKgs),
-      sanitized.totalEstimatedAmount,
+    assert.notEqual(sanitized.totalEstimatedAmount, 72823.21);
+    assert.equal(
+      (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
+      36245.25,
+    );
+  });
+
+  it('draft list/detail stay equal after quantity edit (shared calculator)', () => {
+    const baseItem = {
+      id: 'line-1',
+      productId: 'prod-1',
+      sku: 'A',
+      productName: 'Line A',
+      quantity: 2,
+      unit: 'pcs',
+      resolvedBranchPriceKgs: 36245.25,
+      wholesalePriceKgs: 36245.25,
+      totalAmount: 72490.5,
+    };
+    const before = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.DRAFT,
+        reviewedAt: null,
+        totalEstimatedAmount: 72490.5,
+        transportCostKgs: 0,
+        branch: { branchType: 'HQ_BRANCH' },
+        items: [baseItem],
+      },
+      true,
+    );
+    const after = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.DRAFT,
+        reviewedAt: null,
+        totalEstimatedAmount: 72490.5,
+        transportCostKgs: 0,
+        branch: { branchType: 'HQ_BRANCH' },
+        items: [{ ...baseItem, quantity: 3, totalAmount: 72490.5 }],
+      },
+      true,
+    );
+    assert.equal(before.totalEstimatedAmount, 72490.5);
+    assert.equal(after.totalEstimatedAmount, 108735.75);
+    assert.equal(
+      (after.items[0] as { totalAmount?: number }).totalAmount,
+      after.totalEstimatedAmount,
     );
   });
 

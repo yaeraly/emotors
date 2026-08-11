@@ -4,8 +4,12 @@ import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cos
 export function resolveBranchPurchaseBranchUnitPriceKgs(item: {
   branchPurchasePriceKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
+  /** Create/save snapshot of Цена для филиала (DB column; same value written at draft save). */
+  wholesalePriceKgs?: unknown;
 }): number | null {
-  const raw = item.branchPurchasePriceKgs ?? item.resolvedBranchPriceKgs;
+  // Prefer explicit saved branch-price snapshot fields. Never invent from FIFO/catalog here.
+  const raw =
+    item.resolvedBranchPriceKgs ?? item.branchPurchasePriceKgs ?? item.wholesalePriceKgs;
   if (raw == null) return null;
   const price = Number(raw);
   if (!Number.isFinite(price) || price <= 0) return null;
@@ -25,6 +29,7 @@ export function resolveBranchPurchaseCommercialLineTotalKgs(item: {
   quantity: number;
   branchPurchasePriceKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
+  wholesalePriceKgs?: unknown;
 }): number {
   const quantity = resolveBranchPurchaseBranchDisplayQuantity(item);
   const unitPrice = resolveBranchPurchaseBranchUnitPriceKgs(item);
@@ -39,6 +44,7 @@ export function sumBranchPurchaseCommercialLineTotalsKgs(
     quantity: number;
     branchPurchasePriceKgs?: unknown;
     resolvedBranchPriceKgs?: unknown;
+    wholesalePriceKgs?: unknown;
   }>,
 ): number {
   return roundDisplayMoney(
@@ -69,14 +75,16 @@ export function resolveBranchPurchaseBranchLineTotalKgs(item: {
 
 /**
  * Authoritative draft line Сумма (before HQ Sales approval).
- * Invariant: displayed quantity × displayed Цена для филиала = line Сумма.
- * Never use FIFO/cost payable for draft list/detail totals (that produced stale
- * 63148.89 while the open-draft form correctly showed qty × branch price = 72490.50).
+ * Invariant: draftQuantity × saved/displayed Цена для филиала = line Сумма.
+ *
+ * Never use live FIFO/catalog cost for draft list/detail (that produced stale
+ * 72823.21 while saved qty × branch price correctly showed 72490.50).
  */
 export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   quantity: number;
   branchPurchasePriceKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
+  wholesalePriceKgs?: unknown;
   totalAmount?: unknown;
   estimatedLineProductCostKgs?: unknown;
   branchType?: string | null;
@@ -86,6 +94,7 @@ export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   if (commercial > 0) {
     return commercial;
   }
+  // Only when no saved branch unit price exists — keep previously persisted line total.
   const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
   return stored > 0 ? stored : 0;
 }

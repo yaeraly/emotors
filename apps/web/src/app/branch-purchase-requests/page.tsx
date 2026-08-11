@@ -211,6 +211,18 @@ function isReviewedPurchaseRequest(request: BranchPurchaseRequest): boolean {
 
 /** Same total rules as draft/order detail — never show a stale header alone. */
 function branchPurchaseListAmount(request: BranchPurchaseRequest): number {
+  // Draft list must consume the same authoritative total the API already computed
+  // from saved draft items (qty × Цена для филиала). Do not rebuild from other fields.
+  if (request.status === 'DRAFT') {
+    const apiTotal = Number(request.totalEstimatedAmount ?? 0);
+    const fromItems = branchOrderTotal(request.items, {
+      requestStatus: request.status,
+      reviewed: false,
+      totalEstimatedAmount: request.totalEstimatedAmount,
+    });
+    // Prefer item-sum when API items carry line totals; otherwise trust header.
+    return fromItems > 0 ? fromItems : apiTotal;
+  }
   return branchOrderTotal(request.items, {
     requestStatus: request.status,
     reviewed: isReviewedPurchaseRequest(request),

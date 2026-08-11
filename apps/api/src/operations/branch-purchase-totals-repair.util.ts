@@ -94,7 +94,10 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
         (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
     };
     const repairedKgs = isDraft
-      ? resolveBranchPurchaseDraftLineTotalKgs(lineInput)
+      ? resolveBranchPurchaseDraftLineTotalKgs({
+          ...lineInput,
+          wholesalePriceKgs: row.wholesalePriceKgs,
+        })
       : computeBranchPurchaseHqReviewLineAmountKgs(lineInput);
     const previousKgs = roundDisplayMoney(Number(row.totalAmount ?? 0));
     const reviewed =
@@ -120,6 +123,7 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
           quantity: Number(row.quantity ?? 0),
           branchPurchasePriceKgs: row.branchPurchasePriceKgs,
           resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+          wholesalePriceKgs: row.wholesalePriceKgs,
           totalAmount: repairedLineAmounts.get(String(row.id)) ?? row.totalAmount,
           estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
           branchType,

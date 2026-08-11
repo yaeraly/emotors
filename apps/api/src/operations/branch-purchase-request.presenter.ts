@@ -46,6 +46,7 @@ function resolveDraftLinePricingContext(
     quantity: Number(item.quantity ?? 0),
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    wholesalePriceKgs: item.wholesalePriceKgs,
     totalAmount: item.totalAmount,
     estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
     branchType,
@@ -448,6 +449,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
         const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
           branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+          wholesalePriceKgs: item.wholesalePriceKgs,
         });
         const fifoLineTotal = roundDisplayMoney(
           Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
@@ -457,6 +459,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
             quantity: item.quantity,
             branchPurchasePriceKgs: branchUnitPrice,
             resolvedBranchPriceKgs: branchUnitPrice,
+            wholesalePriceKgs: item.wholesalePriceKgs,
             totalAmount: item.totalAmount,
             estimatedLineProductCostKgs:
               fullItem?.estimatedLineProductCostKgs ?? item.estimatedLineProductCostKgs,
@@ -576,6 +579,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     const branchUnitPrice = resolveBranchPurchaseBranchUnitPriceKgs({
       branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
       resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
+      wholesalePriceKgs: item.wholesalePriceKgs,
     });
     const lineTotal = isDraft
       ? resolveBranchPurchaseDraftLineTotalKgs(
@@ -584,6 +588,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
               quantity: item.quantity,
               branchPurchasePriceKgs: branchUnitPrice,
               resolvedBranchPriceKgs: branchUnitPrice,
+              wholesalePriceKgs: item.wholesalePriceKgs,
               totalAmount: item.totalAmount,
               estimatedLineProductCostKgs:
                 fullItem?.estimatedLineProductCostKgs ?? item.estimatedLineProductCostKgs,

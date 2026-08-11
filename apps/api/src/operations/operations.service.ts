@@ -221,14 +221,20 @@ export class OperationsService {
     const hideFinancialCost = !canViewProductCost(user);
     const presentedRows = await Promise.all(
       rows.map(async (row) => {
-        const transferAtCost = shouldTransferBranchPurchaseAtCost(row.branch?.branchType);
-        const needsAtCostRefresh =
-          transferAtCost && row.status === BranchPurchaseRequestStatus.DRAFT;
+        // Draft list must use saved draft prices only — never live FIFO enrich that can
+        // rewrite Сумма (72823.21 live cost vs 72490.50 saved qty × branch price).
         const enriched =
-          !hideSensitive || needsAtCostRefresh
+          !hideSensitive && row.status !== BranchPurchaseRequestStatus.DRAFT
             ? await this.enrichBranchPurchaseRequestWithHqStock(user, row)
             : row;
-        return presentBranchPurchaseRequestForUser(enriched, { hideSensitive, hideFinancialCost });
+        const presented = presentBranchPurchaseRequestForUser(enriched, {
+          hideSensitive,
+          hideFinancialCost,
+        });
+        if (row.status === BranchPurchaseRequestStatus.DRAFT) {
+          await this.syncStaleDraftPurchaseTotalsIfNeeded(row, presented);
+        }
+        return presented;
       }),
     );
     return presentedRows;
@@ -283,9 +289,11 @@ export class OperationsService {
       totalProductCostKgs?: number;
       hqStockStatus?: 'loaded' | 'unavailable';
     } =
-      !hideSensitive || transferAtCost
-        ? await this.enrichBranchPurchaseRequestWithHqStock(user, request)
-        : request;
+      request.status === BranchPurchaseRequestStatus.DRAFT
+        ? request
+        : !hideSensitive || transferAtCost
+          ? await this.enrichBranchPurchaseRequestWithHqStock(user, request)
+          : request;
     if (request.convertedOrderId) {
       const linkedOrder = await this.prisma.branchDistributionOrder.findFirst({
         where: { id: request.convertedOrderId, deletedAt: null },
@@ -298,7 +306,11 @@ export class OperationsService {
         };
       }
     }
-    return presentBranchPurchaseRequestForUser(enriched, { hideSensitive, hideFinancialCost });
+    const presented = presentBranchPurchaseRequestForUser(enriched, { hideSensitive, hideFinancialCost });
+    if (request.status === BranchPurchaseRequestStatus.DRAFT) {
+      await this.syncStaleDraftPurchaseTotalsIfNeeded(request, presented);
+    }
+    return presented;
   }
 
   async branchProductOptions(
@@ -5551,6 +5563,73 @@ export class OperationsService {
       hideSensitive,
       hideFinancialCost,
     });
+  }
+
+  /**
+   * Persist draft header/line totals when they drift from qty × saved Цена для филиала.
+   * Keeps list `totalEstimatedAmount` synchronized with open-draft detail totals.
+   */
+  private async syncStaleDraftPurchaseTotalsIfNeeded(
+    stored: {
+      id: string;
+      status: BranchPurchaseRequestStatus;
+      totalEstimatedAmount?: unknown;
+      items: Array<Record<string, unknown>>;
+      branch?: { branchType?: string | null } | null;
+    },
+    presented: { totalEstimatedAmount?: unknown; items?: Array<Record<string, unknown>> },
+  ) {
+    if (stored.status !== BranchPurchaseRequestStatus.DRAFT) return;
+
+    const branchType = stored.branch?.branchType ?? null;
+    const authoritativeTotal = roundDisplayMoney(Number(presented.totalEstimatedAmount ?? 0));
+    const storedHeader = roundDisplayMoney(Number(stored.totalEstimatedAmount ?? 0));
+    if (authoritativeTotal <= 0) return;
+
+    const presentedItems = Array.isArray(presented.items) ? presented.items : [];
+    const storedById = new Map(
+      stored.items
+        .filter((item) => item.id)
+        .map((item) => [String(item.id), item]),
+    );
+
+    const lineRepairs: Array<{ id: string; totalAmount: number }> = [];
+    for (const presentedItem of presentedItems) {
+      const id = presentedItem.id != null ? String(presentedItem.id) : '';
+      if (!id) continue;
+      const storedItem = storedById.get(id);
+      if (!storedItem) continue;
+      const nextTotal = resolveBranchPurchaseDraftLineTotalKgs({
+        quantity: Number(storedItem.quantity ?? presentedItem.quantity ?? 0),
+        resolvedBranchPriceKgs: storedItem.resolvedBranchPriceKgs,
+        wholesalePriceKgs: storedItem.wholesalePriceKgs,
+        branchPurchasePriceKgs: presentedItem.branchPurchasePriceKgs,
+        totalAmount: storedItem.totalAmount,
+        branchType,
+      });
+      const prevTotal = roundDisplayMoney(Number(storedItem.totalAmount ?? 0));
+      if (nextTotal > 0 && Math.abs(nextTotal - prevTotal) > 0.009) {
+        lineRepairs.push({ id, totalAmount: nextTotal });
+      }
+    }
+
+    const needsHeaderRepair = Math.abs(authoritativeTotal - storedHeader) > 0.009;
+    if (!needsHeaderRepair && lineRepairs.length === 0) return;
+
+    await Promise.all(
+      lineRepairs.map((repair) =>
+        this.prisma.branchPurchaseRequestItem.update({
+          where: { id: repair.id },
+          data: { totalAmount: repair.totalAmount },
+        }),
+      ),
+    );
+    if (needsHeaderRepair || lineRepairs.length > 0) {
+      await this.prisma.branchPurchaseRequest.update({
+        where: { id: stored.id },
+        data: { totalEstimatedAmount: authoritativeTotal },
+      });
+    }
   }
 
   private canManageWarehouse(user: AuthUser) {
