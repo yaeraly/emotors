@@ -1,5 +1,4 @@
 import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
-import { resolveBranchPurchaseLinePayableAmount } from './branch-purchase-estimated-amount.util';
 
 /** CEO-approved branch unit price frozen on the order line (never wholesale/cost). */
 export function resolveBranchPurchaseBranchUnitPriceKgs(item: {
@@ -69,9 +68,10 @@ export function resolveBranchPurchaseBranchLineTotalKgs(item: {
 }
 
 /**
- * Authoritative draft line Сумма — same rules as Branch Manager draft detail.
- * HQ_BRANCH: FIFO payable when known; otherwise qty × frozen branch price.
- * Never prefer a stale stored line total over a fresh payable/commercial amount.
+ * Authoritative draft line Сумма (before HQ Sales approval).
+ * Invariant: displayed quantity × displayed Цена для филиала = line Сумма.
+ * Never use FIFO/cost payable for draft list/detail totals (that produced stale
+ * 63148.89 while the open-draft form correctly showed qty × branch price = 72490.50).
  */
 export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   quantity: number;
@@ -82,22 +82,6 @@ export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   branchType?: string | null;
   hasPricingPolicy?: boolean | null;
 }): number {
-  const estimatedLineProductCostKgs =
-    item.estimatedLineProductCostKgs == null
-      ? null
-      : Number(item.estimatedLineProductCostKgs);
-  const payable = resolveBranchPurchaseLinePayableAmount({
-    branchType: item.branchType,
-    quantity: item.quantity,
-    estimatedLineProductCostKgs: Number.isFinite(estimatedLineProductCostKgs)
-      ? estimatedLineProductCostKgs
-      : null,
-    unitPriceKgs: resolveBranchPurchaseBranchUnitPriceKgs(item),
-    hasPricingPolicy: item.hasPricingPolicy ?? true,
-  });
-  if (payable > 0) {
-    return payable;
-  }
   const commercial = resolveBranchPurchaseCommercialLineTotalKgs(item);
   if (commercial > 0) {
     return commercial;

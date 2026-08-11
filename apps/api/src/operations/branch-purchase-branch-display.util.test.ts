@@ -327,7 +327,9 @@ describe('branch purchase branch display totals', () => {
     assert.notEqual(sanitized.totalEstimatedAmount, commercialHeader);
   });
 
-  it('draft HQ_BRANCH list/detail parity when one line has FIFO snapshot but stale stored totalAmount', () => {
+  it('draft HQ_BRANCH list/detail uses qty × branch price (not stale FIFO header 63148.89)', () => {
+    // Open-draft form shows qty × Цена для филиала = 72490.50.
+    // Stale list header stored FIFO/payable mix = 63148.89.
     const request = {
       status: BranchPurchaseRequestStatus.DRAFT,
       reviewedAt: null,
@@ -342,9 +344,9 @@ describe('branch purchase branch display totals', () => {
           productName: 'Line A',
           quantity: 2,
           unit: 'pcs',
-          estimatedLineProductCostKgs: 55707.28,
+          estimatedLineProductCostKgs: 50000,
           resolvedBranchPriceKgs: 27853.64,
-          totalAmount: 55707.28,
+          totalAmount: 50000,
         },
         {
           id: 'line-2',
@@ -353,9 +355,9 @@ describe('branch purchase branch display totals', () => {
           productName: 'Line B',
           quantity: 1,
           unit: 'pcs',
-          estimatedLineProductCostKgs: 16783.22,
-          resolvedBranchPriceKgs: 7441.61,
-          totalAmount: 7441.61,
+          estimatedLineProductCostKgs: 13148.89,
+          resolvedBranchPriceKgs: 16783.22,
+          totalAmount: 13148.89,
         },
       ],
     };
@@ -368,38 +370,52 @@ describe('branch purchase branch display totals', () => {
       ),
     );
 
-    assert.equal(resolveBranchPurchaseDraftLineTotalKgs({
-      quantity: 2,
-      estimatedLineProductCostKgs: 55707.28,
-      resolvedBranchPriceKgs: 27853.64,
-      branchType: 'HQ_BRANCH',
-    }), 55707.28);
-    assert.equal(resolveBranchPurchaseDraftLineTotalKgs({
-      quantity: 1,
-      estimatedLineProductCostKgs: 16783.22,
-      resolvedBranchPriceKgs: 7441.61,
-      totalAmount: 7441.61,
-      branchType: 'HQ_BRANCH',
-    }), 16783.22);
-    assert.equal(sumBranchPurchaseDraftLineTotalsKgs([
-      {
+    assert.equal(
+      resolveBranchPurchaseDraftLineTotalKgs({
         quantity: 2,
-        estimatedLineProductCostKgs: 55707.28,
+        estimatedLineProductCostKgs: 50000,
         resolvedBranchPriceKgs: 27853.64,
         branchType: 'HQ_BRANCH',
-      },
-      {
+      }),
+      55707.28,
+    );
+    assert.equal(
+      resolveBranchPurchaseDraftLineTotalKgs({
         quantity: 1,
-        estimatedLineProductCostKgs: 16783.22,
-        resolvedBranchPriceKgs: 7441.61,
-        totalAmount: 7441.61,
+        estimatedLineProductCostKgs: 13148.89,
+        resolvedBranchPriceKgs: 16783.22,
+        totalAmount: 13148.89,
         branchType: 'HQ_BRANCH',
-      },
-    ]), 72490.5);
+      }),
+      16783.22,
+    );
+    assert.equal(
+      sumBranchPurchaseDraftLineTotalsKgs([
+        {
+          quantity: 2,
+          estimatedLineProductCostKgs: 50000,
+          resolvedBranchPriceKgs: 27853.64,
+          branchType: 'HQ_BRANCH',
+        },
+        {
+          quantity: 1,
+          estimatedLineProductCostKgs: 13148.89,
+          resolvedBranchPriceKgs: 16783.22,
+          totalAmount: 13148.89,
+          branchType: 'HQ_BRANCH',
+        },
+      ]),
+      72490.5,
+    );
     assert.equal(full.totalEstimatedAmount, 72490.5);
     assert.equal(sanitized.totalEstimatedAmount, 72490.5);
     assert.equal(lineSum, 72490.5);
     assert.notEqual(sanitized.totalEstimatedAmount, 63148.89);
+    assert.notEqual(
+      Number(request.items[0]!.estimatedLineProductCostKgs) +
+        Number(request.items[1]!.estimatedLineProductCostKgs),
+      sanitized.totalEstimatedAmount,
+    );
   });
 
   it('draft franchise list total equals sum of qty × branch price rows', () => {

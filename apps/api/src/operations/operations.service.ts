@@ -107,6 +107,11 @@ import {
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import {
+  resolveBranchPurchaseCommercialLineTotalKgs,
+  resolveBranchPurchaseDraftLineTotalKgs,
+  sumBranchPurchaseDraftLineTotalsKgs,
+} from './branch-purchase-branch-display.util';
+import {
   assertBranchPurchaseBranchContext,
   assertBranchPurchaseRequestItems,
 } from './branch-purchase-request.validation';
@@ -532,14 +537,16 @@ export class OperationsService {
     }
     this.assertBranchPurchaseRequestItems(dto.items);
     const branchWarehouseId = dto.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(branchId));
-    const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? []);
-    const itemCreates = resolvedItems.map((item, index) =>
-      toBranchPurchaseRequestItemCreate(item, index + 1),
-    );
     const status =
       dto.status === BranchPurchaseRequestStatus.DRAFT
         ? BranchPurchaseRequestStatus.DRAFT
         : BranchPurchaseRequestStatus.SUBMITTED_TO_HQ;
+    const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? [], {
+      persistDraftCommercialTotals: status === BranchPurchaseRequestStatus.DRAFT,
+    });
+    const itemCreates = resolvedItems.map((item, index) =>
+      toBranchPurchaseRequestItemCreate(item, index + 1),
+    );
     const assignedHqWarehouseId =
       status === BranchPurchaseRequestStatus.DRAFT
         ? (await this.getBranchAssignedHqWarehouseId(branchId))
@@ -688,7 +695,9 @@ export class OperationsService {
 
     const branchWarehouseId = dto.branchWarehouseId ?? existing.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(existing.branchId));
     const resolvedItems = dto.items
-      ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items)
+      ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items, {
+          persistDraftCommercialTotals: true,
+        })
       : undefined;
     const itemCreates = resolvedItems?.map((item, index) =>
       toBranchPurchaseRequestItemCreate(item, index + 1),
@@ -5561,6 +5570,7 @@ export class OperationsService {
     branchId: string,
     branchWarehouseId: string | null,
     items: any[],
+    options?: { persistDraftCommercialTotals?: boolean },
   ) {
     if (!items.length) throw new BadRequestException('At least one product line is required');
     if (items.some((item) => !item?.productId)) {
@@ -5627,13 +5637,23 @@ export class OperationsService {
         }
         // Authoritative create/submit line total (shared with HQ/Branch/BA stages):
         // HQ_BRANCH = FIFO payable snapshot; franchise/dealer = qty × frozen branch price.
-        const totalAmount = resolveBranchPurchaseLinePayableAmount({
+        // DRAFT Branch Manager list/open form must use qty × Цена для филиала (not FIFO).
+        const payableAmount = resolveBranchPurchaseLinePayableAmount({
           branchType: branch?.branchType,
           quantity,
           estimatedLineProductCostKgs,
           unitPriceKgs: branchPurchasePriceKgs,
           hasPricingPolicy: pricing.hasPricingPolicy,
         });
+        const commercialAmount = resolveBranchPurchaseCommercialLineTotalKgs({
+          quantity,
+          branchPurchasePriceKgs,
+          resolvedBranchPriceKgs: pricing.resolvedBranchPriceKgs,
+        });
+        const totalAmount =
+          options?.persistDraftCommercialTotals && commercialAmount > 0
+            ? commercialAmount
+            : payableAmount;
         const stockMetrics = hqStockMetrics.get(product.id);
 
         return {
@@ -5883,6 +5903,7 @@ export class OperationsService {
         (request as { convertedOrderId?: string | null }).convertedOrderId,
       );
       const transferAtCost = shouldTransferBranchPurchaseAtCost(branch?.branchType);
+      const isDraftRequest = request.status === BranchPurchaseRequestStatus.DRAFT;
       const staleCostRepairs: Array<{
         itemId: string;
         estimatedLineProductCostKgs: number;
@@ -5944,21 +5965,36 @@ export class OperationsService {
             estimatedLineProductCostKgs = resolvedLineCost.estimatedLineProductCostKgs;
             estimatedUnitCost = resolvedLineCost.estimatedUnitCost;
 
-            const payableAmount = resolveBranchPurchaseLinePayableAmount({
-              branchType: branch?.branchType,
-              quantity: lineQuantity,
-              estimatedLineProductCostKgs,
-              unitPriceKgs: Number(
-                (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ??
-                  (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs ??
-                  0,
-              ),
-              hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
-            });
-            if (payableAmount > 0) {
-              totalAmount = payableAmount;
-              if (approved != null && approved > 0) {
-                approvedLineTotalKgs = payableAmount;
+            const unitPriceKgs = Number(
+              (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ??
+                (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs ??
+                0,
+            );
+            // Draft Branch Manager list/open form: qty × Цена для филиала.
+            // After submit/review: HQ_BRANCH payable stays FIFO inventory cost.
+            if (isDraftRequest) {
+              totalAmount = resolveBranchPurchaseDraftLineTotalKgs({
+                quantity: lineQuantity,
+                branchPurchasePriceKgs: unitPriceKgs,
+                resolvedBranchPriceKgs: unitPriceKgs,
+                totalAmount: storedTotalAmount,
+                estimatedLineProductCostKgs,
+                branchType: branch?.branchType,
+                hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
+              });
+            } else {
+              const payableAmount = resolveBranchPurchaseLinePayableAmount({
+                branchType: branch?.branchType,
+                quantity: lineQuantity,
+                estimatedLineProductCostKgs,
+                unitPriceKgs,
+                hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
+              });
+              if (payableAmount > 0) {
+                totalAmount = payableAmount;
+                if (approved != null && approved > 0) {
+                  approvedLineTotalKgs = payableAmount;
+                }
               }
             }
 
@@ -6013,20 +6049,33 @@ export class OperationsService {
       const totalProductCostKgs = sumDisplayMoneyTotals(
         enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
       );
-      const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
-        branchType: branch?.branchType,
-        totalProductCostKgs,
-        storedEstimatedAmountKgs: sumDisplayMoneyTotals(
-          enrichedItems.map((item) => Number(item.totalAmount ?? 0)),
-        ),
-      });
+      const draftCommercialTotal = sumBranchPurchaseDraftLineTotalsKgs(
+        enrichedItems.map((item) => ({
+          quantity: Number(item.quantity ?? 0),
+          branchPurchasePriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
+          resolvedBranchPriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
+          totalAmount: item.totalAmount,
+          estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+          branchType: branch?.branchType,
+        })),
+      );
+      const totalEstimatedAmount = isDraftRequest
+        ? draftCommercialTotal
+        : resolveBranchPurchaseEstimatedAmountKgs({
+            branchType: branch?.branchType,
+            totalProductCostKgs,
+            storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+              enrichedItems.map((item) => Number(item.totalAmount ?? 0)),
+            ),
+          });
 
-      if (staleCostRepairs.length > 0 || transferAtCost) {
+      if (staleCostRepairs.length > 0 || transferAtCost || isDraftRequest) {
         const storedEstimated = roundDisplayMoney(
           Number((request as { totalEstimatedAmount?: unknown }).totalEstimatedAmount ?? 0),
         );
         const needsHeaderRepair =
-          transferAtCost && Math.abs(storedEstimated - totalEstimatedAmount) > 0.009;
+          Math.abs(storedEstimated - totalEstimatedAmount) > 0.009 &&
+          (isDraftRequest || transferAtCost);
 
         if (staleCostRepairs.length > 0 || needsHeaderRepair) {
           await Promise.all(
@@ -6061,7 +6110,9 @@ export class OperationsService {
                 oldAmount: storedEstimated,
                 correctedAmount: totalEstimatedAmount,
                 difference: roundDisplayMoney(totalEstimatedAmount - storedEstimated),
-                reason: 'estimated_amount_aligned_to_fifo_product_cost',
+                reason: isDraftRequest
+                  ? 'draft_estimated_amount_aligned_to_branch_price_times_qty'
+                  : 'estimated_amount_aligned_to_fifo_product_cost',
                 repairedLineCount: staleCostRepairs.length,
                 itemIds: staleCostRepairs.map((row) => row.itemId),
                 timestamp: new Date().toISOString(),

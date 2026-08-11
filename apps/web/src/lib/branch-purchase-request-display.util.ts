@@ -49,6 +49,10 @@ export type BranchOrderTotalOptions = {
   totalEstimatedAmount?: number | null;
 };
 
+export function isDraftBranchPurchaseRequest(status?: string | null): boolean {
+  return status === 'DRAFT';
+}
+
 /** CEO-approved branch price frozen on the line (never wholesale/retail/cost). */
 export function getFrozenBranchPrice(item: BranchPurchaseRequestLinePricing): number | null {
   const raw = item.branchPurchasePriceKgs ?? item.resolvedBranchPriceKgs;
@@ -216,12 +220,24 @@ export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePric
 
 /**
  * Authoritative branch order line total — same rules as HQ Sales after review.
- * Before HQ Sales review, prefer persisted API totalAmount when present (FIFO payable for HQ_BRANCH).
+ * DRAFT: always displayed quantity × Цена для филиала (matches open-draft form).
+ * Before HQ Sales review (submitted): prefer persisted API totalAmount when present.
  */
 export function branchOrderLineTotal(
   item: BranchPurchaseRequestLinePricing,
   options?: BranchOrderTotalOptions,
 ): number {
+  if (isDraftBranchPurchaseRequest(options?.requestStatus)) {
+    const price = getFrozenBranchPrice(item);
+    const qty = getDisplayQuantity(item);
+    if (price != null && qty > 0) {
+      return roundMoney(price * qty);
+    }
+    if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+      return roundMoney(Number(item.totalAmount));
+    }
+    return 0;
+  }
   const pendingHqReview =
     options?.requestStatus != null && isPendingHqSalesReviewRequest(options.requestStatus);
   if (pendingHqReview && !options?.reviewed) {

@@ -611,6 +611,29 @@ describe('branch purchase request draft form totals', () => {
       65588.93,
     );
   });
+
+  it('DRAFT list/detail branchOrderTotal uses qty × branch price (72490.50 not stale 63148.89)', () => {
+    const items = [
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 27853.64,
+        totalAmount: 50000,
+      },
+      {
+        quantity: 1,
+        branchPurchasePriceKgs: 16783.22,
+        totalAmount: 13148.89,
+      },
+    ];
+    assert.equal(
+      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 63148.89 }),
+      72490.5,
+    );
+    assert.notEqual(
+      branchOrderTotal(items, { requestStatus: 'DRAFT', totalEstimatedAmount: 63148.89 }),
+      63148.89,
+    );
+  });
 });
 
 describe('branch purchase request display util smoke', () => {
