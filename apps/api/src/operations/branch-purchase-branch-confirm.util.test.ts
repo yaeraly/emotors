@@ -4,8 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import {
-  buildBranchPurchaseConfirmDistributionLines,
-  sumBranchPurchaseConfirmDistributionCostKgs,
+  allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot,
+  buildBranchPurchaseCommercialAgreementLines,
+  sumBranchPurchaseCommercialAgreementInventoryCostKgs,
+  sumBranchPurchaseCommercialAgreementTotalKgs,
   sumPersistedApprovedInventoryCostKgs,
 } from './branch-purchase-branch-confirm.util';
 
@@ -28,7 +30,6 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     approvedLineTotalKgs: 1000,
     totalAmount: 1000,
     estimatedUnitCost: 150,
-    // Persisted at HQ Sales review — live FIFO preview may report Available: 0 here.
     estimatedLineProductCostKgs: 300,
     pricingPolicyVersionId: 'policy-1',
     pricingProfileId: null,
@@ -40,7 +41,7 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
   };
 
   it('PENDING_BRANCH_CONFIRMATION → confirm builds DO lines from persisted snapshots (TRA002, qty 2)', () => {
-    const lines = buildBranchPurchaseConfirmDistributionLines(
+    const lines = buildBranchPurchaseCommercialAgreementLines(
       [approvedItem],
       new Map([[product.id, product]]),
       { branchType: 'FRANCHISE' },
@@ -51,31 +52,54 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     assert.equal(lines[0].totalPrice, 1000);
     assert.equal(lines[0].totalCost, 300);
     assert.equal(lines[0].unitPrice, 500);
+    assert.equal(lines[0].hasInventoryCostSnapshot, true);
   });
 
   it('does not require live FIFO availability (no Insufficient FIFO stock path)', () => {
-    // Regression: branch confirm must succeed when persisted cost exists even if
-    // previewFifoAllocation would return allocatedQty = 0 for SKU TRA002.
-    const lines = buildBranchPurchaseConfirmDistributionLines(
+    const lines = buildBranchPurchaseCommercialAgreementLines(
       [approvedItem],
       new Map([[product.id, product]]),
     );
     assert.equal(lines[0].sku, 'TRA002');
     assert.equal(sumPersistedApprovedInventoryCostKgs([approvedItem]), 300);
-    assert.equal(sumBranchPurchaseConfirmDistributionCostKgs(lines), 300);
+    assert.equal(sumBranchPurchaseCommercialAgreementInventoryCostKgs(lines), 300);
   });
 
   it('commercial totals unchanged — selling price stays HQ-approved snapshot', () => {
-    const lines = buildBranchPurchaseConfirmDistributionLines(
+    const lines = buildBranchPurchaseCommercialAgreementLines(
       [approvedItem],
       new Map([[product.id, product]]),
     );
     assert.equal(lines[0].totalPrice, approvedItem.approvedLineTotalKgs);
     assert.notEqual(lines[0].totalPrice, lines[0].totalCost);
+    assert.equal(sumBranchPurchaseCommercialAgreementTotalKgs(lines), 1000);
+  });
+
+  it('missing estimatedLineProductCostKgs does not block branch agreement (TRA002 regression)', () => {
+    const itemWithoutInventoryCost = {
+      ...approvedItem,
+      estimatedLineProductCostKgs: 0,
+      estimatedUnitCost: 0,
+    };
+    const lines = buildBranchPurchaseCommercialAgreementLines(
+      [itemWithoutInventoryCost],
+      new Map([[product.id, product]]),
+    );
+
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].totalPrice, 1000);
+    assert.equal(lines[0].unitPrice, 500);
+    assert.equal(lines[0].totalCost, 0);
+    assert.equal(lines[0].unitCost, 0);
+    assert.equal(lines[0].profit, 0);
+    assert.equal(lines[0].hasInventoryCostSnapshot, false);
+    assert.equal(allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot(lines), false);
+    assert.equal(sumBranchPurchaseCommercialAgreementInventoryCostKgs(lines), 0);
+    assert.equal(sumBranchPurchaseCommercialAgreementTotalKgs(lines), 1000);
   });
 
   it('skips rejected/zero-approved lines', () => {
-    const lines = buildBranchPurchaseConfirmDistributionLines(
+    const lines = buildBranchPurchaseCommercialAgreementLines(
       [
         approvedItem,
         {

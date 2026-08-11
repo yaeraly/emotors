@@ -95,8 +95,10 @@ import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-ite
 import { branchPurchaseRequestItemsInclude } from './branch-purchase-request-items-order.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
 import {
-  buildBranchPurchaseConfirmDistributionLines,
-  sumBranchPurchaseConfirmDistributionCostKgs,
+  allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot,
+  buildBranchPurchaseCommercialAgreementLines,
+  sumBranchPurchaseCommercialAgreementInventoryCostKgs,
+  sumBranchPurchaseCommercialAgreementTotalKgs,
   sumPersistedApprovedInventoryCostKgs,
 } from './branch-purchase-branch-confirm.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
@@ -1582,7 +1584,7 @@ export class OperationsService {
 
       let builtLines;
       try {
-        builtLines = buildBranchPurchaseConfirmDistributionLines(
+        builtLines = buildBranchPurchaseCommercialAgreementLines(
           existing.items as typeof existing.items,
           productsById,
           { branchType: branch?.branchType },
@@ -1591,11 +1593,6 @@ export class OperationsService {
         if (error instanceof Error && error.message.includes('Approved price missing')) {
           throw new BadRequestException(error.message);
         }
-        if (error instanceof Error && error.message.includes('Authoritative FIFO line cost missing')) {
-          throw new BadRequestException(
-            `Сохранённая себестоимость строки отсутствует для SKU. Повторите согласование после проверки HQ Sales.`,
-          );
-        }
         throw error;
       }
       if (!builtLines.length) {
@@ -1603,26 +1600,32 @@ export class OperationsService {
       }
 
       const storedInventoryTotal = sumPersistedApprovedInventoryCostKgs(existing.items);
-      const orderTransferTotal = sumBranchPurchaseConfirmDistributionCostKgs(builtLines);
-      const reconciliation = compareAuthoritativeCostTotals(
-        storedInventoryTotal,
-        orderTransferTotal,
-        'branch purchase confirm',
-      );
-      if (!reconciliation.ok) {
-        this.logger.error({
-          message: 'BRANCH_ORDER_COST_RECONCILIATION_FAILED',
-          branchPurchaseRequestNumber: existing.requestNumber,
-          warehouseId: assignedHqWarehouseId,
-          expectedTotal: reconciliation.expectedKgs,
-          actualTotal: reconciliation.actualKgs,
-          differenceKgs: reconciliation.differenceKgs,
-        });
-        throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
+      const orderInventoryCostTotal = sumBranchPurchaseCommercialAgreementInventoryCostKgs(builtLines);
+      if (
+        allBranchPurchaseAgreementLinesHaveInventoryCostSnapshot(builtLines) &&
+        storedInventoryTotal > 0
+      ) {
+        const reconciliation = compareAuthoritativeCostTotals(
+          storedInventoryTotal,
+          orderInventoryCostTotal,
+          'branch purchase confirm',
+        );
+        if (!reconciliation.ok) {
+          this.logger.error({
+            message: 'BRANCH_ORDER_COST_RECONCILIATION_FAILED',
+            branchPurchaseRequestNumber: existing.requestNumber,
+            warehouseId: assignedHqWarehouseId,
+            expectedTotal: reconciliation.expectedKgs,
+            actualTotal: reconciliation.actualKgs,
+            differenceKgs: reconciliation.differenceKgs,
+          });
+          throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
+        }
       }
 
-      const totalAmount = sumDisplayMoneyTotals(builtLines.map((line) => line.totalPrice));
-      const totalCost = sumDisplayMoneyTotals(builtLines.map((line) => line.totalCost));
+      const totalAmount = sumBranchPurchaseCommercialAgreementTotalKgs(builtLines);
+      const totalCost = sumBranchPurchaseCommercialAgreementInventoryCostKgs(builtLines);
+      const totalProfit = sumDisplayMoneyTotals(builtLines.map((line) => line.profit));
 
       const orderItems = builtLines.map((line) => ({
         productId: line.productId,
@@ -1657,7 +1660,7 @@ export class OperationsService {
           note: existing.note,
           totalAmount,
           totalCost,
-          totalProfit: roundDisplayMoney(totalAmount - totalCost),
+          totalProfit,
           items: { create: orderItems },
         },
         include: { items: true },
