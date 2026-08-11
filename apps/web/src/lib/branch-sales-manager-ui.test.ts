@@ -235,4 +235,27 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /buildLineDecisionsFromItems/);
     assert.match(detailPage, /min="0"/);
   });
+
+  it('branch sales reviewed summary shows position counts and unit quantity totals', () => {
+    assert.match(detailPage, /branchProductRequest\.approvedItems/);
+    assert.match(detailPage, /branchProductRequest\.rejectedItems/);
+    assert.match(detailPage, /branchProductRequest\.orderedUnits/);
+    assert.match(detailPage, /branchProductRequest\.approvedUnits/);
+    assert.match(detailPage, /sumBranchPurchaseRequestedQuantity/);
+    assert.match(detailPage, /sumBranchPurchaseApprovedQuantity/);
+    assert.match(detailPage, /totalRequestedQty/);
+    assert.match(detailPage, /totalApprovedQty/);
+  });
+
+  it('branch sales manager table highlights partial approvals from persisted quantities', () => {
+    const bsmTableStart = detailPage.indexOf('{branchSalesManagerView ? (');
+    const bsmTableEnd = detailPage.indexOf(') : executiveCompactView ? (');
+    const bsmTable = detailPage.slice(bsmTableStart, bsmTableEnd);
+    assert.match(bsmTable, /branchSalesManagerReviewLineRowClass\(item\)/);
+    assert.match(bsmTable, /reviewed \? branchSalesManagerReviewLineRowClass\(item\)/);
+    assert.match(displayUtil, /isPartiallyApprovedBranchPurchaseLine/);
+    assert.match(displayUtil, /bg-amber-50/);
+    assert.match(displayUtil, /bg-red-50/);
+    assert.doesNotMatch(bsmTable, /request\.items\.sort/);
+  });
 });

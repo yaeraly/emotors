@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   branchOrderLineTotal,
   branchOrderTotal,
+  branchSalesManagerReviewLineRowClass,
   draftFormLineTotal,
   draftFormOrderTotal,
   getDisplayQuantity,
@@ -12,8 +13,11 @@ import {
   hqReviewOrderAmount,
   hqReviewPreviewLineAmount,
   hqReviewPreviewOrderAmount,
+  isPartiallyApprovedBranchPurchaseLine,
   requestLineTotal,
   requestOrderTotal,
+  sumBranchPurchaseApprovedQuantity,
+  sumBranchPurchaseRequestedQuantity,
 } from './branch-purchase-request-display.util';
 import { roundMoney } from './money';
 
@@ -647,6 +651,76 @@ describe('branch purchase request display util smoke', () => {
         { quantity: 3, branchPurchasePriceKgs: 5000 },
       ]),
       '100\u00a0000,00',
+    );
+  });
+});
+
+describe('branch sales manager review quantity summary and row styling', () => {
+  it('sums requested and approved unit quantities separately from position counts', () => {
+    const items = [
+      { quantity: 10, approvedQuantity: 10, lineStatus: 'APPROVED' },
+      { quantity: 10, approvedQuantity: 6, lineStatus: 'PARTIALLY_APPROVED' },
+      { quantity: 5, approvedQuantity: 0, lineStatus: 'REJECTED' },
+    ];
+    assert.equal(sumBranchPurchaseRequestedQuantity(items), 25);
+    assert.equal(sumBranchPurchaseApprovedQuantity(items), 16);
+  });
+
+  it('uses request.totalQuantity when provided for ordered units', () => {
+    assert.equal(sumBranchPurchaseRequestedQuantity([{ quantity: 10 }], 120), 120);
+  });
+
+  it('detects partial approval by persisted quantities', () => {
+    assert.equal(
+      isPartiallyApprovedBranchPurchaseLine({
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: 'PARTIALLY_APPROVED',
+      }),
+      true,
+    );
+    assert.equal(
+      isPartiallyApprovedBranchPurchaseLine({
+        quantity: 10,
+        approvedQuantity: 10,
+        lineStatus: 'APPROVED',
+      }),
+      false,
+    );
+    assert.equal(
+      isPartiallyApprovedBranchPurchaseLine({
+        quantity: 10,
+        approvedQuantity: 0,
+        lineStatus: 'REJECTED',
+      }),
+      false,
+    );
+  });
+
+  it('applies amber for partial rows and red for rejected rows only', () => {
+    assert.equal(
+      branchSalesManagerReviewLineRowClass({
+        quantity: 10,
+        approvedQuantity: 10,
+        lineStatus: 'APPROVED',
+      }),
+      '',
+    );
+    assert.equal(
+      branchSalesManagerReviewLineRowClass({
+        quantity: 10,
+        approvedQuantity: 6,
+        lineStatus: 'PARTIALLY_APPROVED',
+      }),
+      'bg-amber-50',
+    );
+    assert.equal(
+      branchSalesManagerReviewLineRowClass({
+        quantity: 10,
+        approvedQuantity: 0,
+        lineStatus: 'REJECTED',
+      }),
+      'bg-red-50',
     );
   });
 });

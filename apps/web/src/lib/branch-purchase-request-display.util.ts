@@ -279,6 +279,47 @@ export function requestOrderTotal(
   return branchOrderTotal(items, options);
 }
 
+/** Sum of all line requested quantities (product units, not position count). */
+export function sumBranchPurchaseRequestedQuantity(
+  items: Array<Pick<BranchPurchaseRequestLinePricing, 'quantity'>>,
+  totalQuantity?: number | null,
+): number {
+  if (totalQuantity != null && Number.isFinite(Number(totalQuantity))) {
+    return Math.max(Number(totalQuantity), 0);
+  }
+  return items.reduce((sum, item) => sum + Math.max(Number(item.quantity ?? 0), 0), 0);
+}
+
+/** Sum of persisted approved quantities; rejected lines contribute 0. */
+export function sumBranchPurchaseApprovedQuantity(
+  items: Array<Pick<BranchPurchaseRequestLinePricing, 'approvedQuantity'>>,
+): number {
+  return items.reduce((sum, item) => sum + Math.max(Number(item.approvedQuantity ?? 0), 0), 0);
+}
+
+export function isPartiallyApprovedBranchPurchaseLine(
+  item: Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
+): boolean {
+  const requested = Math.max(Number(item.quantity ?? 0), 0);
+  const approved = Math.max(Number(item.approvedQuantity ?? 0), 0);
+  if (requested <= 0 || approved <= 0) return false;
+  if (item.lineStatus === 'REJECTED' || item.lineStatus === 'REMOVED_BY_HQ_SALES') return false;
+  return approved < requested;
+}
+
+/** Persisted branch review row styling: partial → amber, rejected → red, full approval → normal. */
+export function branchSalesManagerReviewLineRowClass(
+  item: Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
+): string {
+  if (item.lineStatus === 'REJECTED' || item.lineStatus === 'REMOVED_BY_HQ_SALES') {
+    return 'bg-red-50';
+  }
+  if (isPartiallyApprovedBranchPurchaseLine(item)) {
+    return 'bg-amber-50';
+  }
+  return '';
+}
+
 function parseDraftFormQuantity(quantity: string | number): number {
   const qty = Number(quantity);
   return Number.isFinite(qty) && qty > 0 ? qty : 0;

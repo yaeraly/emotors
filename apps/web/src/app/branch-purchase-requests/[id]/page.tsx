@@ -26,6 +26,7 @@ import { formatProductUnit } from '@/lib/product-unit';
 import {
   branchOrderLineTotal,
   branchOrderTotal,
+  branchSalesManagerReviewLineRowClass,
   formatFrozenBranchPrice,
   formatLineTotalKgs,
   formatOrderTotalKgs,
@@ -33,6 +34,8 @@ import {
   hqReviewPreviewLineAmount,
   hqReviewPreviewOrderAmount,
   requestLineTotal,
+  sumBranchPurchaseApprovedQuantity,
+  sumBranchPurchaseRequestedQuantity,
   type HqReviewPreviewDraft,
 } from '@/lib/branch-purchase-request-display.util';
 import {
@@ -647,6 +650,14 @@ export default function BranchPurchaseRequestDetailPage() {
       ).length ?? 0,
     [request],
   );
+  const totalRequestedQty = useMemo(
+    () => (request ? sumBranchPurchaseRequestedQuantity(request.items, request.totalQuantity) : 0),
+    [request],
+  );
+  const totalApprovedQty = useMemo(
+    () => (request ? sumBranchPurchaseApprovedQuantity(request.items) : 0),
+    [request],
+  );
 
   if (user && !canView) {
     return (
@@ -768,12 +779,18 @@ export default function BranchPurchaseRequestDetailPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
         {branchOnlyView && reviewed ? (
-          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">
+          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm sm:grid-cols-2">
             <p className="font-semibold text-green-700">
               {t('branchProductRequest.approvedItems')}: {approvedItemCount}
             </p>
             <p className="font-semibold text-red-700">
               {t('branchProductRequest.rejectedItems')}: {rejectedItemCount}
+            </p>
+            <p className="font-semibold text-slate-800">
+              {t('branchProductRequest.orderedUnits')}: {totalRequestedQty}
+            </p>
+            <p className="font-semibold text-slate-800">
+              {t('branchProductRequest.approvedUnits')}: {totalApprovedQty}
             </p>
           </div>
         ) : null}
@@ -876,7 +893,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     branchPriceLabel !== t('branchProductRequest.pricingPending');
                   const displayQuantity = getBranchOrderDisplayQuantity(item, { reviewed: Boolean(reviewed) });
                   return (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={reviewed ? branchSalesManagerReviewLineRowClass(item) : undefined}>
                     <td className="px-4 py-3 font-semibold text-slate-900">{item.productName}</td>
                     <td className="px-4 py-3 tabular-nums">{displayQuantity}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
