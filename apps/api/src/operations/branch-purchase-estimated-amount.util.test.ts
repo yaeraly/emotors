@@ -122,10 +122,10 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.equal(roundDisplayMoney(productCost - estimated), 0);
   });
 
-  it('does not reproduce stale 914369.26-style estimated amount for at-cost orders', () => {
+  it('keeps BPR commercial Сумма separate from FIFO product cost for at-cost orders', () => {
     const lines = buildChinaBatchLines();
     const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
-    const staleUnitTimesQty = sumDisplayMoneyTotals(
+    const commercialUnitTimesQty = sumDisplayMoneyTotals(
       lines.map((line) =>
         roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
       ),
@@ -133,7 +133,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     const response = toBranchPurchaseRequestResponse({
       status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
       reviewedAt: new Date(),
-      totalEstimatedAmount: staleUnitTimesQty,
+      totalEstimatedAmount: CHINA_BATCH_TOTAL, // stale FIFO header
       transportCostKgs: 0,
       branch: { branchType: BranchType.HQ_BRANCH },
       items: lines.map((line) => ({
@@ -141,16 +141,15 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
         approvedQuantity: line.quantity,
         lineStatus: 'APPROVED',
         estimatedLineProductCostKgs: line.totalCostKgs,
-        totalAmount: roundDisplayMoney(
-          deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,
-        ),
+        totalAmount: line.totalCostKgs,
         resolvedBranchPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+        wholesalePriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
       })),
     });
     assert.equal(response.totalProductCostKgs, CHINA_BATCH_TOTAL);
-    assert.equal(response.totalEstimatedAmount, CHINA_BATCH_TOTAL);
-    assert.equal(response.totalEstimatedAmount, response.totalProductCostKgs);
-    assert.notEqual(response.totalEstimatedAmount, staleUnitTimesQty);
+    assert.equal(response.totalEstimatedAmount, commercialUnitTimesQty);
+    assert.notEqual(response.totalEstimatedAmount, response.totalProductCostKgs);
+    assert.equal(productCost, CHINA_BATCH_TOTAL);
   });
 
   it('compareEstimatedAmountToProductCost detects unit×qty drift', () => {
@@ -167,9 +166,9 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.match(BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE, /Ориентировочная сумма/);
   });
 
-  it('Branch Sales sanitize keeps Сумма equal to FIFO product cost (0007a11)', () => {
+  it('Branch Sales sanitize keeps Сумма equal to commercial saved price × qty', () => {
     const lines = buildChinaBatchLines();
-    const staleEstimated = sumDisplayMoneyTotals(
+    const commercialEstimated = sumDisplayMoneyTotals(
       lines.map((line) =>
         roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
       ),
@@ -178,7 +177,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        totalEstimatedAmount: staleEstimated,
+        totalEstimatedAmount: CHINA_BATCH_TOTAL, // stale FIFO header
         transportCostKgs: 0,
         branch: { branchType: BranchType.HQ_BRANCH },
         items: lines.map((line, index) => ({
@@ -190,24 +189,21 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
           approvedQuantity: line.quantity,
           lineStatus: 'APPROVED',
           estimatedLineProductCostKgs: line.totalCostKgs,
-          totalAmount: roundDisplayMoney(
-            deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,
-          ),
+          totalAmount: line.totalCostKgs,
           resolvedBranchPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
           wholesalePriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
         })),
       },
       true,
     );
-    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalEstimatedAmount, commercialEstimated);
     assert.equal(sanitized.totalProductCostKgs, undefined);
     const lineSum = sumDisplayMoneyTotals(
       sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
     );
-    assert.equal(lineSum, CHINA_BATCH_TOTAL);
-    // Regression guard: 4330b1f unit×qty path must not recreate 914369.08-style drift.
-    assert.notEqual(staleEstimated, CHINA_BATCH_TOTAL);
-    assert.notEqual(sanitized.totalEstimatedAmount, staleEstimated);
+    assert.equal(lineSum, commercialEstimated);
+    assert.notEqual(commercialEstimated, CHINA_BATCH_TOTAL);
+    assert.notEqual(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
   });
 
   it('reconcileHqBranchTransferCostParity enforces FIFO = payable = order total', () => {

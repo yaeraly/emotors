@@ -88,9 +88,9 @@ export function hqReviewEffectiveQuantity(item: BranchPurchaseRequestLinePricing
 
 /**
  * HQ Sales review table amount for one line.
- * Prefer persisted authoritative totals (HQ_BRANCH FIFO payable / approvedLineTotalKgs).
+ * Prefer persisted authoritative commercial totals from the API.
  * Fall back to effectiveQuantity × frozen Цена для филиала only when no snapshot exists.
- * Never overwrite a saved FIFO payable with commercial unit×qty (72 490.50 → 67 870.14).
+ * Never reconstruct from live Product Catalog / Pricing Policy / FIFO cost.
  */
 export function hqReviewLineAmount(item: BranchPurchaseRequestLinePricing): number {
   const effectiveQuantity = hqReviewEffectiveQuantity(item);
@@ -151,7 +151,7 @@ export function hqReviewPreviewEffectiveQuantity(
  * Live row Сумма while editing Утв.
  * Empty input keeps the previous persisted/requested amount (does not force 0).
  * When a draft qty equals the current effective qty, keep the persisted authoritative total
- * so HQ_BRANCH FIFO payable is not replaced by commercial unit×qty during typing.
+ * so typing does not thrash a correct commercial snapshot.
  */
 export function hqReviewPreviewLineAmount(
   item: BranchPurchaseRequestLinePricing,
@@ -199,8 +199,8 @@ export function hqReviewPreviewOrderAmount(
 
 /**
  * Pre–HQ Sales review branch line Сумма.
- * Prefer persisted API totalAmount (HQ_BRANCH FIFO/authoritative line cost) over
- * reconstructing from displayed unit price × qty (causes ±0.72 / ±0.19 drift).
+ * Prefer persisted API totalAmount (commercial snapshot) over reconstructing
+ * from current catalog/FIFO sources.
  */
 export function pendingBranchReviewLineTotal(item: BranchPurchaseRequestLinePricing): number {
   const authoritative =

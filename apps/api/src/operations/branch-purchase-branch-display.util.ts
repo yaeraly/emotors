@@ -1,4 +1,9 @@
 import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import {
+  calculateBprLineTotalKgs,
+  calculateBprOrderTotalKgs,
+  getBprSavedOrderLineUnitPriceKgs,
+} from './branch-purchase-authoritative-money.util';
 
 /** CEO-approved branch unit price frozen on the order line (never wholesale/cost). */
 export function resolveBranchPurchaseBranchUnitPriceKgs(item: {
@@ -7,13 +12,7 @@ export function resolveBranchPurchaseBranchUnitPriceKgs(item: {
   /** Create/save snapshot of Цена для филиала (DB column; same value written at draft save). */
   wholesalePriceKgs?: unknown;
 }): number | null {
-  // Prefer explicit saved branch-price snapshot fields. Never invent from FIFO/catalog here.
-  const raw =
-    item.resolvedBranchPriceKgs ?? item.branchPurchasePriceKgs ?? item.wholesalePriceKgs;
-  if (raw == null) return null;
-  const price = Number(raw);
-  if (!Number.isFinite(price) || price <= 0) return null;
-  return price;
+  return getBprSavedOrderLineUnitPriceKgs(item);
 }
 
 /** Branch Sales display quantity: requested quantity shown in the table. */
@@ -76,9 +75,7 @@ export function resolveBranchPurchaseBranchLineTotalKgs(item: {
 /**
  * Authoritative draft line Сумма (before HQ Sales approval).
  * Invariant: draftQuantity × saved/displayed Цена для филиала = line Сумма.
- *
- * Never use live FIFO/catalog cost for draft list/detail (that produced stale
- * 72823.21 while saved qty × branch price correctly showed 72490.50).
+ * Delegates to the shared BPR commercial money calculator.
  */
 export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   quantity: number;
@@ -90,21 +87,13 @@ export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   branchType?: string | null;
   hasPricingPolicy?: boolean | null;
 }): number {
-  const commercial = resolveBranchPurchaseCommercialLineTotalKgs(item);
-  if (commercial > 0) {
-    return commercial;
-  }
-  // Only when no saved branch unit price exists — keep previously persisted line total.
-  const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
-  return stored > 0 ? stored : 0;
+  return calculateBprLineTotalKgs(item, 'draft');
 }
 
 export function sumBranchPurchaseDraftLineTotalsKgs(
   items: Array<Parameters<typeof resolveBranchPurchaseDraftLineTotalKgs>[0]>,
 ): number {
-  return sumDisplayMoneyTotals(
-    items.map((item) => resolveBranchPurchaseDraftLineTotalKgs(item)),
-  );
+  return calculateBprOrderTotalKgs(items, 'draft');
 }
 
 export function sumBranchPurchaseBranchLineTotalsKgs(

@@ -168,7 +168,7 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
     );
   });
 
-  it('approved HQ_BRANCH line uses FIFO inventory cost (72490.50 not catalog 67870.14)', () => {
+  it('approved HQ_BRANCH line uses commercial saved price (67870.14 not FIFO 72490.50)', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 2,
@@ -181,37 +181,36 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      72490.5,
+      67870.14,
     );
   });
 
-  it('HQ_BRANCH rejects drifted unit×qty totalAmount in favor of FIFO line cost', () => {
+  it('HQ_BRANCH restores commercial unit×qty when persisted payable drifted to FIFO', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 11,
         approvedQuantity: 11,
         lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
         resolvedBranchPriceKgs: 14756.12,
-        totalAmount: 162317.32, // unit×qty drift
-        approvedLineTotalKgs: 162317.32,
-        estimatedLineProductCostKgs: 162317.33, // exact FIFO
+        totalAmount: 162317.33, // stale FIFO payable
+        approvedLineTotalKgs: 162317.33,
+        estimatedLineProductCostKgs: 162317.33,
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      162317.33,
+      162317.32, // 11 × 14756.12
     );
   });
 
-  it('saved submit unit price is derived from submit line total not catalog price', () => {
+  it('saved order-line unit price prefers frozen Цена для филиала snapshot', () => {
     const savedUnit = resolveBranchPurchaseSavedOrderLineUnitPriceKgs({
       quantity: 2,
       totalAmount: 72490.5,
-      resolvedBranchPriceKgs: 33935.07,
-      estimatedLineProductCostKgs: 72490.5,
+      resolvedBranchPriceKgs: 36245.25,
+      estimatedLineProductCostKgs: 72823.21,
       branchType: 'HQ_BRANCH',
     });
     assert.equal(savedUnit, 36245.25);
-    assert.notEqual(savedUnit, 33935.07);
   });
 });
 

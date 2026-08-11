@@ -143,15 +143,15 @@ describe('branch purchase branch display totals', () => {
     assert.equal((sanitized.items[0] as { wholesalePriceKgs?: unknown }).wholesalePriceKgs, undefined);
   });
 
-  it('sanitized SUBMITTED_TO_HQ HQ_BRANCH list total uses FIFO payable not commercial unit×qty', () => {
+  it('sanitized SUBMITTED_TO_HQ HQ_BRANCH list total uses commercial unit×qty not FIFO cost', () => {
     const displayUnit = 1963.59;
     const qty = 2;
-    const wrongCommercial = 3927.18;
+    const commercial = 3927.18;
     const fifoCost = 630.15;
     const request = {
       status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
       reviewedAt: null,
-      totalEstimatedAmount: wrongCommercial,
+      totalEstimatedAmount: fifoCost,
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -164,29 +164,30 @@ describe('branch purchase branch display totals', () => {
           unit: 'pcs',
           estimatedLineProductCostKgs: fifoCost,
           resolvedBranchPriceKgs: displayUnit,
-          totalAmount: wrongCommercial,
+          totalAmount: fifoCost,
         },
       ],
     };
     const full = toBranchPurchaseRequestResponse(request);
     const sanitized = sanitizeBranchPurchaseRequest(request, true);
 
-    assert.equal(full.totalEstimatedAmount, fifoCost);
-    assert.equal(sanitized.totalEstimatedAmount, fifoCost);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, fifoCost);
+    assert.equal(full.totalEstimatedAmount, commercial);
+    assert.equal(sanitized.totalEstimatedAmount, commercial);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, commercial);
     assert.equal(
       (sanitized.items[0] as { branchPurchasePriceKgs?: number }).branchPurchasePriceKgs,
       displayUnit,
     );
-    assert.notEqual(sanitized.totalEstimatedAmount, wrongCommercial);
+    assert.notEqual(sanitized.totalEstimatedAmount, fifoCost);
   });
 
-  it('sanitized multi-line SUBMITTED HQ_BRANCH order keeps FIFO payable sum', () => {
-    const wrongCommercialHeader = 67870.14;
+  it('sanitized multi-line SUBMITTED HQ_BRANCH order keeps commercial payable sum', () => {
+    const wrongFifoHeader = 1500;
+    const commercialHeader = 72490.5;
     const request = {
       status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
       reviewedAt: null,
-      totalEstimatedAmount: wrongCommercialHeader,
+      totalEstimatedAmount: wrongFifoHeader,
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -199,7 +200,7 @@ describe('branch purchase branch display totals', () => {
           unit: 'pcs',
           estimatedLineProductCostKgs: 1000,
           resolvedBranchPriceKgs: 1963.59,
-          totalAmount: 3927.18,
+          totalAmount: 1000,
         },
         {
           id: 'line-b',
@@ -210,14 +211,14 @@ describe('branch purchase branch display totals', () => {
           unit: 'pcs',
           estimatedLineProductCostKgs: 500,
           resolvedBranchPriceKgs: 68563.32,
-          totalAmount: 68563.32,
+          totalAmount: 500,
         },
       ],
     };
     const sanitized = sanitizeBranchPurchaseRequest(request, true);
-    assert.equal(sanitized.totalEstimatedAmount, 1500);
-    assert.notEqual(sanitized.totalEstimatedAmount, wrongCommercialHeader);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 1000);
+    assert.equal(sanitized.totalEstimatedAmount, commercialHeader);
+    assert.notEqual(sanitized.totalEstimatedAmount, wrongFifoHeader);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 3927.18);
   });
 
   it('sanitized reviewed franchise order matches HQ Sales approved line totals', () => {
@@ -251,12 +252,12 @@ describe('branch purchase branch display totals', () => {
     assert.notEqual(sanitized.totalEstimatedAmount, 25000);
   });
 
-  it('sanitized reviewed HQ branch order uses FIFO payable not commercial unit×qty', () => {
+  it('sanitized reviewed HQ branch order uses commercial unit×qty not FIFO cost', () => {
     const sanitized = sanitizeBranchPurchaseRequest(
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        totalEstimatedAmount: 67870.14, // wrong commercial header
+        totalEstimatedAmount: 72490.5, // stale FIFO header
         transportCostKgs: 0,
         branch: { branchType: 'HQ_BRANCH' },
         items: [
@@ -271,19 +272,20 @@ describe('branch purchase branch display totals', () => {
             unit: 'pcs',
             estimatedLineProductCostKgs: 72490.5,
             resolvedBranchPriceKgs: 33935.07,
-            totalAmount: 67870.14, // wrong commercial line
+            wholesalePriceKgs: 33935.07,
+            totalAmount: 72490.5, // stale FIFO line
           },
         ],
       },
       true,
     );
 
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 72490.5);
-    assert.equal(sanitized.totalEstimatedAmount, 72490.5);
-    assert.notEqual(sanitized.totalEstimatedAmount, 67870.14);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 67870.14);
+    assert.equal(sanitized.totalEstimatedAmount, 67870.14);
+    assert.notEqual(sanitized.totalEstimatedAmount, 72490.5);
   });
 
-  it('sanitized HQ branch after review keeps FIFO batch total as Сумма (not commercial unit×qty)', () => {
+  it('sanitized HQ branch after review keeps commercial unit×qty as Сумма (FIFO inventory separate)', () => {
     const quantity = 11;
     const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
     const lineTotals = distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL);
@@ -302,8 +304,8 @@ describe('branch purchase branch display totals', () => {
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        // Wrong commercial header must not replace FIFO Сумма заказа.
-        totalEstimatedAmount: commercialHeader,
+        // Stale FIFO header must not replace commercial Сумма заказа.
+        totalEstimatedAmount: CHINA_BATCH_TOTAL,
         transportCostKgs: 0,
         branch: { branchType: 'HQ_BRANCH' },
         items: lines.map((line, index) => ({
@@ -318,7 +320,7 @@ describe('branch purchase branch display totals', () => {
           estimatedLineProductCostKgs: line.totalCostKgs,
           resolvedBranchPriceKgs: line.unit,
           wholesalePriceKgs: line.unit,
-          totalAmount: roundDisplayMoney(line.unit * line.quantity),
+          totalAmount: line.totalCostKgs,
         })),
       },
       true,
@@ -329,9 +331,9 @@ describe('branch purchase branch display totals', () => {
         0,
       ),
     );
-    assert.equal(lineSum, CHINA_BATCH_TOTAL);
-    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
-    assert.notEqual(sanitized.totalEstimatedAmount, commercialHeader);
+    assert.equal(lineSum, commercialHeader);
+    assert.equal(sanitized.totalEstimatedAmount, commercialHeader);
+    assert.notEqual(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
   });
 
   it('draft HQ_BRANCH list/detail uses qty × saved branch price (72490.50 not stale live-cost 72823.21)', () => {

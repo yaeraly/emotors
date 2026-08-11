@@ -53,12 +53,13 @@ describe('HQ Branch at-cost permanent invariant', () => {
     assert.notEqual(driftedUnitTimesQty, HQ_BATCH_1_TOTAL);
     assert.ok(Math.abs(roundDisplayMoney(HQ_BATCH_1_TOTAL - driftedUnitTimesQty)) > 0);
 
-    // After HQ Sales review, Branch Sales must show FIFO payable (not create-form unit×qty).
+    // After HQ Sales review, Branch Sales BPR Сумма uses commercial saved price × qty.
+    // Inventory FIFO batch total remains a separate costing concept.
     const sanitized = sanitizeBranchPurchaseRequest(
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        totalEstimatedAmount: driftedUnitTimesQty,
+        totalEstimatedAmount: HQ_BATCH_1_TOTAL, // stale FIFO header must not win
         transportCostKgs: 0,
         branch: { branchType: BranchType.HQ_BRANCH },
         items: lines.map((line, index) => ({
@@ -73,19 +74,18 @@ describe('HQ Branch at-cost permanent invariant', () => {
           estimatedLineProductCostKgs: line.totalCostKgs,
           resolvedBranchPriceKgs: line.unitDisplay,
           wholesalePriceKgs: line.unitDisplay,
-          totalAmount: roundDisplayMoney(line.unitDisplay * line.quantity),
+          totalAmount: line.totalCostKgs,
         })),
       },
       true,
     );
 
-    // Сумма заказа for HQ_BRANCH is FIFO payable (not commercial unit×qty).
     const payableTotals = sanitized.items.map((item) =>
       Number((item as { totalAmount?: number }).totalAmount ?? 0),
     );
-    assert.equal(sumDisplayMoneyTotals(payableTotals), HQ_BATCH_1_TOTAL);
-    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_1_TOTAL);
-    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), driftedUnitTimesQty);
+    assert.equal(sumDisplayMoneyTotals(payableTotals), driftedUnitTimesQty);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), driftedUnitTimesQty);
+    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_1_TOTAL);
 
     const fifoPayableTotals = lines.map((line) =>
       resolveBranchPurchaseLinePayableAmount({
@@ -106,21 +106,21 @@ describe('HQ Branch at-cost permanent invariant', () => {
     assert.equal(costParity.differenceKgs, 0);
   });
 
-  it('Case 1b — BPR-1786370094023: HQ source 822036.20 → BPR 822036.20 (diff 0.00, not +0.19)', () => {
+  it('Case 1b — BPR-1786370094023: inventory FIFO 822036.20 stays separate from BPR commercial Сумма', () => {
     const lines = buildExactBatchLines(HQ_BATCH_2_TOTAL, 55, 10);
     const hqSource = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
     assert.equal(hqSource, HQ_BATCH_2_TOTAL);
 
-    const driftedUnitTimesQty = sumDisplayMoneyTotals(
+    const commercialUnitTimesQty = sumDisplayMoneyTotals(
       lines.map((line) => roundDisplayMoney(line.unitDisplay * line.quantity)),
     );
-    assert.notEqual(driftedUnitTimesQty, HQ_BATCH_2_TOTAL);
+    assert.notEqual(commercialUnitTimesQty, HQ_BATCH_2_TOTAL);
 
     const sanitized = sanitizeBranchPurchaseRequest(
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        totalEstimatedAmount: driftedUnitTimesQty,
+        totalEstimatedAmount: HQ_BATCH_2_TOTAL,
         transportCostKgs: 0,
         branch: { branchType: BranchType.HQ_BRANCH },
         items: lines.map((line, index) => ({
@@ -135,20 +135,20 @@ describe('HQ Branch at-cost permanent invariant', () => {
           estimatedLineProductCostKgs: line.totalCostKgs,
           resolvedBranchPriceKgs: line.unitDisplay,
           wholesalePriceKgs: line.unitDisplay,
-          totalAmount: roundDisplayMoney(line.unitDisplay * line.quantity),
+          totalAmount: line.totalCostKgs,
         })),
       },
       true,
     );
 
-    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_2_TOTAL);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), commercialUnitTimesQty);
     assert.equal(
       sumDisplayMoneyTotals(
         sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
       ),
-      HQ_BATCH_2_TOTAL,
+      commercialUnitTimesQty,
     );
-    assert.equal(roundDisplayMoney(Number(sanitized.totalEstimatedAmount) - HQ_BATCH_2_TOTAL), 0);
+    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_2_TOTAL);
   });
 
   it('Case 2 — fractional unit cost: display rounding must not alter authoritative line total', () => {

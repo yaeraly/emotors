@@ -13,32 +13,33 @@ import {
 } from './branch-purchase-request.presenter';
 
 /**
- * Regression: HQ_BRANCH approve must persist FIFO payable Сумма, not commercial unit×qty.
+ * Regression: HQ_BRANCH approve must persist commercial Сумма (qty × saved Цена для филиала),
+ * never silently replace it with live/stale FIFO inventory cost.
  *
- * BPR-1786349778733 pattern:
- *   saved FIFO line = 72490.50
- *   wrong commercial 2 × 33935.07 = 67870.14
- * Never restore commercial after leave/reopen.
+ * BPR-1786450868586 / commercial snapshot pattern:
+ *   saved unit = 36245.25
+ *   qty = 2 → 72490.50
+ *   stale FIFO header = 72823.21
  */
-const UNIT_PRICE = 33935.07;
+const UNIT_PRICE = 36245.25;
 const APPROVED_QTY = 2;
-const EXPECTED_FIFO_TOTAL = 72490.5;
-const WRONG_COMMERCIAL_TOTAL = 67870.14;
+const EXPECTED_COMMERCIAL_TOTAL = 72490.5;
+const WRONG_FIFO_TOTAL = 72823.21;
 
-describe('HQ_BRANCH approved FIFO totals persist across reopen (BPR-1786349778733)', () => {
-  it('computes FIFO payable 72490.50 (not commercial 67870.14)', () => {
+describe('HQ_BRANCH approved commercial totals persist across reopen (BPR-1786450868586)', () => {
+  it('computes commercial payable 72490.50 (not FIFO 72823.21)', () => {
     const lineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
       quantity: 2,
       approvedQuantity: APPROVED_QTY,
       lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
       resolvedBranchPriceKgs: UNIT_PRICE,
-      estimatedLineProductCostKgs: EXPECTED_FIFO_TOTAL,
+      estimatedLineProductCostKgs: WRONG_FIFO_TOTAL,
       hasPricingPolicyAtReview: true,
       branchType: 'HQ_BRANCH',
     });
-    assert.equal(lineTotal, EXPECTED_FIFO_TOTAL);
-    assert.notEqual(lineTotal, roundDisplayMoney(UNIT_PRICE * APPROVED_QTY));
-    assert.notEqual(lineTotal, WRONG_COMMERCIAL_TOTAL);
+    assert.equal(lineTotal, EXPECTED_COMMERCIAL_TOTAL);
+    assert.equal(lineTotal, roundDisplayMoney(UNIT_PRICE * APPROVED_QTY));
+    assert.notEqual(lineTotal, WRONG_FIFO_TOTAL);
   });
 
   it('franchise still uses commercial qty × branch price', () => {
@@ -54,13 +55,13 @@ describe('HQ_BRANCH approved FIFO totals persist across reopen (BPR-178634977873
     assert.equal(lineTotal, 3927.18);
   });
 
-  it('persists FIFO line/order totals through repair (save + DB reload + BA)', async () => {
+  it('persists commercial line/order totals through repair (save + DB reload + BA)', async () => {
     const request = {
-      id: 'bpr-1786349778733',
-      requestNumber: 'BPR-1786349778733',
+      id: 'bpr-1786450868586',
+      requestNumber: 'BPR-1786450868586',
       status: BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
       reviewedAt: new Date(),
-      totalEstimatedAmount: WRONG_COMMERCIAL_TOTAL,
+      totalEstimatedAmount: WRONG_FIFO_TOTAL,
       transportCostKgs: 0,
       branch: { branchType: 'HQ_BRANCH' },
       items: [
@@ -73,10 +74,11 @@ describe('HQ_BRANCH approved FIFO totals persist across reopen (BPR-178634977873
           approvedQuantity: APPROVED_QTY,
           lineStatus: 'APPROVED',
           unit: 'pcs',
-          estimatedLineProductCostKgs: EXPECTED_FIFO_TOTAL,
+          estimatedLineProductCostKgs: WRONG_FIFO_TOTAL,
           resolvedBranchPriceKgs: UNIT_PRICE,
-          totalAmount: WRONG_COMMERCIAL_TOTAL,
-          approvedLineTotalKgs: WRONG_COMMERCIAL_TOTAL,
+          wholesalePriceKgs: UNIT_PRICE,
+          totalAmount: WRONG_FIFO_TOTAL,
+          approvedLineTotalKgs: WRONG_FIFO_TOTAL,
           hasPricingPolicyAtSubmit: true,
           hasPricingPolicyAtReview: true,
         },
@@ -111,24 +113,27 @@ describe('HQ_BRANCH approved FIFO totals persist across reopen (BPR-178634977873
     };
 
     const result = await repairBranchPurchaseRequestDerivedTotalsInTx(tx, request.id);
-    assert.equal(result.repairedOrderTotalKgs, EXPECTED_FIFO_TOTAL);
-    assert.equal(Number(request.items[0]?.totalAmount), EXPECTED_FIFO_TOTAL);
-    assert.equal(Number(request.totalEstimatedAmount), EXPECTED_FIFO_TOTAL);
+    assert.equal(result.repairedOrderTotalKgs, EXPECTED_COMMERCIAL_TOTAL);
+    assert.equal(Number(request.items[0]?.totalAmount), EXPECTED_COMMERCIAL_TOTAL);
+    assert.equal(Number(request.totalEstimatedAmount), EXPECTED_COMMERCIAL_TOTAL);
 
     const api = toBranchPurchaseRequestResponse(request);
     const ui = sanitizeBranchPurchaseRequest(request, true);
-    assert.equal(api.totalEstimatedAmount, EXPECTED_FIFO_TOTAL);
-    assert.equal(ui.totalEstimatedAmount, EXPECTED_FIFO_TOTAL);
-    assert.equal(sumBranchPurchaseHqReviewLineAmountsKgs([
-      {
-        quantity: 2,
-        approvedQuantity: APPROVED_QTY,
-        lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
-        resolvedBranchPriceKgs: UNIT_PRICE,
-        estimatedLineProductCostKgs: EXPECTED_FIFO_TOTAL,
-        hasPricingPolicyAtReview: true,
-        branchType: 'HQ_BRANCH',
-      },
-    ]), EXPECTED_FIFO_TOTAL);
+    assert.equal(api.totalEstimatedAmount, EXPECTED_COMMERCIAL_TOTAL);
+    assert.equal(ui.totalEstimatedAmount, EXPECTED_COMMERCIAL_TOTAL);
+    assert.equal(
+      sumBranchPurchaseHqReviewLineAmountsKgs([
+        {
+          quantity: 2,
+          approvedQuantity: APPROVED_QTY,
+          lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
+          resolvedBranchPriceKgs: UNIT_PRICE,
+          estimatedLineProductCostKgs: WRONG_FIFO_TOTAL,
+          hasPricingPolicyAtReview: true,
+          branchType: 'HQ_BRANCH',
+        },
+      ]),
+      EXPECTED_COMMERCIAL_TOTAL,
+    );
   });
 });

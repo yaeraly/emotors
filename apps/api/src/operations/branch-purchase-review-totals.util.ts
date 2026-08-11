@@ -1,14 +1,14 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import {
-  allocateProportionalCost,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
-import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branch-display.util';
-import { resolveHqBranchTransferLineCostKgs } from './hq-branch-transfer-cost.util';
-
+import {
+  calculateBprLineTotalKgs,
+  calculateBprOrderTotalKgs,
+} from './branch-purchase-authoritative-money.util';
 export function resolveBranchPurchaseHqReviewEffectiveQuantity(item: {
   quantity: number;
   approvedQuantity?: number | null;
@@ -68,8 +68,8 @@ export function resolveBranchPurchaseSavedOrderLineUnitPriceKgs(item: {
 }
 
 /**
- * Submit-time line total snapshot frozen on the order line.
- * HQ_BRANCH: authoritative FIFO/inventory line cost only — never catalog/display unit × qty.
+ * Submit-time commercial line total snapshot frozen on the order line.
+ * Always qty × saved Цена для филиала when known — never live FIFO/catalog.
  */
 export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
   quantity: number;
@@ -77,38 +77,18 @@ export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
   estimatedLineProductCostKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
   branchPurchasePriceKgs?: unknown;
+  wholesalePriceKgs?: unknown;
   branchType?: string | null;
 }): number {
-  const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
-  const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
-  const fifoSnapshot = resolveHqBranchTransferLineCostKgs({
-    fifoLineCostKgs: item.estimatedLineProductCostKgs as number | string | null | undefined,
-  });
-  const catalogUnit = resolveBranchPurchaseBranchUnitPriceKgs({
-    branchPurchasePriceKgs: item.branchPurchasePriceKgs,
-    resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
-  });
-  const catalogTotal =
-    catalogUnit != null && requestedQty > 0 ? roundDisplayMoney(catalogUnit * requestedQty) : 0;
-
-  if (shouldTransferBranchPurchaseAtCost(item.branchType)) {
-    // HQ_BRANCH accounting source of truth is FIFO/inventory line cost.
-    // Never prefer drifted totalAmount rebuilt as rounded display unit × quantity.
-    if (fifoSnapshot > 0) return fifoSnapshot;
-    if (storedTotal > 0 && storedTotal !== catalogTotal) return storedTotal;
-    return 0;
-  }
-
-  return storedTotal > 0 ? storedTotal : 0;
+  return calculateBprLineTotalKgs(item, 'pending_hq_review');
 }
 
 /**
- * Authoritative approved line total for every BPR lifecycle stage.
+ * Authoritative approved/commercial line total for every BPR lifecycle stage.
  *
- * HQ_BRANCH: exact FIFO/inventory line cost for the effective quantity (markup 0%).
- * Never reconstruct as rounded display unit × quantity (914369.80 → 914369.08 drift).
- *
- * Other branches: approvedLineTotal / submit snapshot scaled by effective qty.
+ * Always uses saved order-line Цена для филиала × effective quantity.
+ * Inventory FIFO (`estimatedLineProductCostKgs`) is kept separately and must not
+ * replace BPR commercial Сумма on role transitions.
  */
 export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   quantity: number;
@@ -116,84 +96,26 @@ export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   lineStatus?: BranchPurchaseRequestLineStatus | string | null;
   resolvedBranchPriceKgs?: unknown;
   branchPurchasePriceKgs?: unknown;
+  wholesalePriceKgs?: unknown;
   totalAmount?: unknown;
   approvedLineTotalKgs?: unknown;
   estimatedLineProductCostKgs?: unknown;
   hasPricingPolicyAtReview?: boolean | null;
   branchType?: string | null;
 }): number {
-  const effectiveQuantity = resolveBranchPurchaseHqReviewEffectiveQuantity(item);
-  if (effectiveQuantity <= 0) {
-    return 0;
-  }
-
-  const requestedQty = Math.max(Number(item.quantity ?? 0), 0);
-
-  if (shouldTransferBranchPurchaseAtCost(item.branchType)) {
-    const fifoSnapshot = resolveHqBranchTransferLineCostKgs({
-      fifoLineCostKgs: item.estimatedLineProductCostKgs as number | string | null | undefined,
-    });
-    if (fifoSnapshot > 0) {
-      if (requestedQty > 0 && effectiveQuantity !== requestedQty) {
-        const scaled = roundDisplayMoney(
-          allocateProportionalCost(fifoSnapshot, requestedQty, effectiveQuantity),
-        );
-        const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
-        const persistedApproved =
-          item.approvedLineTotalKgs != null
-            ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
-            : null;
-
-        // After review/confirm, FIFO + approvedLineTotal are stored for approved qty.
-        if (persistedApproved != null && Math.abs(fifoSnapshot - persistedApproved) <= 0.009) {
-          return fifoSnapshot;
-        }
-        // Submit-time FIFO still covers requested qty (equals stored full-line total) → scale.
-        if (storedTotal > 0 && Math.abs(fifoSnapshot - storedTotal) <= 0.009) {
-          return scaled;
-        }
-        // Fresh FIFO preview for approved qty during HQ review apply.
-        return fifoSnapshot;
-      }
-      return fifoSnapshot;
-    }
-
-    if (isReviewedBranchPurchaseLineStatus(item.lineStatus) && item.approvedLineTotalKgs != null) {
-      const persisted = roundDisplayMoney(Number(item.approvedLineTotalKgs));
-      if (persisted > 0) return persisted;
-    }
-    return 0;
-  }
-
-  if (isReviewedBranchPurchaseLineStatus(item.lineStatus) && item.approvedLineTotalKgs != null) {
-    const persisted = roundDisplayMoney(Number(item.approvedLineTotalKgs));
-    const submitLineTotal = resolveBranchPurchaseSavedSubmitLineTotalKgs(item);
-    const expectedFromSnapshot =
-      submitLineTotal > 0 && requestedQty > 0
-        ? roundDisplayMoney((submitLineTotal * effectiveQuantity) / requestedQty)
-        : 0;
-    if (persisted > 0 && (expectedFromSnapshot <= 0 || persisted === expectedFromSnapshot)) {
-      return persisted;
-    }
-  }
-
-  const submitLineTotal = resolveBranchPurchaseSavedSubmitLineTotalKgs(item);
-  if (submitLineTotal > 0 && requestedQty > 0) {
-    return roundDisplayMoney((submitLineTotal * effectiveQuantity) / requestedQty);
-  }
-
-  const savedUnit = resolveBranchPurchaseSavedOrderLineUnitPriceKgs(item);
-  if (savedUnit != null && savedUnit > 0) {
-    return roundDisplayMoney(savedUnit * effectiveQuantity);
-  }
-
-  return 0;
+  const reviewed = isReviewedBranchPurchaseLineStatus(item.lineStatus);
+  return calculateBprLineTotalKgs(item, reviewed ? 'reviewed' : 'pending_hq_review');
 }
 
 export function sumBranchPurchaseHqReviewLineAmountsKgs(
   items: Array<Parameters<typeof computeBranchPurchaseHqReviewLineAmountKgs>[0]>,
 ): number {
-  return sumDisplayMoneyTotals(items.map((item) => computeBranchPurchaseHqReviewLineAmountKgs(item)));
+  return calculateBprOrderTotalKgs(
+    items,
+    items.some((item) => isReviewedBranchPurchaseLineStatus(item.lineStatus))
+      ? 'reviewed'
+      : 'pending_hq_review',
+  );
 }
 
 /** @deprecated Prefer computeBranchPurchaseHqReviewLineAmountKgs with line status. */

@@ -164,6 +164,7 @@ export function toBranchPurchaseRequestResponse<T extends {
       lineStatus: (item as { lineStatus?: string | null }).lineStatus,
       resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
       branchPurchasePriceKgs: (item as { branchPurchasePriceKgs?: unknown }).branchPurchasePriceKgs,
+      wholesalePriceKgs: item.wholesalePriceKgs,
       totalAmount: item.totalAmount,
       approvedLineTotalKgs: item.approvedLineTotalKgs,
       estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
@@ -408,7 +409,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
   totalEstimatedAmount?: unknown;
   totalProductCostKgs?: number;
 }>(request: T, hideSensitive: boolean) {
-  // Authoritative totals must be computed from full FIFO line data before stripping.
+  // Authoritative commercial totals must be computed from full line snapshots before stripping.
   const full = toBranchPurchaseRequestResponse({
     ...request,
     items: sortBranchPurchaseRequestItems(request.items),
@@ -439,10 +440,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
 
-  // HQ_BRANCH at-cost: after HQ review, branch users see the same FIFO payable totals as HQ Sales.
-  // Cost field names are stripped; Сумма itself remains the authoritative FIFO payable amount.
-  // Before HQ Sales review, create/submit display may still show qty × branch price for the unit column,
-  // but order/line Сумма follows the shared presenter totals (FIFO payable) so BA never drifts.
+  // HQ_BRANCH: strip internal cost fields for branch users, but keep the same commercial
+  // BPR snapshot (qty × saved Цена для филиала) used by HQ Sales / Accountant / CEO / Cashier.
+  // Inventory FIFO remains on estimatedLineProductCostKgs and must not replace Сумма.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
@@ -451,7 +451,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
           resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
           wholesalePriceKgs: item.wholesalePriceKgs,
         });
-        const fifoLineTotal = roundDisplayMoney(
+        const commercialLineTotal = roundDisplayMoney(
           Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
         );
         const draftLineContext = resolveDraftLinePricingContext(
@@ -471,8 +471,8 @@ export function sanitizeBranchPurchaseRequest<T extends {
         const lineTotal = isDraft
           ? resolveBranchPurchaseDraftLineTotalKgs(draftLineContext)
           : pendingHqSalesReview && !reviewed
-            ? fifoLineTotal > 0
-              ? fifoLineTotal
+            ? commercialLineTotal > 0
+              ? commercialLineTotal
               : resolveBranchPurchaseBranchLineTotalKgs({
                   quantity: item.quantity,
                   branchPurchasePriceKgs: branchUnitPrice,
@@ -480,7 +480,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
                   totalAmount: 0,
                   transferAtCost: false,
                 })
-            : fifoLineTotal;
+            : commercialLineTotal;
         return {
           id: item.id,
           productId: item.productId,

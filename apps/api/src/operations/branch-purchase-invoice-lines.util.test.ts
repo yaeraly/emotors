@@ -7,7 +7,7 @@ import {
 } from './branch-purchase-invoice-lines.util';
 
 describe('branch purchase approved invoice lines', () => {
-  it('HQ_BRANCH uses exact FIFO line cost, never display unit × qty (reducer)', () => {
+  it('HQ_BRANCH uses commercial saved price × qty (not FIFO inventory cost)', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-reducer',
       sku: 'RED-18',
@@ -28,7 +28,7 @@ describe('branch purchase approved invoice lines', () => {
     assert.equal(line.unitPrice, 1963.59);
   });
 
-  it('HQ_BRANCH ignores commercial unit×qty when FIFO snapshot differs (China batch drift)', () => {
+  it('HQ_BRANCH ignores FIFO drift and keeps commercial unit×qty snapshot', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-main',
       sku: 'MAIN',
@@ -38,18 +38,17 @@ describe('branch purchase approved invoice lines', () => {
       lineStatus: 'APPROVED',
       branchPurchasePriceKgs: 14756.12,
       resolvedBranchPriceKgs: 14756.12,
-      // Drifted unit×qty stored on line
       totalAmount: 162317.32,
       approvedLineTotalKgs: 162317.32,
       estimatedLineProductCostKgs: 162317.33,
       branchType: 'HQ_BRANCH',
     });
 
-    assert.equal(line.lineTotal, 162317.33);
-    assert.notEqual(line.lineTotal, 162317.32);
+    assert.equal(line.lineTotal, 162317.32);
+    assert.notEqual(line.lineTotal, 162317.33);
   });
 
-  it('keeps HQ_BRANCH FIFO payable line when branch commercial unit×qty would drift total', () => {
+  it('keeps HQ_BRANCH commercial payable when FIFO inventory cost differs', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-main',
       sku: 'MAIN',
@@ -59,17 +58,17 @@ describe('branch purchase approved invoice lines', () => {
       lineStatus: 'APPROVED',
       branchPurchasePriceKgs: 33935.07,
       resolvedBranchPriceKgs: 33935.07,
-      totalAmount: 72490.5,
-      approvedLineTotalKgs: 72490.5,
+      totalAmount: 67870.14,
+      approvedLineTotalKgs: 67870.14,
       estimatedLineProductCostKgs: 72490.5,
       branchType: 'HQ_BRANCH',
     });
 
-    assert.equal(line.lineTotal, 72490.5);
-    assert.notEqual(line.lineTotal, 67870.14);
+    assert.equal(line.lineTotal, 67870.14);
+    assert.notEqual(line.lineTotal, 72490.5);
   });
 
-  it('invoice total equals sum of approved BPR FIFO line snapshots', () => {
+  it('invoice total equals sum of approved BPR commercial line snapshots', () => {
     const items = [
       {
         productId: 'prod-a',

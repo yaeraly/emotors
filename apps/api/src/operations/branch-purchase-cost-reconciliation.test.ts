@@ -43,9 +43,12 @@ describe('buildDistributionLinesFromConfirmedRequestItems — authoritative FIFO
           productId: 'prod-1',
           sku: 'SKU-1',
           productName: 'Motor',
+          quantity: 11,
           approvedQuantity: 11,
+          lineStatus: 'APPROVED',
           resolvedBranchPriceKgs: 125,
           approvedLineTotalKgs: 1375,
+          totalAmount: 1375,
           estimatedUnitCost: 14756.12,
           estimatedLineProductCostKgs: authoritativeLineCost,
           pricingPolicyVersionId: 'policy-1',
@@ -61,6 +64,7 @@ describe('buildDistributionLinesFromConfirmedRequestItems — authoritative FIFO
     );
 
     assert.equal(lines[0].totalCost, authoritativeLineCost);
+    assert.equal(lines[0].totalPrice, 1375);
     assert.notEqual(lines[0].totalCost, roundDisplayMoney(lines[0].unitCost * 11));
   });
 
@@ -71,9 +75,12 @@ describe('buildDistributionLinesFromConfirmedRequestItems — authoritative FIFO
           productId: 'prod-1',
           sku: 'SKU-1',
           productName: 'Motor',
+          quantity: 4,
           approvedQuantity: 4,
+          lineStatus: 'APPROVED',
           resolvedBranchPriceKgs: 125,
           approvedLineTotalKgs: 500,
+          totalAmount: 500,
           estimatedUnitCost: 55,
           estimatedLineProductCostKgs: 220,
           pricingPolicyVersionId: 'policy-1',
@@ -124,9 +131,12 @@ describe('BPR China batch transfer parity', () => {
         productId: `prod-${index}`,
         sku: line.sku,
         productName: line.sku,
+        quantity: line.quantity,
         approvedQuantity: line.quantity,
+        lineStatus: 'APPROVED',
         resolvedBranchPriceKgs: 100,
         approvedLineTotalKgs: line.quantity * 100,
+        totalAmount: line.quantity * 100,
         estimatedUnitCost: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
         estimatedLineProductCostKgs: line.totalCostKgs,
         pricingPolicyVersionId: null,

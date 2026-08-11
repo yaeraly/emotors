@@ -8,7 +8,6 @@ import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branc
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
-  resolveBranchPurchaseSavedOrderLineUnitPriceKgs,
 } from './branch-purchase-review-totals.util';
 
 export type BranchPurchaseInvoiceLineSource = {
@@ -21,6 +20,7 @@ export type BranchPurchaseInvoiceLineSource = {
   lineStatus?: BranchPurchaseRequestLineStatus | string | null;
   branchPurchasePriceKgs?: unknown;
   resolvedBranchPriceKgs?: unknown;
+  wholesalePriceKgs?: unknown;
   totalAmount?: unknown;
   approvedLineTotalKgs?: unknown;
   estimatedLineProductCostKgs?: unknown;
@@ -44,12 +44,14 @@ export function resolveBranchPurchaseApprovedInvoiceLine(
 ): BranchPurchaseInvoiceLine {
   const quantity = resolveBranchPurchaseHqReviewEffectiveQuantity(item);
   const branchUnit = resolveBranchPurchaseBranchUnitPriceKgs(item);
-  const computedLineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
+  // Commercial BPR snapshot only — inventory FIFO stays on estimatedLineProductCostKgs.
+  const lineTotal = computeBranchPurchaseHqReviewLineAmountKgs({
     quantity: item.quantity,
     approvedQuantity: item.approvedQuantity,
     lineStatus: item.lineStatus,
     branchPurchasePriceKgs: item.branchPurchasePriceKgs,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    wholesalePriceKgs: item.wholesalePriceKgs,
     totalAmount: item.totalAmount,
     approvedLineTotalKgs: item.approvedLineTotalKgs,
     estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
@@ -57,25 +59,6 @@ export function resolveBranchPurchaseApprovedInvoiceLine(
       item.hasPricingPolicyAtReview ?? item.hasPricingPolicyAtSubmit ?? null,
     branchType: item.branchType,
   });
-  const fifoLineCost = roundDisplayMoney(Number(item.estimatedLineProductCostKgs ?? 0));
-  const branchLineTotal =
-    branchUnit != null && quantity > 0 ? roundDisplayMoney(branchUnit * quantity) : 0;
-
-  let lineTotal = computedLineTotal;
-  // HQ_BRANCH markup 0%: payable/transfer total is exact FIFO inventory cost only.
-  // Never replace FIFO with commercial display unit × qty (causes ±0.72 / ±0.19 drift).
-  const isHqBranchAtCost =
-    item.branchType === 'HQ_BRANCH' || item.branchType === 'HQ_INTERNAL_BRANCH';
-  if (
-    !isHqBranchAtCost &&
-    branchLineTotal > 0 &&
-    fifoLineCost > 0 &&
-    Math.abs(computedLineTotal - fifoLineCost) <= 0.009 &&
-    branchLineTotal > computedLineTotal + 0.009
-  ) {
-    // Non-HQ branches: restore approved branch price × qty when FIFO was wrongly stored as payable.
-    lineTotal = branchLineTotal;
-  }
 
   if (quantity <= 0 || lineTotal <= 0) {
     return {
@@ -88,22 +71,10 @@ export function resolveBranchPurchaseApprovedInvoiceLine(
     };
   }
 
-  const savedUnit = resolveBranchPurchaseSavedOrderLineUnitPriceKgs({
-    quantity: item.quantity,
-    totalAmount: item.totalAmount,
-    branchPurchasePriceKgs: item.branchPurchasePriceKgs,
-    resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
-    estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
-    branchType: item.branchType,
-  });
   const unitPrice =
-    lineTotal === branchLineTotal && branchUnit != null && branchUnit > 0
+    branchUnit != null && branchUnit > 0
       ? branchUnit
-      : savedUnit != null && savedUnit > 0
-        ? savedUnit
-        : branchUnit != null && branchUnit > 0
-          ? branchUnit
-          : deriveDisplayUnitCost(lineTotal, quantity);
+      : deriveDisplayUnitCost(lineTotal, quantity);
 
   return {
     productId: item.productId,

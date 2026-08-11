@@ -94,6 +94,7 @@ import {
 import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
 import { branchPurchaseRequestItemsInclude } from './branch-purchase-request-items-order.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
+import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 import {
   resolveBranchPurchaseFifoLineCost,
   resolveEnrichedBranchPurchaseLineCost,
@@ -111,6 +112,10 @@ import {
   resolveBranchPurchaseDraftLineTotalKgs,
   sumBranchPurchaseDraftLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
+import {
+  calculateBprLineTotalKgs,
+  calculateBprOrderTotalKgs,
+} from './branch-purchase-authoritative-money.util';
 import {
   assertBranchPurchaseBranchContext,
   assertBranchPurchaseRequestItems,
@@ -466,6 +471,14 @@ export class OperationsService {
         const quantity = quantityByProductId.get(product.id) ?? 0;
         let lineTotalKgs: number | null = null;
         let estimatedLineProductCostKgs = 0;
+        // Create-form Сумма preview: commercial branch price × qty (not live FIFO).
+        if (
+          pricing.branchPurchasePriceKgs != null &&
+          Number(pricing.branchPurchasePriceKgs) > 0 &&
+          quantity > 0
+        ) {
+          lineTotalKgs = roundDisplayMoney(Number(pricing.branchPurchasePriceKgs) * quantity);
+        }
         if (assignedHqWarehouseId && quantity > 0) {
           const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
             productId: product.id,
@@ -479,18 +492,22 @@ export class OperationsService {
           if (fifoCost.allocatedQty > 0) {
             estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
           }
-          const payable = resolveBranchPurchaseLinePayableAmount({
-            branchType: branch?.branchType,
-            quantity,
-            estimatedLineProductCostKgs,
-            unitPriceKgs: pricing.branchPurchasePriceKgs,
-            hasPricingPolicy: pricing.hasPricingPolicy,
-          });
-          // HQ at-cost: omit lineTotal when FIFO is unavailable so clients keep prior authoritative totals
-          // instead of rebuilding from rounded unit × qty (914369.08-style drift).
-          lineTotalKgs =
-            shouldTransferBranchPurchaseAtCost(branch?.branchType) && payable <= 0 ? null : payable;
+          if (lineTotalKgs == null) {
+            const fifoPayable = resolveBranchPurchaseLinePayableAmount({
+              branchType: branch?.branchType,
+              quantity,
+              estimatedLineProductCostKgs,
+              unitPriceKgs: pricing.branchPurchasePriceKgs,
+              hasPricingPolicy: pricing.hasPricingPolicy,
+            });
+            lineTotalKgs = fifoPayable > 0 ? fifoPayable : null;
+          }
         }
+        const transferLineCostKgs = shouldTransferBranchPurchaseAtCost(branch?.branchType)
+          ? estimatedLineProductCostKgs > 0
+            ? estimatedLineProductCostKgs
+            : null
+          : undefined;
         return [
           product.id,
           canViewProductCost(user)
@@ -510,9 +527,7 @@ export class OperationsService {
                 pricingRevision: this.branchOrderPricingRevision.current(),
                 quantity: quantity > 0 ? quantity : undefined,
                 lineTotalKgs,
-                transferLineCostKgs: shouldTransferBranchPurchaseAtCost(branch?.branchType)
-                  ? lineTotalKgs
-                  : undefined,
+                transferLineCostKgs,
               }
             : {
                 branchPriceKgs: pricing.branchPurchasePriceKgs,
@@ -527,9 +542,7 @@ export class OperationsService {
                 pricingRevision: this.branchOrderPricingRevision.current(),
                 quantity: quantity > 0 ? quantity : undefined,
                 lineTotalKgs,
-                transferLineCostKgs: shouldTransferBranchPurchaseAtCost(branch?.branchType)
-                  ? lineTotalKgs
-                  : undefined,
+                transferLineCostKgs,
               },
         ] as const;
       }),
@@ -1596,49 +1609,10 @@ export class OperationsService {
       }
 
       const fifoOrderTotal = sumBranchPurchaseLineProductCosts(fifoLineCosts);
-      if (shouldTransferBranchPurchaseAtCost(branch?.branchType)) {
-        const storedEstimated = roundDisplayMoney(Number(existing.totalEstimatedAmount ?? 0));
-        const estimatedParity = compareEstimatedAmountToProductCost(storedEstimated, fifoOrderTotal);
-        if (!estimatedParity.ok) {
-          await tx.branchPurchaseRequest.update({
-            where: { id: existing.id },
-            data: { totalEstimatedAmount: fifoOrderTotal },
-          });
-          await this.auditInTx(
-            tx,
-            user,
-            existing.branchId,
-            'COST_RECONCILIATION_REPAIRED',
-            'BranchPurchaseRequest',
-            existing.id,
-            {
-              requestNumber: existing.requestNumber,
-              oldAmount: storedEstimated,
-              correctedAmount: fifoOrderTotal,
-              difference: estimatedParity.differenceKgs,
-              reason: 'estimated_amount_aligned_to_fifo_product_cost',
-              affectedItemIds: existing.items.map((item) => item.id),
-            },
-          );
-        }
-        const refreshedEstimated = resolveBranchPurchaseEstimatedAmountKgs({
-          branchType: branch?.branchType,
-          totalProductCostKgs: fifoOrderTotal,
-          storedEstimatedAmountKgs: fifoOrderTotal,
-        });
-        const afterRepair = compareEstimatedAmountToProductCost(refreshedEstimated, fifoOrderTotal);
-        if (!afterRepair.ok) {
-          throw new BadRequestException({
-            message: BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE,
-            branchPurchaseRequestId: existing.id,
-            requestNumber: existing.requestNumber,
-            expectedAmount: afterRepair.expectedKgs,
-            actualAmount: afterRepair.actualKgs,
-            difference: afterRepair.differenceKgs,
-            affectedItemIds: existing.items.map((item) => item.id),
-          });
-        }
-      }
+      // Inventory FIFO cost is refreshed for transfer costing only.
+      // Do NOT overwrite BPR commercial totalEstimatedAmount with live FIFO —
+      // commercial Сумма stays qty × saved Цена для филиала across role transitions.
+      void fifoOrderTotal;
 
       let builtLines;
       try {
@@ -2107,16 +2081,30 @@ export class OperationsService {
 
         const unitCost = fifoCost.estimatedUnitCost;
         const lineCost = fifoCost.estimatedLineProductCostKgs;
-        const atCost = shouldTransferBranchPurchaseAtCost(branch?.branchType);
-        const unitPrice = atCost
-          ? unitCost
-          : Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs);
-        // HQ_BRANCH: selling/transfer price = exact FIFO line cost (markup 0%).
-        // Never rebuild as rounded display unit × quantity.
-        const linePrice = atCost
-          ? lineCost
-          : item.approvedLineTotalKgs != null
-            ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
+        // Warehouse DO: inventory cost = FIFO; selling/payable = BPR commercial snapshot.
+        const invoiceLine = resolveBranchPurchaseApprovedInvoiceLine({
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          quantity: item.quantity,
+          approvedQuantity: quantity,
+          lineStatus: item.lineStatus,
+          resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+          wholesalePriceKgs: item.wholesalePriceKgs,
+          totalAmount: item.totalAmount,
+          approvedLineTotalKgs: item.approvedLineTotalKgs,
+          estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+          hasPricingPolicyAtReview: item.hasPricingPolicyAtReview,
+          hasPricingPolicyAtSubmit: item.hasPricingPolicyAtSubmit,
+          branchType: branch?.branchType,
+        });
+        const unitPrice =
+          invoiceLine.unitPrice > 0
+            ? invoiceLine.unitPrice
+            : Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs);
+        const linePrice =
+          invoiceLine.lineTotal > 0
+            ? invoiceLine.lineTotal
             : roundDisplayMoney(unitPrice * quantity);
         lineCosts.push(lineCost);
         linePrices.push(linePrice);
@@ -5714,25 +5702,23 @@ export class OperationsService {
             estimatedUnitCost = fifoCost.estimatedUnitCost;
           }
         }
-        // Authoritative create/submit line total (shared with HQ/Branch/BA stages):
-        // HQ_BRANCH = FIFO payable snapshot; franchise/dealer = qty × frozen branch price.
-        // DRAFT Branch Manager list/open form must use qty × Цена для филиала (not FIFO).
-        const payableAmount = resolveBranchPurchaseLinePayableAmount({
-          branchType: branch?.branchType,
-          quantity,
-          estimatedLineProductCostKgs,
-          unitPriceKgs: branchPurchasePriceKgs,
-          hasPricingPolicy: pricing.hasPricingPolicy,
-        });
+        // Authoritative BPR commercial line total: always qty × frozen Цена для филиала.
+        // FIFO inventory cost is stored separately in estimatedLineProductCostKgs.
         const commercialAmount = resolveBranchPurchaseCommercialLineTotalKgs({
           quantity,
           branchPurchasePriceKgs,
           resolvedBranchPriceKgs: pricing.resolvedBranchPriceKgs,
         });
         const totalAmount =
-          options?.persistDraftCommercialTotals && commercialAmount > 0
+          commercialAmount > 0
             ? commercialAmount
-            : payableAmount;
+            : resolveBranchPurchaseLinePayableAmount({
+                branchType: branch?.branchType,
+                quantity,
+                estimatedLineProductCostKgs,
+                unitPriceKgs: branchPurchasePriceKgs,
+                hasPricingPolicy: pricing.hasPricingPolicy,
+              });
         const stockMetrics = hqStockMetrics.get(product.id);
 
         return {
@@ -6049,32 +6035,30 @@ export class OperationsService {
                 (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs ??
                 0,
             );
-            // Draft Branch Manager list/open form: qty × Цена для филиала.
-            // After submit/review: HQ_BRANCH payable stays FIFO inventory cost.
-            if (isDraftRequest) {
-              totalAmount = resolveBranchPurchaseDraftLineTotalKgs({
-                quantity: lineQuantity,
+            // BPR commercial totals always use saved Цена для филиала × effective qty.
+            // Live FIFO only refreshes estimatedLineProductCostKgs (inventory), never Сумма.
+            const moneyStage =
+              isDraftRequest ||
+              request.status === BranchPurchaseRequestStatus.SUBMITTED ||
+              request.status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ
+                ? ('draft' as const)
+                : ('reviewed' as const);
+            totalAmount = calculateBprLineTotalKgs(
+              {
+                quantity: Number(item.quantity ?? 0),
+                approvedQuantity: approved,
+                lineStatus: (item as { lineStatus?: string | null }).lineStatus,
                 branchPurchasePriceKgs: unitPriceKgs,
                 resolvedBranchPriceKgs: unitPriceKgs,
+                wholesalePriceKgs: (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs,
                 totalAmount: storedTotalAmount,
-                estimatedLineProductCostKgs,
-                branchType: branch?.branchType,
-                hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
-              });
-            } else {
-              const payableAmount = resolveBranchPurchaseLinePayableAmount({
-                branchType: branch?.branchType,
-                quantity: lineQuantity,
-                estimatedLineProductCostKgs,
-                unitPriceKgs,
-                hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
-              });
-              if (payableAmount > 0) {
-                totalAmount = payableAmount;
-                if (approved != null && approved > 0) {
-                  approvedLineTotalKgs = payableAmount;
-                }
-              }
+                approvedLineTotalKgs:
+                  (item as { approvedLineTotalKgs?: unknown }).approvedLineTotalKgs ?? null,
+              },
+              moneyStage === 'draft' ? 'pending_hq_review' : 'reviewed',
+            );
+            if (approved != null && approved > 0 && totalAmount > 0) {
+              approvedLineTotalKgs = totalAmount;
             }
 
             if (
@@ -6085,12 +6069,13 @@ export class OperationsService {
                 Math.abs(resolvedLineCost.estimatedUnitCost - storedUnitCost) > 0.009 ||
                 Math.abs(totalAmount - storedTotalAmount) > 0.009)
             ) {
+              // Persist FIFO inventory cost separately; always keep commercial line totals.
               staleCostRepairs.push({
                 itemId: item.id,
                 estimatedLineProductCostKgs: resolvedLineCost.estimatedLineProductCostKgs,
                 estimatedUnitCost: resolvedLineCost.estimatedUnitCost,
                 totalAmount,
-                approvedLineTotalKgs,
+                approvedLineTotalKgs: approvedLineTotalKgs,
               });
             }
           }
@@ -6128,25 +6113,25 @@ export class OperationsService {
       const totalProductCostKgs = sumDisplayMoneyTotals(
         enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
       );
-      const draftCommercialTotal = sumBranchPurchaseDraftLineTotalsKgs(
+      const commercialOrderTotal = calculateBprOrderTotalKgs(
         enrichedItems.map((item) => ({
           quantity: Number(item.quantity ?? 0),
+          approvedQuantity: (item as { approvedQuantity?: number | null }).approvedQuantity,
+          lineStatus: (item as { lineStatus?: string | null }).lineStatus,
           branchPurchasePriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
           resolvedBranchPriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
+          wholesalePriceKgs: (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs,
           totalAmount: item.totalAmount,
-          estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
-          branchType: branch?.branchType,
+          approvedLineTotalKgs: (item as { approvedLineTotalKgs?: unknown }).approvedLineTotalKgs,
         })),
+        isDraftRequest ||
+          request.status === BranchPurchaseRequestStatus.SUBMITTED ||
+          request.status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ
+          ? 'pending_hq_review'
+          : 'reviewed',
       );
-      const totalEstimatedAmount = isDraftRequest
-        ? draftCommercialTotal
-        : resolveBranchPurchaseEstimatedAmountKgs({
-            branchType: branch?.branchType,
-            totalProductCostKgs,
-            storedEstimatedAmountKgs: sumDisplayMoneyTotals(
-              enrichedItems.map((item) => Number(item.totalAmount ?? 0)),
-            ),
-          });
+      // BPR header is always commercial snapshot — never live FIFO product cost.
+      const totalEstimatedAmount = commercialOrderTotal;
 
       if (staleCostRepairs.length > 0 || transferAtCost || isDraftRequest) {
         const storedEstimated = roundDisplayMoney(
@@ -6189,9 +6174,7 @@ export class OperationsService {
                 oldAmount: storedEstimated,
                 correctedAmount: totalEstimatedAmount,
                 difference: roundDisplayMoney(totalEstimatedAmount - storedEstimated),
-                reason: isDraftRequest
-                  ? 'draft_estimated_amount_aligned_to_branch_price_times_qty'
-                  : 'estimated_amount_aligned_to_fifo_product_cost',
+                reason: 'bpr_commercial_total_aligned_to_saved_branch_price_times_qty',
                 repairedLineCount: staleCostRepairs.length,
                 itemIds: staleCostRepairs.map((row) => row.itemId),
                 timestamp: new Date().toISOString(),

@@ -299,13 +299,14 @@ export async function applyBranchPurchaseLineReviewInTx(
     estimatedUnitCost = fifoCost.estimatedUnitCost;
   }
 
-  // Persist authoritative Сумма at decision time.
-  // HQ_BRANCH: exact FIFO cost for approved qty (never display unit × qty).
+  // Persist authoritative commercial Сумма at decision time:
+  // approvedQty × saved Цена для филиала. FIFO stays on estimatedLineProductCostKgs only.
   const authoritativeLineAmount = computeBranchPurchaseHqReviewLineAmountKgs({
     quantity: item.quantity,
     approvedQuantity: resolved.approvedQuantity,
     lineStatus: resolved.lineStatus,
     resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    wholesalePriceKgs: (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs,
     totalAmount: item.totalAmount,
     approvedLineTotalKgs: item.approvedLineTotalKgs,
     estimatedLineProductCostKgs,
