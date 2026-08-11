@@ -5,6 +5,7 @@ import {
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
+import { applyHqBranchInternalDistributionProfit } from '../distribution/hq-branch-distribution-profit.util';
 
 export type BranchPurchaseConfirmLineSnapshot = {
   approvedQuantity?: number | null;
@@ -114,29 +115,34 @@ export function buildBranchPurchaseCommercialAgreementLines<
     const lineCost = hasInventoryCostSnapshot ? inventoryLineCost! : 0;
     const unitCost = hasInventoryCostSnapshot ? deriveDisplayUnitCost(lineCost, quantity) : 0;
 
-    lines.push({
-      productId: product.id,
-      sku: product.sku,
-      productName: product.name,
-      quantity,
-      unitCost,
-      unitPrice,
-      totalCost: lineCost,
-      totalPrice: linePrice,
-      profit: hasInventoryCostSnapshot ? roundDisplayMoney(linePrice - lineCost) : 0,
-      hasInventoryCostSnapshot,
-      pricingPolicyVersionId: item.pricingPolicyVersionId,
-      pricingProfileId: item.pricingProfileId,
-      resolvedPriceKgs: unitPrice,
-      baseCostKgs: Number(item.estimatedUnitCost ?? unitCost),
-      baseBranchPriceKgs: unitPrice,
-      appliedRuleType: item.appliedRuleType,
-      appliedRuleId: item.appliedRuleId,
-      appliedAdjustmentMode: item.appliedAdjustmentMode,
-      appliedAdjustmentValue:
-        item.appliedAdjustmentValue != null ? Number(item.appliedAdjustmentValue) : null,
-      priceResolvedAt: item.priceResolvedAt,
-    });
+    lines.push(
+      applyHqBranchInternalDistributionProfit(
+        {
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          quantity,
+          unitCost,
+          unitPrice,
+          totalCost: lineCost,
+          totalPrice: linePrice,
+          profit: hasInventoryCostSnapshot ? roundDisplayMoney(linePrice - lineCost) : 0,
+          hasInventoryCostSnapshot,
+          pricingPolicyVersionId: item.pricingPolicyVersionId,
+          pricingProfileId: item.pricingProfileId,
+          resolvedPriceKgs: unitPrice,
+          baseCostKgs: Number(item.estimatedUnitCost ?? unitCost),
+          baseBranchPriceKgs: unitPrice,
+          appliedRuleType: item.appliedRuleType,
+          appliedRuleId: item.appliedRuleId,
+          appliedAdjustmentMode: item.appliedAdjustmentMode,
+          appliedAdjustmentValue:
+            item.appliedAdjustmentValue != null ? Number(item.appliedAdjustmentValue) : null,
+          priceResolvedAt: item.priceResolvedAt,
+        },
+        options?.branchType,
+      ),
+    );
   }
 
   return lines;

@@ -9,6 +9,7 @@ import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
 } from './branch-purchase-review-totals.util';
+import { applyHqBranchInternalDistributionProfit } from '../distribution/hq-branch-distribution-profit.util';
 
 export type BranchPurchaseInvoiceLineSource = {
   id?: string;
@@ -135,14 +136,22 @@ export function buildDistributionOrderItemPricePatches(
       const totalPrice = approved.lineTotal;
       const unitPrice = approved.unitPrice;
 
+      const bprItem = bprItems.find((row) => row.productId === orderItem.productId);
+      const normalized = applyHqBranchInternalDistributionProfit(
+        {
+          quantity: approved.quantity,
+          unitPrice,
+          totalPrice,
+          unitCost,
+          totalCost,
+          profit: roundDisplayMoney(totalPrice - totalCost),
+        },
+        bprItem?.branchType ?? null,
+      );
+
       return {
         productId: orderItem.productId,
-        quantity: approved.quantity,
-        unitPrice,
-        totalPrice,
-        unitCost,
-        totalCost,
-        profit: roundDisplayMoney(totalPrice - totalCost),
+        ...normalized,
       };
     })
     .filter((row): row is DistributionOrderItemPricePatch => row != null);

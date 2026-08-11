@@ -90,6 +90,7 @@ import {
   buildDistributionOrderItemPricePatches,
   sumBranchPurchaseApprovedInvoiceTotalKgs,
 } from '../operations/branch-purchase-invoice-lines.util';
+import { shouldTransferBranchPurchaseAtCost } from '../operations/branch-purchase-estimated-amount.util';
 import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibility.util';
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
@@ -143,6 +144,11 @@ import {
 } from './branch-receiving.util';
 import { resolveMasterProductForReceivingInTx } from './branch-receiving-product.util';
 import { sanitizeDistributionOrderForBranchCeo } from './branch-ceo-distribution.presenter';
+import {
+  applyHqBranchInternalDistributionProfit,
+  normalizeHqBranchDistributionOrderResponse,
+  sumHqBranchDistributionOrderTotals,
+} from './hq-branch-distribution-profit.util';
 import {
   assertAllDistributionItemsPicked,
   assertDistributionOrderItemPickingAllowed,
@@ -382,21 +388,32 @@ export class DistributionService {
               userId: user.id,
               userRole: user.role,
             });
-            if ('totalCostKgs' in reserved) {
-              const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
-              const preservedUnitPrice = Number(item.unitPrice);
-              const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
-              await tx.branchDistributionOrderItem.update({
-                where: { id: item.id },
-                data: {
-                  unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
-                  totalCost,
-                  unitPrice: preservedUnitPrice,
-                  totalPrice: preservedTotalPrice,
-                  profit: roundDisplayMoney(preservedTotalPrice - totalCost),
-                },
-              });
-            }
+          if ('totalCostKgs' in reserved) {
+            const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
+            const preservedUnitPrice = Number(item.unitPrice);
+            const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
+            const reservedLine = applyHqBranchInternalDistributionProfit(
+              {
+                quantity: item.quantity,
+                unitPrice: preservedUnitPrice,
+                unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
+                totalPrice: preservedTotalPrice,
+                totalCost,
+                profit: roundDisplayMoney(preservedTotalPrice - totalCost),
+              },
+              branch?.branchType ?? null,
+            );
+            await tx.branchDistributionOrderItem.update({
+              where: { id: item.id },
+              data: {
+                unitCost: reservedLine.unitCost,
+                unitPrice: reservedLine.unitPrice,
+                totalCost: reservedLine.totalCost,
+                totalPrice: reservedLine.totalPrice,
+                profit: reservedLine.profit,
+              },
+            });
+          }
           } catch (error) {
             throw new BadRequestException(
               error instanceof Error ? error.message : `FIFO reservation failed for SKU ${item.sku}`,
@@ -443,18 +460,58 @@ export class DistributionService {
       const refreshedItems = await tx.branchDistributionOrderItem.findMany({
         where: { orderId: order.id },
       });
-      const totalAmount = sumDisplayMoneyTotals(refreshedItems.map((row) => Number(row.totalPrice)));
-      const totalCostSum = sumDisplayMoneyTotals(refreshedItems.map((row) => Number(row.totalCost)));
+      const branchType = linkedPurchaseRequest?.branch?.branchType ?? null;
+      if (branchType) {
+        for (const item of refreshedItems) {
+          const normalized = applyHqBranchInternalDistributionProfit(
+            {
+              quantity: item.quantity,
+              unitPrice: Number(item.unitPrice),
+              unitCost: Number(item.unitCost),
+              totalPrice: Number(item.totalPrice),
+              totalCost: Number(item.totalCost),
+              profit: Number(item.profit),
+            },
+            branchType,
+          );
+          if (
+            normalized.totalCost !== Number(item.totalCost) ||
+            normalized.profit !== Number(item.profit)
+          ) {
+            await tx.branchDistributionOrderItem.update({
+              where: { id: item.id },
+              data: {
+                unitCost: normalized.unitCost,
+                totalCost: normalized.totalCost,
+                unitPrice: normalized.unitPrice,
+                totalPrice: normalized.totalPrice,
+                profit: normalized.profit,
+              },
+            });
+          }
+        }
+      }
+
+      const finalItems = await tx.branchDistributionOrderItem.findMany({
+        where: { orderId: order.id },
+      });
+      const orderTotals = sumHqBranchDistributionOrderTotals(
+        finalItems.map((row) => ({
+          totalPrice: Number(row.totalPrice),
+          totalCost: Number(row.totalCost),
+        })),
+        branchType,
+      );
       await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
-          totalAmount,
-          totalCost: totalCostSum,
-          totalProfit: roundDisplayMoney(totalAmount - totalCostSum),
+          totalAmount: orderTotals.totalAmount,
+          totalCost: orderTotals.totalCost,
+          totalProfit: orderTotals.totalProfit,
         },
       });
 
-      if (!financialOnlyApprove) {
+      if (!financialOnlyApprove && !shouldTransferBranchPurchaseAtCost(branchType)) {
         const fifoAllocations = await tx.distributionFifoAllocation.findMany({
           where: {
             distributionOrderItem: { orderId: order.id },
@@ -464,7 +521,7 @@ export class DistributionService {
         });
         const transferReconciliation = reconcileBranchTransferCost(
           fifoAllocations.map((row) => Number(row.totalCostKgs)),
-          totalCostSum,
+          orderTotals.totalCost,
           'branch distribution approve',
         );
         if (!transferReconciliation.ok) {
@@ -999,6 +1056,11 @@ export class DistributionService {
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
+      const receivingBranch = await tx.branch.findUnique({
+        where: { id: order.branchId },
+        select: { code: true, branchType: true, hqToBranchMarkupPercent: true },
+      });
+
       const weightSnapshot = await this.buildDispatchWeightSnapshot(tx, order.items);
       if (weightSnapshot.missingWeightProducts.length > 0) {
         const productName = weightSnapshot.missingWeightProducts[0]!;
@@ -1087,10 +1149,7 @@ export class DistributionService {
           note: `Distribution order ${order.orderNumber}`,
         });
 
-        const branch = await tx.branch.findUnique({
-          where: { id: order.branchId },
-          select: { code: true, branchType: true, hqToBranchMarkupPercent: true },
-        });
+        const branch = receivingBranch;
         const product = await tx.product.findFirst({
           where: { id: inventoryProduct.productId, deletedAt: null },
           select: { hqBranchWholesaleMarkupPercent: true },
@@ -1121,14 +1180,27 @@ export class DistributionService {
 
         // Reconcile order line to the real multi-layer FIFO allocation (historical lock).
         if (consumed.allocatedQty > 0) {
+          const preservedTotalPrice = roundDisplayMoney(Number(item.totalPrice));
+          const preservedUnitPrice = Number(item.unitPrice);
+          const shipmentLine = applyHqBranchInternalDistributionProfit(
+            {
+              quantity: item.quantity,
+              unitPrice: preservedUnitPrice,
+              unitCost: this.roundMoney(consumed.totalCostKgs / consumed.allocatedQty),
+              totalPrice: preservedTotalPrice,
+              totalCost: this.roundMoney(consumed.totalCostKgs),
+              profit: this.roundMoney(consumed.profitKgs),
+            },
+            branch?.branchType ?? null,
+          );
           await tx.branchDistributionOrderItem.update({
             where: { id: item.id },
             data: {
-              unitCost: this.roundMoney(consumed.totalCostKgs / consumed.allocatedQty),
-              unitPrice: this.roundMoney(consumed.totalPriceKgs / consumed.allocatedQty),
-              totalCost: this.roundMoney(consumed.totalCostKgs),
-              totalPrice: this.roundMoney(consumed.totalPriceKgs),
-              profit: this.roundMoney(consumed.profitKgs),
+              unitCost: shipmentLine.unitCost,
+              unitPrice: shipmentLine.unitPrice,
+              totalCost: shipmentLine.totalCost,
+              totalPrice: shipmentLine.totalPrice,
+              profit: shipmentLine.profit,
             },
           });
 
@@ -1187,11 +1259,13 @@ export class DistributionService {
       const shippedItems = await tx.branchDistributionOrderItem.findMany({
         where: { orderId: order.id },
       });
-      const shippedTotalAmount = this.roundMoney(
-        shippedItems.reduce((sum, row) => sum + Number(row.totalPrice), 0),
-      );
-      const shippedTotalCost = this.roundMoney(
-        shippedItems.reduce((sum, row) => sum + Number(row.totalCost), 0),
+      const branchType = receivingBranch?.branchType ?? null;
+      const shippedTotals = sumHqBranchDistributionOrderTotals(
+        shippedItems.map((row) => ({
+          totalPrice: Number(row.totalPrice),
+          totalCost: Number(row.totalCost),
+        })),
+        branchType,
       );
 
       const updated = await tx.branchDistributionOrder.update({
@@ -1199,9 +1273,9 @@ export class DistributionService {
         data: {
           status: BranchDistributionOrderStatus.SHIPPED,
           sentAt: new Date(),
-          totalAmount: shippedTotalAmount,
-          totalCost: shippedTotalCost,
-          totalProfit: this.roundMoney(shippedTotalAmount - shippedTotalCost),
+          totalAmount: shippedTotals.totalAmount,
+          totalCost: shippedTotals.totalCost,
+          totalProfit: shippedTotals.totalProfit,
         },
         include: this.include(),
       });
@@ -4827,31 +4901,40 @@ export class DistributionService {
           : roundDisplayMoney(requestedPrice * quantity);
       const unitCost = deriveDisplayUnitCost(totalCost, quantity);
       const unitPrice = deriveDisplayUnitCost(totalPrice, quantity);
-      items.push({
-        productId: product.id,
-        sku: product.sku,
-        productName: product.name,
-        quantity,
-        unitCost,
-        unitPrice,
-        totalCost,
-        totalPrice,
-        profit: roundDisplayMoney(totalPrice - totalCost),
-        pricingPolicyVersionId: priceFreeze.pricingPolicyVersionId,
-        pricingProfileId: priceFreeze.pricingProfileId,
-        resolvedPriceKgs: priceFreeze.resolvedPriceKgs,
-        baseCostKgs: fifoPreview.activeUnitCost || priceFreeze.baseCostKgs,
-        baseBranchPriceKgs: fifoPreview.activeUnitPrice || priceFreeze.baseBranchPriceKgs,
-        appliedRuleType: priceFreeze.appliedRuleType,
-        appliedRuleId: priceFreeze.appliedRuleId,
-        appliedAdjustmentMode: priceFreeze.appliedAdjustmentMode,
-        appliedAdjustmentValue: priceFreeze.appliedAdjustmentValue,
-        priceResolvedAt: priceFreeze.priceResolvedAt,
-      });
+      items.push(
+        applyHqBranchInternalDistributionProfit(
+          {
+            productId: product.id,
+            sku: product.sku,
+            productName: product.name,
+            quantity,
+            unitCost,
+            unitPrice,
+            totalCost,
+            totalPrice,
+            profit: roundDisplayMoney(totalPrice - totalCost),
+            pricingPolicyVersionId: priceFreeze.pricingPolicyVersionId,
+            pricingProfileId: priceFreeze.pricingProfileId,
+            resolvedPriceKgs: priceFreeze.resolvedPriceKgs,
+            baseCostKgs: fifoPreview.activeUnitCost || priceFreeze.baseCostKgs,
+            baseBranchPriceKgs: fifoPreview.activeUnitPrice || priceFreeze.baseBranchPriceKgs,
+            appliedRuleType: priceFreeze.appliedRuleType,
+            appliedRuleId: priceFreeze.appliedRuleId,
+            appliedAdjustmentMode: priceFreeze.appliedAdjustmentMode,
+            appliedAdjustmentValue: priceFreeze.appliedAdjustmentValue,
+            priceResolvedAt: priceFreeze.priceResolvedAt,
+          },
+          branch?.branchType,
+        ),
+      );
     }
-    const totalAmount = sumDisplayMoneyTotals(items.map((item) => item.totalPrice));
-    const totalCost = sumDisplayMoneyTotals(items.map((item) => item.totalCost));
-    return { items, totalAmount, totalCost, totalProfit: roundDisplayMoney(totalAmount - totalCost) };
+    const orderTotals = sumHqBranchDistributionOrderTotals(items, branch?.branchType);
+    return {
+      items,
+      totalAmount: orderTotals.totalAmount,
+      totalCost: orderTotals.totalCost,
+      totalProfit: orderTotals.totalProfit,
+    };
   }
 
   private async generateOrderNumber(tx: PrismaTx) {
@@ -5439,7 +5522,7 @@ export class DistributionService {
     if (user && !canViewProductCost(user)) {
       return sanitizeDistributionOrderForBranchCeo(response);
     }
-    return response;
+    return normalizeHqBranchDistributionOrderResponse(response, order.branch?.branchType);
   }
 
   private sanitizeReceivingForUser(user: AuthUser, receiving: any) {

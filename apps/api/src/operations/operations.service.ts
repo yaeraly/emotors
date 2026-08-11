@@ -101,6 +101,7 @@ import {
   sumBranchPurchaseCommercialAgreementTotalKgs,
   sumPersistedApprovedInventoryCostKgs,
 } from './branch-purchase-branch-confirm.util';
+import { sumHqBranchDistributionOrderTotals } from '../distribution/hq-branch-distribution-profit.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 import {
   resolveBranchPurchaseFifoLineCost,
@@ -1624,8 +1625,9 @@ export class OperationsService {
       }
 
       const totalAmount = sumBranchPurchaseCommercialAgreementTotalKgs(builtLines);
-      const totalCost = sumBranchPurchaseCommercialAgreementInventoryCostKgs(builtLines);
-      const totalProfit = sumDisplayMoneyTotals(builtLines.map((line) => line.profit));
+      const hqBranchTotals = sumHqBranchDistributionOrderTotals(builtLines, branch?.branchType);
+      const totalCost = hqBranchTotals.totalCost;
+      const totalProfit = hqBranchTotals.totalProfit;
 
       const orderItems = builtLines.map((line) => ({
         productId: line.productId,

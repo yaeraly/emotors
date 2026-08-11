@@ -75,6 +75,26 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     assert.equal(sumBranchPurchaseCommercialAgreementTotalKgs(lines), 1000);
   });
 
+  it('HQ Branch internal transfer profit is zero while amount unchanged', () => {
+    const hqItem = {
+      ...approvedItem,
+      resolvedBranchPriceKgs: 36245.25,
+      approvedLineTotalKgs: 72490.5,
+      totalAmount: 72490.5,
+      estimatedLineProductCostKgs: 63148.89,
+      estimatedUnitCost: 31574.45,
+    };
+    const lines = buildBranchPurchaseCommercialAgreementLines(
+      [hqItem],
+      new Map([[product.id, product]]),
+      { branchType: 'HQ_BRANCH' },
+    );
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].totalPrice, 72490.5);
+    assert.equal(lines[0].totalCost, 72490.5);
+    assert.equal(lines[0].profit, 0);
+  });
+
   it('missing estimatedLineProductCostKgs does not block branch agreement (TRA002 regression)', () => {
     const itemWithoutInventoryCost = {
       ...approvedItem,
