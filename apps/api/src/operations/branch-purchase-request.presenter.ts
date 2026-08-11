@@ -335,6 +335,7 @@ export function presentBranchPurchaseRequestForUser<T extends {
     rejectionReasonCode?: string | null;
     publicComment?: string | null;
     hasPricingPolicyAtReview?: boolean | null;
+    hasPricingPolicyAtSubmit?: boolean | null;
     pricingPolicyVersionId?: unknown;
     pricingProfileId?: unknown;
     appliedRuleType?: unknown;
@@ -390,6 +391,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     rejectionReasonCode?: string | null;
     publicComment?: string | null;
     hasPricingPolicyAtReview?: boolean | null;
+    hasPricingPolicyAtSubmit?: boolean | null;
     pricingPolicyVersionId?: unknown;
     pricingProfileId?: unknown;
     appliedRuleType?: unknown;
@@ -534,7 +536,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
                 resolvedBranchPriceKgs: item.branchPurchasePriceKgs,
                 totalAmount: item.totalAmount,
                 estimatedLineProductCostKgs: fullItemsById.get(item.id ?? '')?.estimatedLineProductCostKgs,
-                hasPricingPolicyAtSubmit: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtSubmit,
+                hasPricingPolicyAtSubmit: (
+                  fullItemsById.get(item.id ?? '') as { hasPricingPolicyAtSubmit?: boolean | null } | undefined
+                )?.hasPricingPolicyAtSubmit,
                 hasPricingPolicyAtReview: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtReview,
               },
               request.branch?.branchType ?? request.branchType ?? null,
@@ -654,7 +658,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
               resolvedBranchPriceKgs: item.branchPurchasePriceKgs,
               totalAmount: item.totalAmount,
               estimatedLineProductCostKgs: fullItemsById.get(item.id ?? '')?.estimatedLineProductCostKgs,
-              hasPricingPolicyAtSubmit: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtSubmit,
+              hasPricingPolicyAtSubmit: (
+                fullItemsById.get(item.id ?? '') as { hasPricingPolicyAtSubmit?: boolean | null } | undefined
+              )?.hasPricingPolicyAtSubmit,
               hasPricingPolicyAtReview: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtReview,
             },
             branchType,

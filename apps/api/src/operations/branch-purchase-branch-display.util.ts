@@ -82,10 +82,16 @@ export function resolveBranchPurchaseDraftLineTotalKgs(item: {
   branchType?: string | null;
   hasPricingPolicy?: boolean | null;
 }): number {
+  const estimatedLineProductCostKgs =
+    item.estimatedLineProductCostKgs == null
+      ? null
+      : Number(item.estimatedLineProductCostKgs);
   const payable = resolveBranchPurchaseLinePayableAmount({
     branchType: item.branchType,
     quantity: item.quantity,
-    estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+    estimatedLineProductCostKgs: Number.isFinite(estimatedLineProductCostKgs)
+      ? estimatedLineProductCostKgs
+      : null,
     unitPriceKgs: resolveBranchPurchaseBranchUnitPriceKgs(item),
     hasPricingPolicy: item.hasPricingPolicy ?? true,
   });
