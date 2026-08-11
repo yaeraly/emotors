@@ -36,7 +36,7 @@ import {
   hqReviewPreviewLineAmount,
   hqReviewPreviewOrderAmount,
   requestLineTotal,
-  sortBranchSalesManagerReviewItemsPartialFirst,
+  sortBranchSalesManagerReviewItemsByApprovalResult,
   sumBranchPurchaseApprovedQuantity,
   sumBranchPurchaseRequestedQuantity,
   type HqReviewPreviewDraft,
@@ -664,7 +664,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const branchSalesTableItems = useMemo(() => {
     if (!request) return [];
     if (!reviewed) return request.items;
-    return sortBranchSalesManagerReviewItemsPartialFirst(request.items);
+    return sortBranchSalesManagerReviewItemsByApprovalResult(request.items);
   }, [request, reviewed]);
 
   if (user && !canView) {

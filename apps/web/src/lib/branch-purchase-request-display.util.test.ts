@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   branchOrderLineTotal,
   branchOrderTotal,
+  branchSalesManagerReviewLineDisplayPriority,
   branchSalesManagerReviewLineRowClass,
   draftFormLineTotal,
   draftFormOrderTotal,
@@ -15,10 +16,12 @@ import {
   hqReviewOrderAmount,
   hqReviewPreviewLineAmount,
   hqReviewPreviewOrderAmount,
+  isFullyApprovedBranchPurchaseReviewLine,
   isPartiallyApprovedBranchPurchaseLine,
+  isRejectedBranchPurchaseReviewLine,
   requestLineTotal,
   requestOrderTotal,
-  sortBranchSalesManagerReviewItemsPartialFirst,
+  sortBranchSalesManagerReviewItemsByApprovalResult,
   sumBranchPurchaseApprovedQuantity,
   sumBranchPurchaseRequestedQuantity,
 } from './branch-purchase-request-display.util';
@@ -727,18 +730,25 @@ describe('branch sales manager review quantity summary and row styling', () => {
     );
   });
 
-  it('sorts partial approvals first while preserving original order within each group', () => {
+  it('sorts rejected, then partial, then full while preserving original order within each group', () => {
     const items = [
       { id: 'a', quantity: 10, approvedQuantity: 10, lineStatus: 'APPROVED' },
-      { id: 'b', quantity: 10, approvedQuantity: 6, lineStatus: 'PARTIALLY_APPROVED' },
-      { id: 'c', quantity: 5, approvedQuantity: 5, lineStatus: 'APPROVED' },
-      { id: 'd', quantity: 8, approvedQuantity: 3, lineStatus: 'PARTIALLY_APPROVED' },
-      { id: 'e', quantity: 10, approvedQuantity: 0, lineStatus: 'REJECTED' },
+      { id: 'b', quantity: 5, approvedQuantity: 0, lineStatus: 'REJECTED' },
+      { id: 'c', quantity: 10, approvedQuantity: 6, lineStatus: 'PARTIALLY_APPROVED' },
+      { id: 'd', quantity: 4, approvedQuantity: 4, lineStatus: 'APPROVED' },
+      { id: 'e', quantity: 8, approvedQuantity: 3, lineStatus: 'PARTIALLY_APPROVED' },
+      { id: 'f', quantity: 2, approvedQuantity: 0, lineStatus: 'REJECTED' },
     ];
     assert.deepEqual(
-      sortBranchSalesManagerReviewItemsPartialFirst(items).map((item) => item.id),
-      ['b', 'd', 'a', 'c', 'e'],
+      sortBranchSalesManagerReviewItemsByApprovalResult(items).map((item) => item.id),
+      ['b', 'f', 'c', 'e', 'a', 'd'],
     );
+    assert.equal(branchSalesManagerReviewLineDisplayPriority(items[1]), 0);
+    assert.equal(branchSalesManagerReviewLineDisplayPriority(items[2]), 1);
+    assert.equal(branchSalesManagerReviewLineDisplayPriority(items[0]), 2);
+    assert.equal(isRejectedBranchPurchaseReviewLine(items[1]), true);
+    assert.equal(isPartiallyApprovedBranchPurchaseLine(items[2]), true);
+    assert.equal(isFullyApprovedBranchPurchaseReviewLine(items[0]), true);
   });
 
   it('exposes requested and approved quantities from persisted line fields', () => {

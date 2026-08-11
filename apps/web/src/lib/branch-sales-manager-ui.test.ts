@@ -65,7 +65,7 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(bsmTable, /formatLineTotalKgs\(item, branchOrderTotalOptions\)/);
     assert.match(bsmTable, /formatOrderTotalKgs\(request\.items, branchOrderTotalOptions\)/);
     assert.match(bsmTable, /branchSalesTableItems\.map/);
-    assert.match(detailPage, /sortBranchSalesManagerReviewItemsPartialFirst/);
+    assert.match(detailPage, /sortBranchSalesManagerReviewItemsByApprovalResult/);
     assert.match(detailPage, /branchSalesTableItems = useMemo/);
   });
 
@@ -262,6 +262,7 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(displayUtil, /isPartiallyApprovedBranchPurchaseLine/);
     assert.match(displayUtil, /bg-amber-50/);
     assert.match(displayUtil, /bg-red-50/);
-    assert.match(displayUtil, /sortBranchSalesManagerReviewItemsPartialFirst/);
+    assert.match(displayUtil, /sortBranchSalesManagerReviewItemsByApprovalResult/);
+    assert.match(displayUtil, /branchSalesManagerReviewLineDisplayPriority/);
   });
 });

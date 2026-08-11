@@ -307,11 +307,39 @@ export function isPartiallyApprovedBranchPurchaseLine(
   return approved < requested;
 }
 
+export function isRejectedBranchPurchaseReviewLine(
+  item: Pick<BranchPurchaseRequestLinePricing, 'approvedQuantity' | 'lineStatus'>,
+): boolean {
+  if (item.lineStatus === 'REJECTED' || item.lineStatus === 'REMOVED_BY_HQ_SALES') {
+    return true;
+  }
+  return Math.max(Number(item.approvedQuantity ?? 0), 0) <= 0;
+}
+
+export function isFullyApprovedBranchPurchaseReviewLine(
+  item: Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
+): boolean {
+  if (isRejectedBranchPurchaseReviewLine(item)) return false;
+  if (isPartiallyApprovedBranchPurchaseLine(item)) return false;
+  const requested = Math.max(Number(item.quantity ?? 0), 0);
+  const approved = Math.max(Number(item.approvedQuantity ?? 0), 0);
+  return requested > 0 && approved >= requested;
+}
+
+/** Branch Sales review table display priority: rejected → partial → full. */
+export function branchSalesManagerReviewLineDisplayPriority(
+  item: Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
+): 0 | 1 | 2 {
+  if (isRejectedBranchPurchaseReviewLine(item)) return 0;
+  if (isPartiallyApprovedBranchPurchaseLine(item)) return 1;
+  return 2;
+}
+
 /** Persisted branch review row styling: partial → amber, rejected → red, full approval → normal. */
 export function branchSalesManagerReviewLineRowClass(
   item: Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
 ): string {
-  if (item.lineStatus === 'REJECTED' || item.lineStatus === 'REMOVED_BY_HQ_SALES') {
+  if (isRejectedBranchPurchaseReviewLine(item)) {
     return 'bg-red-50';
   }
   if (isPartiallyApprovedBranchPurchaseLine(item)) {
@@ -320,20 +348,24 @@ export function branchSalesManagerReviewLineRowClass(
   return '';
 }
 
-/** Stable sort: partially approved lines first, preserving original submission order within each group. */
-export function sortBranchSalesManagerReviewItemsPartialFirst<
+/** Stable sort: rejected, then partial, then full — preserving original submission order within each group. */
+export function sortBranchSalesManagerReviewItemsByApprovalResult<
   T extends Pick<BranchPurchaseRequestLinePricing, 'quantity' | 'approvedQuantity' | 'lineStatus'>,
 >(items: T[]): T[] {
   return items
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
-      const leftPartial = isPartiallyApprovedBranchPurchaseLine(left.item) ? 0 : 1;
-      const rightPartial = isPartiallyApprovedBranchPurchaseLine(right.item) ? 0 : 1;
-      if (leftPartial !== rightPartial) return leftPartial - rightPartial;
+      const leftPriority = branchSalesManagerReviewLineDisplayPriority(left.item);
+      const rightPriority = branchSalesManagerReviewLineDisplayPriority(right.item);
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
       return left.index - right.index;
     })
     .map(({ item }) => item);
 }
+
+/** @deprecated Use sortBranchSalesManagerReviewItemsByApprovalResult */
+export const sortBranchSalesManagerReviewItemsPartialFirst =
+  sortBranchSalesManagerReviewItemsByApprovalResult;
 
 export function getBranchSalesReviewRequestedQuantity(
   item: Pick<BranchPurchaseRequestLinePricing, 'quantity'>,
