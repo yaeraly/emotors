@@ -10,8 +10,10 @@ import {
   resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
   resolveBranchPurchaseCommercialLineTotalKgs,
+  resolveBranchPurchaseDraftLineTotalKgs,
   sumBranchPurchaseBranchLineTotalsKgs,
   sumBranchPurchaseCommercialLineTotalsKgs,
+  sumBranchPurchaseDraftLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 import { computeBranchPurchaseHqReviewLineAmountKgs } from './branch-purchase-review-totals.util';
@@ -30,6 +32,27 @@ export function isPendingHqSalesReviewStatus(status: BranchPurchaseRequestStatus
     status === BranchPurchaseRequestStatus.SUBMITTED ||
     status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ
   );
+}
+
+export function isDraftBranchPurchaseRequestStatus(status: BranchPurchaseRequestStatus): boolean {
+  return status === BranchPurchaseRequestStatus.DRAFT;
+}
+
+function resolveDraftLinePricingContext(
+  item: Record<string, unknown>,
+  branchType: string | null,
+) {
+  return {
+    quantity: Number(item.quantity ?? 0),
+    branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+    resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+    totalAmount: item.totalAmount,
+    estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+    branchType,
+    hasPricingPolicy:
+      (item.hasPricingPolicyAtReview as boolean | null | undefined) ??
+      (item.hasPricingPolicyAtSubmit as boolean | null | undefined),
+  };
 }
 
 const REVIEWED_REQUEST_STATUSES = new Set<BranchPurchaseRequestStatus>([
@@ -129,6 +152,7 @@ export function toBranchPurchaseRequestResponse<T extends {
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
   const transferAtCost = shouldTransferBranchPurchaseAtCost(branchType);
   const orderedItems = sortBranchPurchaseRequestItems(request.items);
+  const isDraft = isDraftBranchPurchaseRequestStatus(request.status);
   const items = orderedItems.map((rawItem) => {
     const item = toBranchPurchaseRequestItemResponse(
       rawItem as Parameters<typeof toBranchPurchaseRequestItemResponse>[0],
@@ -148,7 +172,23 @@ export function toBranchPurchaseRequestResponse<T extends {
       branchType,
     });
     const storedTotal = roundDisplayMoney(Number(item.totalAmount ?? 0));
-    const resolvedTotal = lineAmount > 0 ? lineAmount : storedTotal;
+    const resolvedTotal = isDraft
+      ? resolveBranchPurchaseDraftLineTotalKgs(
+          resolveDraftLinePricingContext(
+            {
+              ...item,
+              branchPurchasePriceKgs: (item as { branchPurchasePriceKgs?: unknown }).branchPurchasePriceKgs,
+              hasPricingPolicyAtSubmit: (item as { hasPricingPolicyAtSubmit?: boolean | null })
+                .hasPricingPolicyAtSubmit,
+              hasPricingPolicyAtReview: (item as { hasPricingPolicyAtReview?: boolean | null })
+                .hasPricingPolicyAtReview,
+            },
+            branchType,
+          ),
+        )
+      : lineAmount > 0
+        ? lineAmount
+        : storedTotal;
     const approvedQty = Math.max(Number(item.approvedQuantity ?? 0), 0);
     return {
       ...item,
@@ -178,8 +218,15 @@ export function toBranchPurchaseRequestResponse<T extends {
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
   // approvedOrderTotal = SUM(authoritative line totals) — consumed by all downstream roles.
   const computedOrderTotal = sumApiMoneyKgs(items.map((item) => Number(item.totalAmount ?? 0)));
-  const totalEstimatedAmount =
-    computedOrderTotal > 0 ? computedOrderTotal : toApiMoneyKgs(request.totalEstimatedAmount);
+  const totalEstimatedAmount = isDraft
+    ? sumBranchPurchaseDraftLineTotalsKgs(
+        items.map((item) =>
+          resolveDraftLinePricingContext(item as Record<string, unknown>, branchType),
+        ),
+      )
+    : computedOrderTotal > 0
+      ? computedOrderTotal
+      : toApiMoneyKgs(request.totalEstimatedAmount);
 
   return {
     ...request,
@@ -365,6 +412,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     branchDisplayStatus: resolveBranchDisplayStatus(request.status, request.items),
     partialFulfillmentMessage: null,
   });
+  const isDraft = isDraftBranchPurchaseRequestStatus(request.status);
 
   if (!hideSensitive) {
     return full;
@@ -386,6 +434,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
     request.branch?.branchType ?? request.branchType ?? null,
   );
   const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
+  const branchType = request.branch?.branchType ?? request.branchType ?? null;
 
   // HQ_BRANCH at-cost: after HQ review, branch users see the same FIFO payable totals as HQ Sales.
   // Cost field names are stripped; Сумма itself remains the authoritative FIFO payable amount.
@@ -401,8 +450,22 @@ export function sanitizeBranchPurchaseRequest<T extends {
         const fifoLineTotal = roundDisplayMoney(
           Number(fullItem?.totalAmount ?? item.totalAmount ?? 0),
         );
-        const lineTotal =
-          pendingHqSalesReview && !reviewed
+        const draftLineContext = resolveDraftLinePricingContext(
+          {
+            quantity: item.quantity,
+            branchPurchasePriceKgs: branchUnitPrice,
+            resolvedBranchPriceKgs: branchUnitPrice,
+            totalAmount: item.totalAmount,
+            estimatedLineProductCostKgs:
+              fullItem?.estimatedLineProductCostKgs ?? item.estimatedLineProductCostKgs,
+            hasPricingPolicyAtSubmit: item.hasPricingPolicyAtSubmit,
+            hasPricingPolicyAtReview: item.hasPricingPolicyAtReview,
+          },
+          branchType,
+        );
+        const lineTotal = isDraft
+          ? resolveBranchPurchaseDraftLineTotalKgs(draftLineContext)
+          : pendingHqSalesReview && !reviewed
             ? fifoLineTotal > 0
               ? fifoLineTotal
               : resolveBranchPurchaseBranchLineTotalKgs({
@@ -461,8 +524,24 @@ export function sanitizeBranchPurchaseRequest<T extends {
         };
       });
 
-    const branchOrderTotal =
-      pendingHqSalesReview && !reviewed
+    const branchOrderTotal = isDraft
+      ? sumBranchPurchaseDraftLineTotalsKgs(
+          sanitizedItems.map((item) =>
+            resolveDraftLinePricingContext(
+              {
+                quantity: item.quantity,
+                branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+                resolvedBranchPriceKgs: item.branchPurchasePriceKgs,
+                totalAmount: item.totalAmount,
+                estimatedLineProductCostKgs: fullItemsById.get(item.id ?? '')?.estimatedLineProductCostKgs,
+                hasPricingPolicyAtSubmit: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtSubmit,
+                hasPricingPolicyAtReview: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtReview,
+              },
+              request.branch?.branchType ?? request.branchType ?? null,
+            ),
+          ),
+        )
+      : pendingHqSalesReview && !reviewed
         ? roundDisplayMoney(
             Number(full.totalEstimatedAmount ?? 0) > 0
               ? Number(full.totalEstimatedAmount)
@@ -494,8 +573,23 @@ export function sanitizeBranchPurchaseRequest<T extends {
       branchPurchasePriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
       resolvedBranchPriceKgs: fullItem?.resolvedBranchPriceKgs ?? item.resolvedBranchPriceKgs,
     });
-    const lineTotal =
-      pendingHqSalesReview || !reviewed
+    const lineTotal = isDraft
+      ? resolveBranchPurchaseDraftLineTotalKgs(
+          resolveDraftLinePricingContext(
+            {
+              quantity: item.quantity,
+              branchPurchasePriceKgs: branchUnitPrice,
+              resolvedBranchPriceKgs: branchUnitPrice,
+              totalAmount: item.totalAmount,
+              estimatedLineProductCostKgs:
+                fullItem?.estimatedLineProductCostKgs ?? item.estimatedLineProductCostKgs,
+              hasPricingPolicyAtSubmit: item.hasPricingPolicyAtSubmit,
+              hasPricingPolicyAtReview: item.hasPricingPolicyAtReview,
+            },
+            branchType,
+          ),
+        )
+      : pendingHqSalesReview || !reviewed
         ? resolveBranchPurchaseCommercialLineTotalKgs({
             quantity: item.quantity,
             branchPurchasePriceKgs: branchUnitPrice,
@@ -550,8 +644,24 @@ export function sanitizeBranchPurchaseRequest<T extends {
     };
   });
 
-  const branchOrderTotal =
-    pendingHqSalesReview || !reviewed
+  const branchOrderTotal = isDraft
+    ? sumBranchPurchaseDraftLineTotalsKgs(
+        branchItems.map((item) =>
+          resolveDraftLinePricingContext(
+            {
+              quantity: item.quantity,
+              branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+              resolvedBranchPriceKgs: item.branchPurchasePriceKgs,
+              totalAmount: item.totalAmount,
+              estimatedLineProductCostKgs: fullItemsById.get(item.id ?? '')?.estimatedLineProductCostKgs,
+              hasPricingPolicyAtSubmit: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtSubmit,
+              hasPricingPolicyAtReview: fullItemsById.get(item.id ?? '')?.hasPricingPolicyAtReview,
+            },
+            branchType,
+          ),
+        ),
+      )
+    : pendingHqSalesReview || !reviewed
       ? sumBranchPurchaseCommercialLineTotalsKgs(
           branchItems.map((item) => ({
             quantity: item.quantity,

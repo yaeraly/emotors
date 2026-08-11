@@ -724,7 +724,15 @@ export class OperationsService {
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
-    return updated;
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: updated.branchId, deletedAt: null },
+      select: { branchType: true, assignedHqWarehouseId: true },
+    });
+    const enriched = await this.enrichBranchPurchaseRequestWithHqStock(user, {
+      ...updated,
+      branch,
+    });
+    return this.presentBranchPurchaseRequestResponse(user, enriched);
   }
 
   async submitBranchPurchaseRequest(user: AuthUser, id: string) {

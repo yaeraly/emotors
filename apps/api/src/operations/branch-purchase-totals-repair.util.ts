@@ -1,6 +1,10 @@
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import {
+  resolveBranchPurchaseDraftLineTotalKgs,
+  sumBranchPurchaseDraftLineTotalsKgs,
+} from './branch-purchase-branch-display.util';
+import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   sumBranchPurchaseHqReviewLineAmountsKgs,
 } from './branch-purchase-review-totals.util';
@@ -66,6 +70,7 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
   const branchType = (request.branch as { branchType?: string | null } | null)?.branchType ?? null;
   const items = request.items as Array<Record<string, unknown>>;
   const previousOrderTotalKgs = roundDisplayMoney(Number(request.totalEstimatedAmount ?? 0));
+  const isDraft = request.status === BranchPurchaseRequestStatus.DRAFT;
 
   const lineRepairs: Array<{ itemId: string; previousKgs: number; repairedKgs: number }> = [];
   const repairedLineAmounts = new Map<string, number>();
@@ -78,13 +83,19 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
       totalAmount: row.totalAmount,
       approvedLineTotalKgs: row.approvedLineTotalKgs,
       resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+      branchPurchasePriceKgs: row.branchPurchasePriceKgs,
       estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
       hasPricingPolicyAtReview:
         (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
         (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
       branchType,
+      hasPricingPolicy:
+        (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
+        (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
     };
-    const repairedKgs = computeBranchPurchaseHqReviewLineAmountKgs(lineInput);
+    const repairedKgs = isDraft
+      ? resolveBranchPurchaseDraftLineTotalKgs(lineInput)
+      : computeBranchPurchaseHqReviewLineAmountKgs(lineInput);
     const previousKgs = roundDisplayMoney(Number(row.totalAmount ?? 0));
     const reviewed =
       row.lineStatus != null && row.lineStatus !== 'PENDING_REVIEW';
@@ -103,21 +114,35 @@ export async function repairBranchPurchaseRequestDerivedTotalsInTx(
     repairedLineAmounts.set(String(row.id), repairedKgs);
   }
 
-  const repairedOrderTotalKgs = sumBranchPurchaseHqReviewLineAmountsKgs(
-    items.map((row) => ({
-      quantity: Number(row.quantity ?? 0),
-      approvedQuantity: row.approvedQuantity as number | null | undefined,
-      lineStatus: row.lineStatus as string | null | undefined,
-      totalAmount: repairedLineAmounts.get(String(row.id)) ?? row.totalAmount,
-      approvedLineTotalKgs: repairedLineAmounts.get(String(row.id)) ?? row.approvedLineTotalKgs,
-      resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
-      estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
-      hasPricingPolicyAtReview:
-        (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
-        (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
-      branchType,
-    })),
-  );
+  const repairedOrderTotalKgs = isDraft
+    ? sumBranchPurchaseDraftLineTotalsKgs(
+        items.map((row) => ({
+          quantity: Number(row.quantity ?? 0),
+          branchPurchasePriceKgs: row.branchPurchasePriceKgs,
+          resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+          totalAmount: repairedLineAmounts.get(String(row.id)) ?? row.totalAmount,
+          estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
+          branchType,
+          hasPricingPolicy:
+            (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
+            (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
+        })),
+      )
+    : sumBranchPurchaseHqReviewLineAmountsKgs(
+        items.map((row) => ({
+          quantity: Number(row.quantity ?? 0),
+          approvedQuantity: row.approvedQuantity as number | null | undefined,
+          lineStatus: row.lineStatus as string | null | undefined,
+          totalAmount: repairedLineAmounts.get(String(row.id)) ?? row.totalAmount,
+          approvedLineTotalKgs: repairedLineAmounts.get(String(row.id)) ?? row.approvedLineTotalKgs,
+          resolvedBranchPriceKgs: row.resolvedBranchPriceKgs,
+          estimatedLineProductCostKgs: row.estimatedLineProductCostKgs,
+          hasPricingPolicyAtReview:
+            (row.hasPricingPolicyAtReview as boolean | null | undefined) ??
+            (row.hasPricingPolicyAtSubmit as boolean | null | undefined),
+          branchType,
+        })),
+      );
 
   await tx.branchPurchaseRequest.update({
     where: { id: requestId },
@@ -157,5 +182,5 @@ export function assertBranchPurchaseRequestTotalParity(
 }
 
 export function isRepairableBranchPurchaseRequestStatus(status: BranchPurchaseRequestStatus): boolean {
-  return REVIEWED_STATUSES.has(status);
+  return status === BranchPurchaseRequestStatus.DRAFT || REVIEWED_STATUSES.has(status);
 }

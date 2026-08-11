@@ -10,7 +10,9 @@ import {
 import {
   resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
+  resolveBranchPurchaseDraftLineTotalKgs,
   sumBranchPurchaseBranchLineTotalsKgs,
+  sumBranchPurchaseDraftLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
 import { sanitizeBranchPurchaseRequest, toBranchPurchaseRequestResponse } from './branch-purchase-request.presenter';
 
@@ -323,5 +325,108 @@ describe('branch purchase branch display totals', () => {
     assert.equal(lineSum, CHINA_BATCH_TOTAL);
     assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
     assert.notEqual(sanitized.totalEstimatedAmount, commercialHeader);
+  });
+
+  it('draft HQ_BRANCH list/detail parity when one line has FIFO snapshot but stale stored totalAmount', () => {
+    const request = {
+      status: BranchPurchaseRequestStatus.DRAFT,
+      reviewedAt: null,
+      totalEstimatedAmount: 63148.89,
+      transportCostKgs: 0,
+      branch: { branchType: 'HQ_BRANCH' },
+      items: [
+        {
+          id: 'line-1',
+          productId: 'prod-1',
+          sku: 'A',
+          productName: 'Line A',
+          quantity: 2,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: 55707.28,
+          resolvedBranchPriceKgs: 27853.64,
+          totalAmount: 55707.28,
+        },
+        {
+          id: 'line-2',
+          productId: 'prod-2',
+          sku: 'B',
+          productName: 'Line B',
+          quantity: 1,
+          unit: 'pcs',
+          estimatedLineProductCostKgs: 16783.22,
+          resolvedBranchPriceKgs: 7441.61,
+          totalAmount: 7441.61,
+        },
+      ],
+    };
+    const full = toBranchPurchaseRequestResponse(request);
+    const sanitized = sanitizeBranchPurchaseRequest(request, true);
+    const lineSum = roundDisplayMoney(
+      sanitized.items.reduce(
+        (sum, item) => sum + Number((item as { totalAmount?: number }).totalAmount ?? 0),
+        0,
+      ),
+    );
+
+    assert.equal(resolveBranchPurchaseDraftLineTotalKgs({
+      quantity: 2,
+      estimatedLineProductCostKgs: 55707.28,
+      resolvedBranchPriceKgs: 27853.64,
+      branchType: 'HQ_BRANCH',
+    }), 55707.28);
+    assert.equal(resolveBranchPurchaseDraftLineTotalKgs({
+      quantity: 1,
+      estimatedLineProductCostKgs: 16783.22,
+      resolvedBranchPriceKgs: 7441.61,
+      totalAmount: 7441.61,
+      branchType: 'HQ_BRANCH',
+    }), 16783.22);
+    assert.equal(sumBranchPurchaseDraftLineTotalsKgs([
+      {
+        quantity: 2,
+        estimatedLineProductCostKgs: 55707.28,
+        resolvedBranchPriceKgs: 27853.64,
+        branchType: 'HQ_BRANCH',
+      },
+      {
+        quantity: 1,
+        estimatedLineProductCostKgs: 16783.22,
+        resolvedBranchPriceKgs: 7441.61,
+        totalAmount: 7441.61,
+        branchType: 'HQ_BRANCH',
+      },
+    ]), 72490.5);
+    assert.equal(full.totalEstimatedAmount, 72490.5);
+    assert.equal(sanitized.totalEstimatedAmount, 72490.5);
+    assert.equal(lineSum, 72490.5);
+    assert.notEqual(sanitized.totalEstimatedAmount, 63148.89);
+  });
+
+  it('draft franchise list total equals sum of qty × branch price rows', () => {
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.DRAFT,
+        reviewedAt: null,
+        totalEstimatedAmount: 25000,
+        transportCostKgs: 0,
+        branch: { branchType: 'FRANCHISE' },
+        items: [
+          {
+            id: 'line-1',
+            productId: 'prod-1',
+            sku: 'SKU-1',
+            productName: 'Контроллер',
+            quantity: 10,
+            unit: 'pcs',
+            resolvedBranchPriceKgs: 2500,
+            totalAmount: 20000,
+          },
+        ],
+      },
+      true,
+    );
+
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 25000);
+    assert.equal(sanitized.totalEstimatedAmount, 25000);
   });
 });

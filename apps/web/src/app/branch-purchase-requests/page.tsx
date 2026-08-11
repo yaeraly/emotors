@@ -39,7 +39,7 @@ import {
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
-import { draftFormLineTotal, draftFormOrderTotal } from '@/lib/branch-purchase-request-display.util';
+import { branchOrderTotal, draftFormLineTotal, draftFormOrderTotal } from '@/lib/branch-purchase-request-display.util';
 import { formatKgsLocalized } from '@/lib/money';
 
 import { toast } from '@/lib/toast';
@@ -87,6 +87,7 @@ type BranchPurchaseRequest = {
   transportNotes?: string | null;
   totalQuantity?: number;
   totalEstimatedAmount?: number;
+  reviewedAt?: string | null;
   convertedOrderId?: string | null;
   items: RequestItem[];
   createdAt: string;
@@ -184,6 +185,37 @@ function linesFromRequest(request: BranchPurchaseRequest): DraftLine[] {
 
 function isSubmittedStatus(status: string) {
   return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
+}
+
+function isReviewedPurchaseRequest(request: BranchPurchaseRequest): boolean {
+  const reviewedStatuses = new Set([
+    'APPROVED',
+    'PARTIALLY_APPROVED',
+    'REJECTED',
+    'PENDING_BRANCH_CONFIRMATION',
+    'BRANCH_CONFIRMED',
+    'BRANCH_DECLINED',
+    'READY_FOR_HQ_WAREHOUSE',
+    'SENT_TO_HQ_WAREHOUSE',
+    'SHIPPED',
+    'RECEIVED',
+    'RECEIVED_WITH_DIFFERENCE',
+    'COMPLETED',
+    'PAYMENT_CONFIRMED',
+    'PAYMENT_SUBMITTED',
+    'PENDING_PAYMENT',
+    'PENDING_INSTALLMENT_APPROVAL',
+  ]);
+  return Boolean(request.reviewedAt) || reviewedStatuses.has(request.status);
+}
+
+/** Same total rules as draft/order detail — never show a stale header alone. */
+function branchPurchaseListAmount(request: BranchPurchaseRequest): number {
+  return branchOrderTotal(request.items, {
+    requestStatus: request.status,
+    reviewed: isReviewedPurchaseRequest(request),
+    totalEstimatedAmount: request.totalEstimatedAmount,
+  });
 }
 
 function totalRequestedQuantity(request: BranchPurchaseRequest) {
@@ -1289,7 +1321,7 @@ function BranchPurchaseRequestsPageInner() {
                       <td className={hqTdClass(false)}>{resolveRequestStatusLabel(t, request, false)}</td>
                     </>
                   ) : branchOnlyView ? (
-                    <td className={hqTdClass(false)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                    <td className={hqTdClass(false)}>{branchPurchaseListAmount(request).toFixed(2)}</td>
                   ) : null}
                   {!ceoInspectorView ? (
                     <td className={hqTdClass(false, 'whitespace-nowrap')}>{new Date(request.createdAt).toLocaleDateString()}</td>

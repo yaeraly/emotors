@@ -105,6 +105,11 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(detailPage, /getBranchOrderDisplayQuantity/);
   });
 
+  it('branch order list uses shared branchOrderTotal helper for branch manager table', () => {
+    assert.match(listPage, /branchPurchaseListAmount\(request\)/);
+    assert.match(listPage, /branchOrderTotal\(request\.items/);
+  });
+
   it('create and draft product table line Сумма uses displayed Цена для филиала × quantity', () => {
     assert.match(listPage, /draftFormLineTotal\(line\)/);
     assert.match(listPage, /draftFormOrderTotal\(lines\)/);

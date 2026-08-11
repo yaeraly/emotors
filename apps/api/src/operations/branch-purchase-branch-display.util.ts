@@ -1,4 +1,5 @@
-import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import { resolveBranchPurchaseLinePayableAmount } from './branch-purchase-estimated-amount.util';
 
 /** CEO-approved branch unit price frozen on the order line (never wholesale/cost). */
 export function resolveBranchPurchaseBranchUnitPriceKgs(item: {
@@ -65,6 +66,46 @@ export function resolveBranchPurchaseBranchLineTotalKgs(item: {
   }
   const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
   return stored > 0 ? stored : 0;
+}
+
+/**
+ * Authoritative draft line Сумма — same rules as Branch Manager draft detail.
+ * HQ_BRANCH: FIFO payable when known; otherwise qty × frozen branch price.
+ * Never prefer a stale stored line total over a fresh payable/commercial amount.
+ */
+export function resolveBranchPurchaseDraftLineTotalKgs(item: {
+  quantity: number;
+  branchPurchasePriceKgs?: unknown;
+  resolvedBranchPriceKgs?: unknown;
+  totalAmount?: unknown;
+  estimatedLineProductCostKgs?: unknown;
+  branchType?: string | null;
+  hasPricingPolicy?: boolean | null;
+}): number {
+  const payable = resolveBranchPurchaseLinePayableAmount({
+    branchType: item.branchType,
+    quantity: item.quantity,
+    estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+    unitPriceKgs: resolveBranchPurchaseBranchUnitPriceKgs(item),
+    hasPricingPolicy: item.hasPricingPolicy ?? true,
+  });
+  if (payable > 0) {
+    return payable;
+  }
+  const commercial = resolveBranchPurchaseCommercialLineTotalKgs(item);
+  if (commercial > 0) {
+    return commercial;
+  }
+  const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
+  return stored > 0 ? stored : 0;
+}
+
+export function sumBranchPurchaseDraftLineTotalsKgs(
+  items: Array<Parameters<typeof resolveBranchPurchaseDraftLineTotalKgs>[0]>,
+): number {
+  return sumDisplayMoneyTotals(
+    items.map((item) => resolveBranchPurchaseDraftLineTotalKgs(item)),
+  );
 }
 
 export function sumBranchPurchaseBranchLineTotalsKgs(
