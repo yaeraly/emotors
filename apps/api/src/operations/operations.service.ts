@@ -94,6 +94,11 @@ import {
 import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
 import { branchPurchaseRequestItemsInclude } from './branch-purchase-request-items-order.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
+import {
+  buildBranchPurchaseConfirmDistributionLines,
+  sumBranchPurchaseConfirmDistributionCostKgs,
+  sumPersistedApprovedInventoryCostKgs,
+} from './branch-purchase-branch-confirm.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 import {
   resolveBranchPurchaseFifoLineCost,
@@ -1559,65 +1564,26 @@ export class OperationsService {
         where: { id: existing.branchId, deletedAt: null },
         select: { branchType: true, hqToBranchMarkupPercent: true },
       });
-      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
 
+      // Branch Sales «Согласовать заказ» is workflow confirmation only.
+      // Use persisted HQ-review line snapshots — never live FIFO allocation/validation here.
       const productsById = new Map<string, Pick<Product, 'id' | 'sku' | 'name' | 'finalCostKgs'>>();
-      const fifoLineCosts: number[] = [];
-      const itemsWithFifoCosts = [];
 
       for (const item of existing.items) {
         const approvedQuantity = item.approvedQuantity ?? 0;
-        if (approvedQuantity <= 0) {
-          itemsWithFifoCosts.push(item);
-          continue;
-        }
+        if (approvedQuantity <= 0) continue;
 
         const product = await tx.product.findFirst({
           where: { id: item.productId, deletedAt: null },
         });
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
         productsById.set(product.id, product);
-
-        const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, tx, {
-          productId: item.productId,
-          warehouseId: assignedHqWarehouseId,
-          quantity: approvedQuantity,
-          branchType: branch?.branchType,
-          hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
-          fallbackUnitCost: Number(item.estimatedUnitCost ?? 0),
-          fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? 0),
-        });
-        if (fifoCost.allocatedQty < approvedQuantity) {
-          throw new BadRequestException(
-            `Insufficient FIFO stock for SKU ${item.sku}. Requested: ${approvedQuantity} Available: ${fifoCost.allocatedQty}`,
-          );
-        }
-
-        fifoLineCosts.push(fifoCost.estimatedLineProductCostKgs);
-        await tx.branchPurchaseRequestItem.update({
-          where: { id: item.id },
-          data: {
-            estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
-            estimatedUnitCost: fifoCost.estimatedUnitCost,
-          },
-        });
-        itemsWithFifoCosts.push({
-          ...item,
-          estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
-          estimatedUnitCost: fifoCost.estimatedUnitCost,
-        });
       }
-
-      const fifoOrderTotal = sumBranchPurchaseLineProductCosts(fifoLineCosts);
-      // Inventory FIFO cost is refreshed for transfer costing only.
-      // Do NOT overwrite BPR commercial totalEstimatedAmount with live FIFO —
-      // commercial Сумма stays qty × saved Цена для филиала across role transitions.
-      void fifoOrderTotal;
 
       let builtLines;
       try {
-        builtLines = buildDistributionLinesFromConfirmedRequestItems(
-          itemsWithFifoCosts as typeof existing.items,
+        builtLines = buildBranchPurchaseConfirmDistributionLines(
+          existing.items as typeof existing.items,
           productsById,
           { branchType: branch?.branchType },
         );
@@ -1625,15 +1591,21 @@ export class OperationsService {
         if (error instanceof Error && error.message.includes('Approved price missing')) {
           throw new BadRequestException(error.message);
         }
+        if (error instanceof Error && error.message.includes('Authoritative FIFO line cost missing')) {
+          throw new BadRequestException(
+            `Сохранённая себестоимость строки отсутствует для SKU. Повторите согласование после проверки HQ Sales.`,
+          );
+        }
         throw error;
       }
       if (!builtLines.length) {
         throw new BadRequestException('Order has no approved items');
       }
 
-      const orderTransferTotal = sumDisplayMoneyTotals(builtLines.map((line) => line.totalCost));
+      const storedInventoryTotal = sumPersistedApprovedInventoryCostKgs(existing.items);
+      const orderTransferTotal = sumBranchPurchaseConfirmDistributionCostKgs(builtLines);
       const reconciliation = compareAuthoritativeCostTotals(
-        fifoOrderTotal,
+        storedInventoryTotal,
         orderTransferTotal,
         'branch purchase confirm',
       );
