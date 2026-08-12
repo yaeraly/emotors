@@ -62,6 +62,7 @@ export const warehouseManagerDistributionHubSections: ModuleSectionLink[] = [
   { href: '/distribution/orders', labelKey: 'wm.hub.distribution.shipping' },
   { href: '/distribution/orders', labelKey: 'wm.hub.distribution.shippedOrders' },
   { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
+  { href: '/branch-hq-returns', labelKey: 'branchHqReturn.menuHqWarehouse' },
 ];
 
 export const supplyChainHubSections: ModuleSectionLink[] = [

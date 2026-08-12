@@ -262,6 +262,7 @@ const WAREHOUSE_MANAGER_ALLOWED_PREFIXES = [
   '/stock-movements',
   '/hq-warehouses',
   '/distribution',
+  '/branch-hq-returns',
 ];
 
 export function isWarehouseManagerForbiddenPath(pathname: string) {
@@ -503,6 +504,7 @@ const BRANCH_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/branch-manager',
   '/branch-purchase-requests',
+  '/branch-hq-returns',
   '/alerts',
   '/notifications',
 ];
@@ -520,6 +522,7 @@ const BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES = [
   '/distribution/orders',
   '/distribution/receivings',
   '/distribution/shortage-reports',
+  '/branch-hq-returns',
   '/alerts',
   '/notifications',
 ];
@@ -665,6 +668,7 @@ const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/products',
   '/branch-purchase-requests',
   '/branch-manager',
+  '/branch-hq-returns',
   '/follow-ups',
   '/alerts',
   '/notifications',
@@ -892,6 +896,19 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/returns')) return hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
+  if (pathname === '/branch-hq-returns' || pathname.startsWith('/branch-hq-returns/')) {
+    return (
+      hasFullAccess(user) ||
+      isCeoUser(user) ||
+      isWarehouseManagerUser(user) ||
+      isHqAccountantUser(user) ||
+      hasRole(user, 'FINANCE_MANAGER') ||
+      isBranchWarehouseOperator(user) ||
+      isBranchOwnerUser(user) ||
+      isBranchSalesManagerUser(user) ||
+      isBranchManagerUser(user)
+    );
+  }
   if (pathname.startsWith('/warranty/claims')) return hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
   if (pathname.startsWith('/supplier-claims')) return hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
   if (pathname.startsWith('/alerts') || pathname.startsWith('/notifications')) return true;

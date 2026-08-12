@@ -1521,3 +1521,100 @@ export type FinanceAuditEntry = {
   user?: { id: string; fullName: string; email: string } | null;
 };
 
+export type BranchHqReturnStatus =
+  | 'DRAFT'
+  | 'PENDING_BRANCH_APPROVAL'
+  | 'BRANCH_APPROVED'
+  | 'READY_TO_SHIP'
+  | 'PICKING'
+  | 'PACKED'
+  | 'SHIPPED_TO_HQ'
+  | 'RECEIVED_AT_HQ'
+  | 'HQ_ACCEPTED'
+  | 'COMPLETED'
+  | 'REJECTED'
+  | 'CANCELLED'
+  | 'DISCREPANCY';
+
+export type BranchHqReturnReason =
+  | 'SURPLUS'
+  | 'ORDER_ERROR'
+  | 'DEFECT'
+  | 'MALFUNCTION'
+  | 'EXCHANGE'
+  | 'HQ_DECISION'
+  | 'OTHER';
+
+export type BranchHqReturnCondition = 'NEW' | 'USED' | 'DEFECTIVE' | 'DAMAGED';
+
+export type BranchHqReturnFinancialAdjustmentStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'NOT_REQUIRED';
+
+export type BranchHqReturnItem = {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  quantity: number;
+  availableAtCreate: number;
+  reason: BranchHqReturnReason;
+  condition: BranchHqReturnCondition;
+  comment?: string | null;
+  unitCostKgs: number;
+  lineReturnValueKgs: number;
+  shippedQuantity: number;
+  receivedQuantity: number;
+  damagedQuantity: number;
+  differenceQuantity: number;
+  hqCondition?: BranchHqReturnCondition | null;
+  hqReceivingNote?: string | null;
+  pickedAt?: string | null;
+  pickedByUserId?: string | null;
+};
+
+export type BranchHqReturnFinancialAdjustment = {
+  id: string;
+  returnId: string;
+  branchId: string;
+  status: BranchHqReturnFinancialAdjustmentStatus;
+  acceptedReturnValueKgs: number;
+  currentDebtKgs: number;
+  suggestedCreditKgs: number;
+  appliedCreditKgs: number;
+  resultingDebtKgs: number;
+  remainingCreditKgs: number;
+  decidedById?: string | null;
+  decidedAt?: string | null;
+  decisionNote?: string | null;
+};
+
+export type BranchHqReturn = {
+  id: string;
+  returnNumber: string;
+  status: BranchHqReturnStatus;
+  branchId: string;
+  branch?: Branch | null;
+  sourceWarehouseId?: string;
+  destinationWarehouseId?: string;
+  totalQuantity: number;
+  totalLineCount: number;
+  totalReturnValueKgs: number;
+  note?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  items?: BranchHqReturnItem[];
+  pickingProgress?: {
+    pickedCount: number;
+    totalCount: number;
+    remainingCount: number;
+  };
+  financialAdjustment?: BranchHqReturnFinancialAdjustment | null;
+  salesRevenueKgs?: number;
+  profitKgs?: number;
+  canEditDraft?: boolean;
+};
+

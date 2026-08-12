@@ -152,7 +152,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     id: 'warehouse',
     labelKey: 'nav.inventory',
     defaultHref: '/branch-ceo/warehouse',
-    pathPrefixes: ['/branch-ceo/warehouse'],
+    pathPrefixes: ['/branch-ceo/warehouse', '/branch-hq-returns'],
     sidebarVisible: inventoryVisible,
     pages: [
       {
@@ -164,6 +164,11 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
         href: '/branch-ceo/warehouse/inventory',
         labelKey: 'branchWarehouseOperator.inventory',
         isVisible: (user) => isBranchOwnerUser(user) && inventoryVisible(user),
+      },
+      {
+        href: '/branch-hq-returns',
+        labelKey: 'branchHqReturn.menuBranchApproval',
+        isVisible: (user) => isBranchOwnerUser(user),
       },
     ],
   },
@@ -302,8 +307,8 @@ export const branchSalesManagerNavModules: UnifiedNavModule[] = [
     id: 'distribution',
     labelKey: 'nav.branchProductOrders',
     defaultHref: '/branch-purchase-requests',
-    pathPrefixes: ['/branch-purchase-requests', '/branch-manager'],
-    sidebarVisible: canViewBranchPurchaseRequests,
+    pathPrefixes: ['/branch-purchase-requests', '/branch-manager', '/branch-hq-returns'],
+    sidebarVisible: (user) => canViewBranchPurchaseRequests(user) || isBranchSalesManagerUser(user),
     pageLevelSectionNav: true,
     pages: [
       {
@@ -315,6 +320,11 @@ export const branchSalesManagerNavModules: UnifiedNavModule[] = [
         href: '/branch-manager/shipments',
         labelKey: 'branchManager.incomingShipments',
         isVisible: (user) => isBranchManagerUser(user) || isBranchSalesManagerUser(user),
+      },
+      {
+        href: '/branch-hq-returns',
+        labelKey: 'branchHqReturn.menuBranchApproval',
+        isVisible: (user) => isBranchSalesManagerUser(user) || isBranchManagerUser(user),
       },
     ],
   },

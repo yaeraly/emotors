@@ -428,6 +428,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/finance/dashboard" className={sidebarNavClass(pathname, '/finance/dashboard')}>
                   {t('nav.finance')}
                 </Link>
+                <Link href="/branch-hq-returns?finance=1" className={sidebarNavClass(pathname, '/branch-hq-returns')}>
+                  {t('branchHqReturn.menuFinance')}
+                </Link>
                 <Link href="/tax" className={sidebarNavClass(pathname, '/tax')}>
                   {t('tax.title')}
                 </Link>
@@ -450,6 +453,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t(distributionModuleTitleKey(user))}</Link>
+                <Link href="/branch-hq-returns" className={sidebarNavClass(pathname, '/branch-hq-returns')}>{t('branchHqReturn.menuHqWarehouse')}</Link>
               </>
             ) : franchiseDirectorView ? (
               <>
@@ -473,6 +477,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/branch-warehouse/warehouse" className={sidebarNavClass(pathname, '/branch-warehouse/warehouse')}>{t('branchWarehouseOperator.warehouse')}</Link>
                 <Link href="/distribution/orders?status=SHIPPED" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/shortage-reports" className={sidebarNavClass(pathname, '/distribution/shortage-reports')}>{t('distribution.shortageReports')}</Link>
+                <Link href="/branch-hq-returns" className={sidebarNavClass(pathname, '/branch-hq-returns')}>{t('branchHqReturn.menuBranchWarehouse')}</Link>
               </>
             ) : branchAccountantView ? (
               <>
