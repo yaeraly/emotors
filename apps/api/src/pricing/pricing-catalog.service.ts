@@ -936,17 +936,6 @@ export class PricingCatalogService {
       recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
       minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
     });
-    if (
-      basePrices.recommendedRetailPriceKgs > 0 &&
-      basePrices.masterPriceKgs > 0 &&
-      basePrices.wholesalePriceKgs > 0 &&
-      !(
-        basePrices.recommendedRetailPriceKgs > basePrices.masterPriceKgs &&
-        basePrices.masterPriceKgs > basePrices.wholesalePriceKgs
-      )
-    ) {
-      throw new BadRequestException('Price order must be Retail > Master > Wholesale');
-    }
     const retailPrices = calculateRetailPricesFromBranchPrice(basePrices.hqBranchWholesalePriceKgs, {
       minimumRetailMarkupPercent: dto.minimumSellingMarkupPercent,
       recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,

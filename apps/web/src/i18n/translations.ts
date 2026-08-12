@@ -6341,7 +6341,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'pricing.categorySaved': 'Категория сохранена',
     'pricing.productSaved': 'Цена товара сохранена',
     'pricing.markupSaved': 'Наценка успешно сохранена',
-    'pricing.markupsSaved': 'Наценки успешно сохранены',
+    'pricing.markupsSaved': 'Изменения сохранены',
     'pricing.unsavedRow': 'Не сохранено',
     'pricing.invalidMarkup': 'Введите корректное значение наценки',
     'pricing.restoredAuto': 'Автоматическая цена восстановлена',
