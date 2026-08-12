@@ -100,7 +100,7 @@ describe('branch sales manager ui cleanup', () => {
     const formTable = listPage.slice(formTableStart, formTableEnd);
     assert.match(formTable, /branchOnlyView && !branchSalesManagerView[\s\S]*productSearch\.sku/);
     assert.match(formTable, /line\.quantity/);
-    assert.match(formTable, /draftFormLineTotal\(line\)/);
+    assert.match(formTable, /draftFormLineTotal\(\{ \.\.\.line, branchType: formBranchType \}\)/);
     assert.match(formTable, /formatBranchPrice\(line, t\)/);
   });
 
@@ -116,17 +116,12 @@ describe('branch sales manager ui cleanup', () => {
     assert.match(listPage, /branchOrderTotal\(request\.items/);
   });
 
-  it('create and draft product table line Сумма uses displayed Цена для филиала × quantity', () => {
-    assert.match(listPage, /draftFormLineTotal\(line\)/);
-    assert.match(listPage, /draftFormOrderTotal\(lines\)/);
+  it('create and draft product table line Сумма uses FIFO for HQ Branch and branch-price × qty for franchise', () => {
+    assert.match(listPage, /draftFormLineTotal\(line\)|draftFormLineTotal\(\{ \.\.\.line, branchType: formBranchType \}\)/);
+    assert.match(listPage, /draftFormOrderTotal/);
     assert.match(listPage, /formatBranchPrice\(line, t\)/);
-    assert.match(listPage, /Create-form Сумма must use displayed Цена для филиала × qty/);
-    assert.match(listPage, /Do not store FIFO lineTotalKgs as a create-form total override/);
-    assert.match(displayUtil, /return roundMoney\(qty \* price\)/);
-    assert.doesNotMatch(
-      displayUtil,
-      /export function draftFormLineTotal[\s\S]*authoritativeLineTotalKgs[\s\S]*return/,
-    );
+    assert.match(listPage, /HQ Branch: persist backend FIFO line total/);
+    assert.match(displayUtil, /isHqBranchTransferDisplay\(line\.branchType\)/);
   });
 
   it('create order form hides branch and branch warehouse selectors for branch sales manager', () => {

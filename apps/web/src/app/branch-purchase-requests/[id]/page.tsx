@@ -102,6 +102,7 @@ type RequestDetail = {
   branch?: {
     id: string;
     name: string;
+    branchType?: string | null;
     assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
   };
   status: string;
@@ -620,6 +621,7 @@ export default function BranchPurchaseRequestDetailPage() {
             requestStatus: request.status,
             reviewed: Boolean(reviewed),
             totalEstimatedAmount: request.totalEstimatedAmount,
+            branchType: request.branch?.branchType,
           }
         : undefined,
     [request, reviewed],

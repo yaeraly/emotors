@@ -533,7 +533,32 @@ describe('branch purchase request draft form totals', () => {
     );
   });
 
-  it('Желмаян Контроллер: 25 × 2466.47 = 61661.75 (not FIFO 51795.79)', () => {
+  it('HQ_BRANCH draft form uses FIFO line total, not rounded unit × qty', () => {
+    assert.equal(
+      draftFormLineTotal({
+        productId: 'sku-1',
+        quantity: '3',
+        branchPurchasePriceKgs: 33.33,
+        authoritativeLineTotalKgs: 100,
+        authoritativeLineQuantity: 3,
+        branchType: 'HQ_BRANCH',
+      }),
+      100,
+    );
+    assert.notEqual(
+      draftFormLineTotal({
+        productId: 'sku-1',
+        quantity: '3',
+        branchPurchasePriceKgs: 33.33,
+        authoritativeLineTotalKgs: 100,
+        authoritativeLineQuantity: 3,
+        branchType: 'HQ_BRANCH',
+      }),
+      99.99,
+    );
+  });
+
+  it('franchise draft form still uses Цена для филиала × qty when FIFO snapshot exists', () => {
     assert.equal(
       draftFormLineTotal({
         productId: 'ctrl-70h',
@@ -619,6 +644,48 @@ describe('branch purchase request draft form totals', () => {
         },
       ]),
       65588.93,
+    );
+  });
+
+  it('HQ_BRANCH reviewed total uses FIFO line sum, not a drifted header', () => {
+    const items = [
+      { quantity: 3, branchPurchasePriceKgs: 33.33, totalAmount: 100 },
+      { quantity: 2, branchPurchasePriceKgs: 50.01, totalAmount: 100.01 },
+    ];
+    const options = {
+      requestStatus: 'PENDING_BRANCH_CONFIRMATION',
+      reviewed: true,
+      totalEstimatedAmount: 199.99,
+      branchType: 'HQ_BRANCH',
+    };
+    assert.equal(branchOrderTotal(items, options), 200.01);
+    assert.equal(branchOrderTotal(items, options), branchOrderTotal(items, options));
+    assert.notEqual(branchOrderTotal(items, options), 199.99);
+  });
+
+  it('HQ_BRANCH DRAFT list/detail uses persisted FIFO totalAmount, not unit×qty', () => {
+    const items = [
+      {
+        quantity: 2,
+        branchPurchasePriceKgs: 36245.25,
+        totalAmount: 72823.21,
+      },
+    ];
+    assert.equal(
+      branchOrderTotal(items, {
+        requestStatus: 'DRAFT',
+        totalEstimatedAmount: 72823.21,
+        branchType: 'HQ_BRANCH',
+      }),
+      72823.21,
+    );
+    assert.notEqual(
+      branchOrderTotal(items, {
+        requestStatus: 'DRAFT',
+        totalEstimatedAmount: 72823.21,
+        branchType: 'HQ_BRANCH',
+      }),
+      72490.5,
     );
   });
 

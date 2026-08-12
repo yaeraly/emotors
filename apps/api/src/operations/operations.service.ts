@@ -76,7 +76,8 @@ import {
   sumReceiveMovementTotals,
 } from '../procurement/procurement-receive-inventory-reconcile.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
-import { deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import { assertMoneyEqual } from '../common/money/money';
+import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
@@ -582,6 +583,25 @@ export class OperationsService {
     const totalEstimatedAmount = sumDisplayMoneyTotals(
       resolvedItems.map((item) => Number(item.totalAmount ?? 0)),
     );
+    const persistBranch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { branchType: true },
+    });
+    if (shouldTransferBranchPurchaseAtCost(persistBranch?.branchType)) {
+      const fifoSum = sumDisplayMoneyTotals(
+        resolvedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+      );
+      assertMoneyEqual(fifoSum, totalEstimatedAmount, 'HQ_BRANCH BPR create: FIFO sum vs header');
+      for (const item of resolvedItems) {
+        if (Number(item.estimatedLineProductCostKgs ?? 0) > 0) {
+          assertMoneyEqual(
+            item.estimatedLineProductCostKgs,
+            item.totalAmount,
+            `HQ_BRANCH BPR create line ${item.sku}`,
+          );
+        }
+      }
+    }
 
     const request = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
@@ -732,6 +752,27 @@ export class OperationsService {
     const totalEstimatedAmount = resolvedItems
       ? sumDisplayMoneyTotals(resolvedItems.map((item) => Number(item.totalAmount ?? 0)))
       : undefined;
+    if (resolvedItems && totalEstimatedAmount != null) {
+      const persistBranch = await this.prisma.branch.findFirst({
+        where: { id: existing.branchId, deletedAt: null },
+        select: { branchType: true },
+      });
+      if (shouldTransferBranchPurchaseAtCost(persistBranch?.branchType)) {
+        const fifoSum = sumDisplayMoneyTotals(
+          resolvedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+        );
+        assertMoneyEqual(fifoSum, totalEstimatedAmount, 'HQ_BRANCH BPR update: FIFO sum vs header');
+        for (const item of resolvedItems) {
+          if (Number(item.estimatedLineProductCostKgs ?? 0) > 0) {
+            assertMoneyEqual(
+              item.estimatedLineProductCostKgs,
+              item.totalAmount,
+              `HQ_BRANCH BPR update line ${item.sku}`,
+            );
+          }
+        }
+      }
+    }
 
     const updated = await this.prisma.branchPurchaseRequest.update({
       where: { id },

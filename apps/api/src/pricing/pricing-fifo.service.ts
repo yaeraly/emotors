@@ -14,7 +14,7 @@ import {
   type PricingCostBasisSource,
 } from './pricing-cost-basis.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
-import { assertMoneyEqual } from '../common/money/money';
+import { assertMoneyEqual, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import {
   allocateLayerConsumptionCost,
   deriveDisplayUnitCost,
@@ -667,7 +667,8 @@ export class PricingFifoService {
           mappedLayer?.layerBaseQuantity ??
           (batch.initialQuantity > 0 ? batch.initialQuantity : take);
         const layerTotalCostKgs =
-          mappedLayer?.layerTotalCostKgs ?? Number(batch.unitCostKgs) * layerBaseQty;
+          mappedLayer?.layerTotalCostKgs ??
+          toStoredMoneyKgs(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQty));
         const lineCost = allocateLayerConsumptionCost({
           layerTotalCostKgs,
           layerBaseQuantity: layerBaseQty,
@@ -1152,7 +1153,7 @@ export class PricingFifoService {
       const layerTotalCostKgs =
         mappedLayer?.layerTotalCostKgs && mappedLayer.layerTotalCostKgs > 0
           ? mappedLayer.layerTotalCostKgs
-          : roundDisplayMoney(Number(batch.unitCostKgs) * layerBaseQty);
+          : toStoredMoneyKgs(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQty));
       const lineCost = allocateLayerConsumptionCost({
         layerTotalCostKgs,
         layerBaseQuantity: layerBaseQty,
@@ -1309,7 +1310,7 @@ export class PricingFifoService {
           movementUnitCostKgs: movement ? Number(movement.unitCostKgs) : null,
           movementTotalCostKgs: movement?.totalCostKgs != null ? Number(movement.totalCostKgs) : null,
         });
-        layerTotalCostKgs = roundDisplayMoney(unitCostKgs * layerBaseQuantity);
+        layerTotalCostKgs = toStoredMoneyKgs(toMoneyDecimal(unitCostKgs).mul(layerBaseQuantity));
       }
 
       return {

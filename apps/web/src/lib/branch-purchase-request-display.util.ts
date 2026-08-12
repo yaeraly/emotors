@@ -17,11 +17,17 @@ export type DraftFormLinePricing = {
   productId?: string;
   quantity: string | number;
   branchPurchasePriceKgs?: number | null;
-  /** Optional backend FIFO/payable total; Branch Sales create/draft UI ignores this when branch price is known. */
+  /** Backend FIFO/payable total. HQ_BRANCH uses this as Сумма; franchise ignores it. */
   authoritativeLineTotalKgs?: number | null;
+  authoritativeLineQuantity?: number | null;
+  branchType?: string | null;
   pricingPending?: boolean;
   priceResolving?: boolean;
 };
+
+export function isHqBranchTransferDisplay(branchType?: string | null): boolean {
+  return branchType === 'HQ_BRANCH';
+}
 
 export function isPendingHqSalesReviewRequest(status?: string | null): boolean {
   return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
@@ -47,6 +53,7 @@ export type BranchOrderTotalOptions = {
   requestStatus?: string | null;
   reviewed?: boolean;
   totalEstimatedAmount?: number | null;
+  branchType?: string | null;
 };
 
 export function isDraftBranchPurchaseRequest(status?: string | null): boolean {
@@ -227,6 +234,12 @@ export function branchOrderLineTotal(
   item: BranchPurchaseRequestLinePricing,
   options?: BranchOrderTotalOptions,
 ): number {
+  if (isHqBranchTransferDisplay(options?.branchType)) {
+    if (item.totalAmount != null && Number.isFinite(Number(item.totalAmount)) && Number(item.totalAmount) > 0) {
+      return roundMoney(Number(item.totalAmount));
+    }
+    return hqReviewLineAmount(item);
+  }
   if (isDraftBranchPurchaseRequest(options?.requestStatus)) {
     const price = getFrozenBranchPrice(item);
     const qty = getDisplayQuantity(item);
@@ -254,7 +267,9 @@ export function branchOrderTotal(
   items: BranchPurchaseRequestLinePricing[],
   options?: BranchOrderTotalOptions,
 ): number {
-  if (options?.reviewed) {
+  // HQ Branch: always SUM(authoritative line costs). Never prefer a drifted header
+  // rebuilt from rounded unit × qty.
+  if (options?.reviewed && !isHqBranchTransferDisplay(options.branchType)) {
     const header = options.totalEstimatedAmount;
     if (header != null && Number.isFinite(Number(header)) && Number(header) > 0) {
       return roundMoney(Number(header));
@@ -404,13 +419,20 @@ export function getDraftFormBranchPrice(line: DraftFormLinePricing): number | nu
 /**
  * Row total for NEW/DRAFT create form.
  *
- * Invariant: Displayed Количество × Displayed Цена для филиала = Displayed Сумма.
- * Uses the same raw numeric branch price shown in the price column — never FIFO/cost
- * lineTotalKgs (that produced 25 × hidden 2071.83 = 51795.79 instead of 25 × 2466.47).
+ * Franchise/dealer: displayed Количество × Цена для филиала.
+ * HQ Branch: backend FIFO/authoritative line total (never rounded unit × qty).
  */
 export function draftFormLineTotal(line: DraftFormLinePricing): number {
-  const price = getDraftFormBranchPrice(line);
   const qty = parseDraftFormQuantity(line.quantity);
+  if (isHqBranchTransferDisplay(line.branchType)) {
+    const fifo = Number(line.authoritativeLineTotalKgs ?? 0);
+    const snapshotQty = Number(line.authoritativeLineQuantity ?? 0);
+    if (fifo > 0 && qty > 0 && (snapshotQty <= 0 || snapshotQty === qty)) {
+      return roundMoney(fifo);
+    }
+    return 0;
+  }
+  const price = getDraftFormBranchPrice(line);
   if (price != null && qty > 0) {
     return roundMoney(qty * price);
   }

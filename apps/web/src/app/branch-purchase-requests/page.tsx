@@ -73,6 +73,7 @@ type BranchPurchaseRequest = {
   branch?: {
     id: string;
     name: string;
+    branchType?: string | null;
     assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
   };
   status: string;
@@ -103,8 +104,9 @@ type DraftLine = {
   weightKg: number;
   branchPurchasePriceKgs: number | null;
   wholesalePriceKgs: number | null;
-  /** Backend authoritative line total (HQ_BRANCH FIFO payable when present). */
+  /** Backend FIFO/payable total. HQ_BRANCH uses this as Сумма. */
   authoritativeLineTotalKgs: number | null;
+  authoritativeLineQuantity: number | null;
   pricingPending: boolean;
   priceResolving: boolean;
   branchStock: number | null;
@@ -145,6 +147,7 @@ function emptyLine(): DraftLine {
     branchPurchasePriceKgs: null,
     wholesalePriceKgs: null,
     authoritativeLineTotalKgs: null,
+    authoritativeLineQuantity: null,
     pricingPending: false,
     priceResolving: false,
     branchStock: 0,
@@ -172,7 +175,9 @@ function linesFromRequest(request: BranchPurchaseRequest): DraftLine[] {
       weightKg: item.weightKg ?? 0,
       branchPurchasePriceKgs: branchPrice,
       wholesalePriceKgs: branchPrice,
-      authoritativeLineTotalKgs: null,
+      authoritativeLineTotalKgs:
+        item.totalAmount != null && Number(item.totalAmount) > 0 ? Number(item.totalAmount) : null,
+      authoritativeLineQuantity: item.quantity,
       pricingPending: branchPrice == null,
       priceResolving: false,
       branchStock: item.currentBranchStock ?? 0,
@@ -219,6 +224,7 @@ function branchPurchaseListAmount(request: BranchPurchaseRequest): number {
       requestStatus: request.status,
       reviewed: false,
       totalEstimatedAmount: request.totalEstimatedAmount,
+      branchType: request.branch?.branchType,
     });
     // Prefer item-sum when API items carry line totals; otherwise trust header.
     return fromItems > 0 ? fromItems : apiTotal;
@@ -227,6 +233,7 @@ function branchPurchaseListAmount(request: BranchPurchaseRequest): number {
     requestStatus: request.status,
     reviewed: isReviewedPurchaseRequest(request),
     totalEstimatedAmount: request.totalEstimatedAmount,
+    branchType: request.branch?.branchType,
   });
 }
 
@@ -398,6 +405,7 @@ function BranchPurchaseRequestsPageInner() {
                 branchPurchasePriceKgs: branchPrice ?? line.branchPurchasePriceKgs,
                 wholesalePriceKgs: branchPrice ?? line.wholesalePriceKgs,
                 authoritativeLineTotalKgs: null,
+                authoritativeLineQuantity: null,
                 pricingPending: false,
                 priceResolving: true,
               }
@@ -415,6 +423,7 @@ function BranchPurchaseRequestsPageInner() {
         branchPurchasePriceKgs: branchPrice,
         wholesalePriceKgs: branchPrice,
         authoritativeLineTotalKgs: null,
+        authoritativeLineQuantity: null,
         pricingPending: false,
         priceResolving: true,
         branchStock: 0,
@@ -691,6 +700,10 @@ function BranchPurchaseRequestsPageInner() {
   const detailHref = (requestId: string) => `/branch-purchase-requests/${requestId}`;
   const activeEditingDraftId = branchSalesManagerView ? draftIdFromUrl : editingDraftId;
   const activeFormBranchId = branchSalesManagerView ? (user?.branchId ?? form.branchId) : form.branchId;
+  const formBranchType =
+    branches.find((branch) => branch.id === activeFormBranchId)?.branchType ??
+    user?.branch?.branchType ??
+    null;
 
   useEffect(() => {
     if (!branchSalesManagerView) return;
@@ -821,13 +834,20 @@ function BranchPurchaseRequestsPageInner() {
                   : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
                     ? Boolean(entry.hasPricingPolicy)
                     : branchPrice != null;
-            // Create-form Сумма must use displayed Цена для филиала × qty.
-            // Do not store FIFO lineTotalKgs as a create-form total override.
+            const lineTotalRaw =
+              typeof entry === 'object' && entry != null ? entry.lineTotalKgs : null;
+            const lineTotal =
+              lineTotalRaw != null && Number.isFinite(Number(lineTotalRaw)) && Number(lineTotalRaw) > 0
+                ? Number(lineTotalRaw)
+                : null;
+            const qty = Number(line.quantity) || 0;
+            // HQ Branch: persist backend FIFO line total. Franchise: ignore FIFO override.
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
-              authoritativeLineTotalKgs: null,
+              authoritativeLineTotalKgs: lineTotal,
+              authoritativeLineQuantity: lineTotal != null && qty > 0 ? qty : null,
               pricingPending: !hasPricing,
               priceResolving: false,
             };
@@ -845,7 +865,9 @@ function BranchPurchaseRequestsPageInner() {
       });
   }, [branchOnlyView, draftProductIds, draftQuantities, activeFormBranchId, showForm]);
 
-  const draftTotalAmount = draftFormOrderTotal(lines);
+  const draftTotalAmount = draftFormOrderTotal(
+    lines.map((line) => ({ ...line, branchType: formBranchType })),
+  );
 
   if (user && !canView) {
     return (
@@ -1175,6 +1197,7 @@ function BranchPurchaseRequestsPageInner() {
                                       ...row,
                                       quantity: e.target.value,
                                       authoritativeLineTotalKgs: null,
+                                      authoritativeLineQuantity: null,
                                       priceResolving: Boolean(row.productId),
                                     }
                                   : row,
@@ -1191,7 +1214,7 @@ function BranchPurchaseRequestsPageInner() {
                       </td>
                       {branchOnlyView ? (
                         <td className="px-3 py-2 font-semibold text-slate-900">
-                          {formatKgsLocalized(draftFormLineTotal(line))}{' '}
+                          {formatKgsLocalized(draftFormLineTotal({ ...line, branchType: formBranchType }))}{' '}
                           сом
                         </td>
                       ) : null}

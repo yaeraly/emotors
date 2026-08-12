@@ -31,6 +31,7 @@
     "verify:product-catalog-costs": "tsx scripts/verify-product-catalog-cost-table.ts",
     "repair:product-catalog-reference-costs": "tsx scripts/repair-product-catalog-reference-costs.ts",
     "repair:sold-out-product-pricing": "tsx scripts/repair-sold-out-product-pricing.ts",
+    "reconcile:proc-bpr-money": "tsx scripts/reconcile-proc-bpr-money.ts",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {
