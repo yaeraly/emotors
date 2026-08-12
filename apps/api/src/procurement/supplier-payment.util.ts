@@ -37,7 +37,7 @@ export function roundMoney(value: number, decimals = 2) {
 }
 
 export function calculateAmountKgs(amountYuan: number, exchangeRate: number) {
-  return roundMoney(amountYuan * exchangeRate);
+  return roundMoneyDecimal(toMoneyDecimal(amountYuan).times(toMoneyDecimal(exchangeRate)));
 }
 
 const EXCLUDED_SUPPLIER_PAYMENT_STATUSES = new Set([

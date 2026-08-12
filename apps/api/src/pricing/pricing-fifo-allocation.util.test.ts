@@ -53,17 +53,49 @@ describe('buildFifoAllocationLines — multi-layer branch order', () => {
     assert.equal(result.profitKgs, 0);
   });
 
-  it('never averages costs before markup', () => {
+  it('HQ branch 3 pcs totaling 100.00 keeps exact layer remainder', () => {
     const result = buildFifoAllocationLines(
       [
-        { batchId: 'L1', remainingQuantity: 3, unitCostKgs: 5000 },
-        { batchId: 'L2', remainingQuantity: 2, unitCostKgs: 6000 },
+        {
+          batchId: 'L1',
+          remainingQuantity: 3,
+          unitCostKgs: 33.33,
+          layerTotalCostKgs: 100,
+          layerBaseQuantity: 3,
+        },
       ],
-      5,
-      { markupPercent: 20, branchType: 'FRANCHISE' },
+      3,
+      { markupPercent: 20, branchType: 'HQ_BRANCH' },
     );
-    // Average cost would be 5400 → price 6480; per-layer prices must differ.
-    assert.notEqual(result.lines[0].unitPriceKgs, result.lines[1].unitPriceKgs);
-    assert.equal(result.totalPriceKgs, 3 * 6000 + 2 * 7200);
+    assert.equal(result.totalCostKgs, 100);
+    assert.equal(result.totalPriceKgs, 100);
+    assert.equal(result.profitKgs, 0);
+  });
+
+  it('multi-layer consume keeps each layer remainder, no cross-layer average', () => {
+    const result = buildFifoAllocationLines(
+      [
+        {
+          batchId: 'A',
+          remainingQuantity: 5,
+          unitCostKgs: 20,
+          layerTotalCostKgs: 100,
+          layerBaseQuantity: 5,
+        },
+        {
+          batchId: 'B',
+          remainingQuantity: 7,
+          unitCostKgs: 10.01,
+          layerTotalCostKgs: 70.07,
+          layerBaseQuantity: 7,
+        },
+      ],
+      12,
+      { markupPercent: 0, branchType: 'HQ_BRANCH' },
+    );
+    assert.equal(result.lines[0]!.totalCostKgs, 100);
+    assert.equal(result.lines[1]!.totalCostKgs, 70.07);
+    assert.equal(result.totalCostKgs, 170.07);
+    assert.equal(result.profitKgs, 0);
   });
 });

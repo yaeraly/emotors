@@ -1,4 +1,5 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
+import { isMoneyEqual, multiplyMoney, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import {
   roundDisplayMoney,
   sumDisplayMoneyTotals,
@@ -35,8 +36,8 @@ export function getBprSavedOrderLineUnitPriceKgs(item: {
   const raw =
     item.resolvedBranchPriceKgs ?? item.branchPurchasePriceKgs ?? item.wholesalePriceKgs;
   if (raw == null) return null;
-  const price = Number(raw);
-  if (!Number.isFinite(price) || price <= 0) return null;
+  const price = toStoredMoneyKgs(toMoneyDecimal(raw));
+  if (price <= 0) return null;
   return price;
 }
 
@@ -85,7 +86,7 @@ export function calculateBprLineTotalKgs(
 
   const unit = getBprSavedOrderLineUnitPriceKgs(item);
   const commercial =
-    unit != null && unit > 0 ? roundDisplayMoney(unit * qty) : 0;
+    unit != null && unit > 0 ? toStoredMoneyKgs(multiplyMoney(unit, qty)) : 0;
 
   if (stage === 'reviewed') {
     const approved =
@@ -93,7 +94,7 @@ export function calculateBprLineTotalKgs(
         ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
         : null;
     if (approved != null && approved > 0) {
-      if (commercial <= 0 || Math.abs(approved - commercial) <= 0.009) {
+      if (commercial <= 0 || approved === commercial) {
         return approved;
       }
       // Persisted payable drifted from saved price × qty — restore commercial snapshot.
@@ -157,7 +158,7 @@ export function assertBprMoneyNeutralTransition(
     return { ok: true, beforeKgs, afterKgs, differenceKgs };
   }
   return {
-    ok: Math.abs(differenceKgs) <= 0,
+    ok: isMoneyEqual(differenceKgs, 0),
     beforeKgs,
     afterKgs,
     differenceKgs,

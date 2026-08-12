@@ -4,6 +4,7 @@ import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import {
   allocateLayerConsumptionCost,
+  computeLayerRemainingCostKgs,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
@@ -37,7 +38,7 @@ describe('allocateLayerConsumptionCost — full layer remainder', () => {
     assert.notEqual(consumed, unitTimesQty);
   });
 
-  it('partial layer consumption uses proportional remaining value', () => {
+  it('partial remaining layer uses remainder-safe remaining cost, not JS float unit×qty', () => {
     const layerTotal = 162317.33;
     const baseQty = 11;
     const remaining = 3;
@@ -47,7 +48,15 @@ describe('allocateLayerConsumptionCost — full layer remainder', () => {
       remainingQuantity: remaining,
       takeQuantity: remaining,
     });
-    assert.equal(consumed, roundDisplayMoney((layerTotal / baseQty) * remaining));
+    const remainingCost = computeLayerRemainingCostKgs(layerTotal, baseQty, remaining);
+    const alreadyConsumed = allocateLayerConsumptionCost({
+      layerTotalCostKgs: layerTotal,
+      layerBaseQuantity: baseQty,
+      remainingQuantity: baseQty,
+      takeQuantity: baseQty - remaining,
+    });
+    assert.equal(consumed, remainingCost);
+    assert.equal(roundDisplayMoney(alreadyConsumed + consumed), layerTotal);
   });
 });
 

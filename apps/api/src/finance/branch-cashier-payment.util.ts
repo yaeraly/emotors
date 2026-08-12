@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { BranchPaymentMethod } from '@prisma/client';
+import { compareMoney, isMoneyEqual, subtractMoney, toStoredMoneyKgs } from '../common/money/money';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { computeFullPaymentChange } from '../sales/sale-full-payment.util';
 
@@ -51,15 +52,15 @@ export function resolveBranchCashierNetPayment(
         : computeFullPaymentChange(remaining, received).changeAmount;
     const netAcceptedAmount = remaining;
 
-    if (received + 0.009 < remaining) {
+    if (compareMoney(received, remaining) < 0) {
       throw new BadRequestException(
         'Для полной оплаты полученная сумма не может быть меньше остатка по счёту.',
       );
     }
-    if (change > received + 0.009) {
+    if (compareMoney(change, received) > 0) {
       throw new BadRequestException('Сдача не может превышать полученную сумму.');
     }
-    if (roundCashierMoney(received - change) + 0.009 < remaining) {
+    if (compareMoney(subtractMoney(received, change), remaining) < 0) {
       throw new BadRequestException('Сумма зачисления не покрывает остаток по счёту.');
     }
 
@@ -74,7 +75,7 @@ export function resolveBranchCashierNetPayment(
   if (netAcceptedAmount <= 0) {
     throw new BadRequestException('Сумма платежа должна быть больше нуля');
   }
-  if (netAcceptedAmount > remaining + 0.009) {
+  if (compareMoney(netAcceptedAmount, remaining) > 0) {
     throw new BadRequestException(`Максимальная сумма платежа: ${remaining.toFixed(2)}.`);
   }
 
@@ -85,14 +86,14 @@ export function resolveBranchCashierNetPayment(
       ? roundCashierMoney(input.changeAmount)
       : roundCashierMoney(Math.max(received - netAcceptedAmount, 0));
 
-  if (roundCashierMoney(received - change) + 0.009 < netAcceptedAmount) {
+  if (compareMoney(subtractMoney(received, change), netAcceptedAmount) < 0) {
     throw new BadRequestException('Сумма зачисления не совпадает с принятой оплатой за вычетом сдачи.');
   }
 
   return {
     netAcceptedAmount,
     receivedAmount: received,
-    changeAmount: change > 0.009 ? change : null,
+    changeAmount: change > 0 ? change : null,
   };
 }
 
@@ -106,8 +107,8 @@ export function reconcilePaymentAccountDelta(input: {
   return {
     delta,
     expected,
-    matches: Math.abs(delta - expected) < 0.01,
-    difference: roundCashierMoney(delta - expected),
+    matches: isMoneyEqual(delta, expected),
+    difference: toStoredMoneyKgs(subtractMoney(delta, expected)),
   };
 }
 

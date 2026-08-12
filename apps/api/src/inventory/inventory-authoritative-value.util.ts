@@ -1,6 +1,6 @@
 import { Prisma, type WarehouseType } from '@prisma/client';
+import { toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import {
-  allocateProportionalCost,
   computeLayerRemainingCostKgs,
   deriveDisplayUnitCost,
   roundDisplayMoney,
@@ -48,9 +48,7 @@ async function mapFifoLayerTotals(
     const movementTotal = movement ? roundDisplayMoney(movement.totalCostKgs ?? 0) : 0;
     const fallbackTotal =
       layerBaseQuantity > 0
-        ? roundDisplayMoney(
-            new Prisma.Decimal(Number(batch.unitCostKgs ?? 0)).mul(layerBaseQuantity),
-          )
+        ? toStoredMoneyKgs(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQuantity))
         : 0;
     // Fully consumed layers contribute zero remaining warehouse value.
     const layerTotalCostKgs = remainingQuantity <= 0 ? 0 : movementTotal > 0 ? movementTotal : fallbackTotal;
@@ -353,7 +351,7 @@ export async function assertInventoryCountLinesMatchAuthoritativeValuation(
     );
     const stored = roundDisplayMoney(Number(item.differenceValueKgs));
     const expected = recomputed.differenceValueKgs;
-    if (Math.abs(stored - expected) > toleranceKgs) {
+    if (stored !== expected) {
       mismatches.push({
         itemId: item.id,
         productId: item.productId,
@@ -415,7 +413,7 @@ export async function compareWarehouseInventoryValuation(
   const fifoTotalKgs = await sumWarehouseFifoRemainingValueKgs(tx, warehouseId);
   const balanceTotalKgs = await sumWarehouseBalanceInventoryValueKgs(tx, warehouseId);
   const differenceKgs = roundDisplayMoney(balanceTotalKgs - fifoTotalKgs);
-  const ok = Math.abs(differenceKgs) <= toleranceKgs;
+  const ok = differenceKgs === 0;
   return { ok, fifoTotalKgs, balanceTotalKgs, differenceKgs };
 }
 
@@ -539,7 +537,7 @@ export async function inspectWarehouseFifoBalanceParity(
       });
       continue;
     }
-    if (Math.abs(roundDisplayMoney(balanceValueKgs - fifoRemainingValueKgs)) > toleranceKgs) {
+    if (Math.abs(roundDisplayMoney(balanceValueKgs - fifoRemainingValueKgs)) > 0) {
       issues.push({
         productId,
         balanceQuantity,
@@ -555,7 +553,7 @@ export async function inspectWarehouseFifoBalanceParity(
   const balanceTotalKgs = roundDisplayMoney(balanceTotal);
   const differenceKgs = roundDisplayMoney(balanceTotalKgs - fifoTotalKgs);
   return {
-    ok: issues.length === 0 && Math.abs(differenceKgs) <= toleranceKgs,
+    ok: issues.length === 0 && differenceKgs === 0,
     fifoTotalKgs,
     balanceTotalKgs,
     differenceKgs,

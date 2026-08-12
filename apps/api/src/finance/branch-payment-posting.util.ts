@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { BranchPaymentMethod, Prisma } from '@prisma/client';
+import { isMoneyEqual, subtractMoney, toStoredMoneyKgs } from '../common/money/money';
 
 type MoneyInput = number | string | Prisma.Decimal | null | undefined;
 
@@ -59,12 +60,12 @@ export function resolveBranchPaymentNetAmount(input: {
   changeAmount?: MoneyInput;
 }) {
   if (input.netAcceptedAmount != null) {
-    return Number(input.netAcceptedAmount);
+    return toStoredMoneyKgs(input.netAcceptedAmount);
   }
   if (input.receivedAmount != null && input.changeAmount != null) {
-    return Number(input.receivedAmount) - Number(input.changeAmount);
+    return toStoredMoneyKgs(subtractMoney(input.receivedAmount, input.changeAmount));
   }
-  return Number(input.amount ?? 0);
+  return toStoredMoneyKgs(input.amount ?? 0);
 }
 
 export function paymentRequiresLedgerPosting(input: {
@@ -79,14 +80,14 @@ export function reconcileConfirmedPaymentPosting(input: {
   ledgerSignedAmount?: number | null;
   balanceDelta?: number | null;
 }) {
-  const expected = Number(input.netAcceptedAmount ?? 0);
-  const ledger = Number(input.ledgerSignedAmount ?? 0);
-  const delta = Number(input.balanceDelta ?? 0);
+  const expected = toStoredMoneyKgs(input.netAcceptedAmount ?? 0);
+  const ledger = toStoredMoneyKgs(input.ledgerSignedAmount ?? 0);
+  const delta = toStoredMoneyKgs(input.balanceDelta ?? 0);
   return {
     expected,
     ledger,
     balanceDelta: delta,
-    difference: Math.round((expected - ledger) * 100) / 100,
-    matches: Math.abs(expected - ledger) < 0.01 && Math.abs(expected - delta) < 0.01,
+    difference: toStoredMoneyKgs(subtractMoney(expected, ledger)),
+    matches: isMoneyEqual(expected, ledger) && isMoneyEqual(expected, delta),
   };
 }

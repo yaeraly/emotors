@@ -14,9 +14,9 @@ import {
   type PricingCostBasisSource,
 } from './pricing-cost-basis.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
+import { assertMoneyEqual } from '../common/money/money';
 import {
   allocateLayerConsumptionCost,
-  allocateProportionalCost,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
@@ -1127,7 +1127,7 @@ export class PricingFifoService {
     },
   ) {
     let remainingToConsume = input.quantity;
-    let totalCost = 0;
+    const lineCosts: number[] = [];
 
     const batches = await tx.fifoInventoryBatch.findMany({
       where: {
@@ -1137,14 +1137,29 @@ export class PricingFifoService {
       },
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
+    const allocationLayers = await this.mapBatchesToAllocationLayers(tx, batches);
+    const layerByBatchId = new Map(allocationLayers.map((layer) => [layer.batchId, layer]));
 
     for (const batch of batches) {
       if (remainingToConsume <= 0) break;
       const take = Math.min(batch.remainingQuantity, remainingToConsume);
       if (take <= 0) continue;
 
-      const lineCost = Number(batch.unitCostKgs) * take;
-      totalCost += lineCost;
+      const mappedLayer = layerByBatchId.get(batch.id);
+      const layerBaseQty =
+        mappedLayer?.layerBaseQuantity ??
+        (batch.initialQuantity > 0 ? batch.initialQuantity : take);
+      const layerTotalCostKgs =
+        mappedLayer?.layerTotalCostKgs && mappedLayer.layerTotalCostKgs > 0
+          ? mappedLayer.layerTotalCostKgs
+          : roundDisplayMoney(Number(batch.unitCostKgs) * layerBaseQty);
+      const lineCost = allocateLayerConsumptionCost({
+        layerTotalCostKgs,
+        layerBaseQuantity: layerBaseQty,
+        remainingQuantity: batch.remainingQuantity,
+        takeQuantity: take,
+      });
+      lineCosts.push(lineCost);
       remainingToConsume -= take;
 
       await tx.fifoInventoryBatch.update({
@@ -1176,6 +1191,7 @@ export class PricingFifoService {
             saleItemId: input.saleItemId,
             quantity: take,
             unitCostKgs: Number(batch.unitCostKgs),
+            totalCostKgs: lineCost,
             timestamp: new Date().toISOString(),
           } as Prisma.InputJsonValue,
         },
@@ -1183,10 +1199,12 @@ export class PricingFifoService {
     }
 
     const consumedQty = input.quantity - remainingToConsume;
-    const unitCost =
-      consumedQty > 0 ? Math.round((totalCost / consumedQty + Number.EPSILON) * 100) / 100 : 0;
-
-    return { unitCost, consumedQty, totalCost: Math.round((totalCost + Number.EPSILON) * 100) / 100 };
+    const totalCost = sumDisplayMoneyTotals(lineCosts);
+    return {
+      unitCost: deriveDisplayUnitCost(totalCost, consumedQty),
+      consumedQty,
+      totalCost,
+    };
   }
 
   isHqBranchType(branchType: BranchType | null | undefined) {
@@ -1522,6 +1540,13 @@ export class PricingFifoService {
         referenceId: line.allocationId,
         note: input.receivingNote,
       });
+      if (movement.totalCostKgs != null) {
+        assertMoneyEqual(
+          totalCostKgs,
+          movement.totalCostKgs,
+          `Branch receipt ${line.allocationId} vs HQ transfer cost`,
+        );
+      }
 
       const fifoBatch = await this.ensureBranchFifoBatchFromMovementInTx(tx, {
         id: movement.id,

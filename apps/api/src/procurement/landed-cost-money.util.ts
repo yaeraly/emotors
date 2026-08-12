@@ -1,10 +1,11 @@
 import { Prisma } from '@prisma/client';
+import { toMoneyDecimal as sharedToMoneyDecimal } from '../common/money/money';
 
 /** Internal CNY settlement scale — never truncate settlement CNY to display 2dp. */
 export const SUPPLIER_CNY_SETTLEMENT_SCALE = 8;
 
 export function toMoneyDecimal(value: number | Prisma.Decimal | string): Prisma.Decimal {
-  return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
+  return sharedToMoneyDecimal(value);
 }
 
 /** Final currency round (2 dp, half-up) — only at allocation/storage boundaries. */

@@ -1,34 +1,46 @@
 import { Prisma } from '@prisma/client';
-import { distributeRoundedMoneyAmounts } from '../procurement/landed-cost-money.util';
+import {
+  consumeFifoLayerMoney,
+  distributeMoneyToTarget,
+  remainingFifoLayerMoney,
+  roundMoneyKgs,
+  sumMoney,
+  toMoneyDecimal,
+  toStoredMoneyKgs,
+} from '../common/money/money';
 
 function toDecimal(value: number | Prisma.Decimal) {
-  return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
+  return toMoneyDecimal(value);
 }
 
 /** Round only for final stored/display currency amounts (2 dp, half-up). */
 export function roundDisplayMoney(value: number | Prisma.Decimal): number {
-  return toDecimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+  return toStoredMoneyKgs(value);
 }
 
 /** Display/storage unit cost derived from authoritative line total ÷ quantity. */
 export function deriveDisplayUnitCost(totalCostKgs: number, quantity: number): number {
   const qty = Math.abs(Number(quantity));
-  if (qty <= 0 || totalCostKgs <= 0) return 0;
-  return roundDisplayMoney(toDecimal(totalCostKgs).div(qty));
+  if (qty <= 0 || toMoneyDecimal(totalCostKgs).lte(0)) return 0;
+  return toStoredMoneyKgs(toMoneyDecimal(totalCostKgs).div(qty));
 }
 
 /**
- * Exact monetary value still on a FIFO layer (proportional from authoritative layer total).
+ * Exact monetary value still on a FIFO layer.
+ * Uses remainder-safe sequential consumption so original = consumed + remaining.
  */
 export function computeLayerRemainingCostKgs(
   layerTotalCostKgs: number,
   layerBaseQuantity: number,
   remainingQuantity: number,
 ): number {
-  const baseQty = Math.abs(Number(layerBaseQuantity));
-  const remaining = Math.max(0, Math.floor(Number(remainingQuantity)));
-  if (layerTotalCostKgs <= 0 || baseQty <= 0 || remaining <= 0) return 0;
-  return roundDisplayMoney(allocateProportionalCost(layerTotalCostKgs, baseQty, remaining));
+  return toStoredMoneyKgs(
+    remainingFifoLayerMoney({
+      originalLayerCost: layerTotalCostKgs,
+      layerBaseQuantity,
+      remainingQuantity,
+    }),
+  );
 }
 
 /**
@@ -41,24 +53,17 @@ export function allocateLayerConsumptionCost(input: {
   layerBaseQuantity: number;
   remainingQuantity: number;
   takeQuantity: number;
+  remainingLayerCostKgs?: number;
 }): number {
-  const take = Math.abs(Number(input.takeQuantity));
-  const remaining = Math.max(0, Math.floor(Number(input.remainingQuantity)));
-  const baseQty = Math.abs(Number(input.layerBaseQuantity));
-  const layerTotal = Number(input.layerTotalCostKgs);
-  if (take <= 0 || layerTotal <= 0 || baseQty <= 0) return 0;
-
-  if (remaining <= 0) {
-    return roundDisplayMoney(allocateProportionalCost(layerTotal, baseQty, take));
-  }
-
-  const remainingLayerCost = allocateProportionalCost(layerTotal, baseQty, remaining);
-
-  if (take >= remaining) {
-    return roundDisplayMoney(remainingLayerCost);
-  }
-
-  return roundDisplayMoney(allocateProportionalCost(remainingLayerCost, remaining, take));
+  return toStoredMoneyKgs(
+    consumeFifoLayerMoney({
+      originalLayerCost: input.layerTotalCostKgs,
+      layerBaseQuantity: input.layerBaseQuantity,
+      remainingQuantity: input.remainingQuantity,
+      takeQuantity: input.takeQuantity,
+      remainingLayerCost: input.remainingLayerCostKgs,
+    }).consumedCost,
+  );
 }
 
 /**
@@ -72,17 +77,13 @@ export function allocateProportionalCost(
 ): number {
   const baseQty = Math.abs(Number(layerBaseQuantity));
   const take = Math.abs(Number(takeQuantity));
-  if (take <= 0 || baseQty <= 0 || layerTotalCostKgs <= 0) return 0;
-  return toDecimal(layerTotalCostKgs).mul(toDecimal(take).div(baseQty)).toNumber();
+  if (take <= 0 || baseQty <= 0 || toMoneyDecimal(layerTotalCostKgs).lte(0)) return 0;
+  return toMoneyDecimal(layerTotalCostKgs).mul(toDecimal(take).div(baseQty)).toNumber();
 }
 
 /** Sum monetary line totals with a single final 2dp round. */
 export function sumDisplayMoneyTotals(amounts: number[]): number {
-  let sum = new Prisma.Decimal(0);
-  for (const amount of amounts) {
-    sum = sum.plus(amount);
-  }
-  return roundDisplayMoney(sum);
+  return toStoredMoneyKgs(sumMoney(amounts));
 }
 
 /**
@@ -90,9 +91,9 @@ export function sumDisplayMoneyTotals(amounts: number[]): number {
  */
 export function distributeAuthoritativeLineTotal(rawShares: number[], lineTotalCostKgs: number): number[] {
   if (!rawShares.length) return [];
-  const target = roundDisplayMoney(lineTotalCostKgs);
-  if (target <= 0) return rawShares.map(() => 0);
-  return distributeRoundedMoneyAmounts(rawShares, target);
+  const target = roundMoneyKgs(lineTotalCostKgs);
+  if (target.lte(0)) return rawShares.map(() => 0);
+  return distributeMoneyToTarget(rawShares, target).map((value) => value.toNumber());
 }
 
 /**

@@ -111,4 +111,14 @@ describe('reconcileConfirmedPaymentPosting', () => {
     assert.equal(result.matches, true);
     assert.equal(result.difference, 0);
   });
+
+  it('partial payments of 33.34 + 33.33 + 33.34 close 100.01 exactly', () => {
+    const remaining = reconcileConfirmedPaymentPosting({
+      netAcceptedAmount: 100.01,
+      ledgerSignedAmount: 100.01,
+      balanceDelta: 100.01,
+    });
+    assert.equal(remaining.matches, true);
+    assert.equal(remaining.difference, 0);
+  });
 });
