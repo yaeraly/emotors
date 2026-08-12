@@ -24,8 +24,10 @@ import {
   applyHqBranchWholesaleMarkup,
   pricesFromMarkups,
   resolveHqToBranchPrice,
+  resolveHqTransferBasePriceKgs,
   validateMarkups,
 } from './pricing-calculator.util';
+import { validateHqTransferMarkupSave } from './pricing-scope-validation.util';
 import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
 import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { PricingFifoService } from './pricing-fifo.service';
@@ -539,13 +541,12 @@ export class PricingCatalogService {
     branchId?: string,
   ) {
     this.assertCanManage(user);
-    if (dto.hqBranchWholesaleMarkupPercent < 0) {
-      throw new BadRequestException('Markup must be >= 0');
-    }
+    const transferValidation = validateHqTransferMarkupSave(dto.hqBranchWholesaleMarkupPercent);
+    if (transferValidation) throw new BadRequestException(transferValidation);
 
     const product = await this.prisma.product.findFirst({
       where: { id: productId, deletedAt: null },
-      include: { productCategory: { select: { nameRu: true } } },
+      include: { productCategory: { select: PRODUCT_CATEGORY_MARKUP_SELECT } },
     });
     if (!product) throw new NotFoundException('Product not found');
 
@@ -564,15 +565,33 @@ export class PricingCatalogService {
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
     };
-    const validationError = validateMarkups(cost.costPriceKgs, nextMarkups);
-    if (validationError) throw new BadRequestException(validationError);
     // Persist derived master prices for storage/history only — display after save uses Engine.
     const prices = pricesFromMarkups(cost.costPriceKgs, nextMarkups);
+    const category = this.defaultCategoryMaximumFields(product.productCategory);
+    const effectiveMaximumRetailMarkupPercent = resolveEffectiveMaximumRetailMarkupPercent(
+      product,
+      category,
+    );
+    const retailPrices = calculateRetailPricesFromBranchPrice(prices.hqBranchWholesalePriceKgs, {
+      minimumRetailMarkupPercent: nextMarkups.minimumSellingMarkupPercent,
+      recommendedRetailMarkupPercent: nextMarkups.recommendedRetailMarkupPercent,
+      effectiveMaximumRetailMarkupPercent,
+    });
+    const resolvedRetailPolicy = resolveRetailMaximumPolicy(product, category);
+    const enableMaximumRetailPrice = maximumPolicyToLegacyEnabled(resolvedRetailPolicy);
 
     await this.prisma.$transaction(async (tx) => {
       const updated = await this.persistProductPricing(tx, user, product, {
         costPriceKgs: cost.costPriceKgs,
-        ...prices,
+        wholesalePriceKgs: prices.wholesalePriceKgs,
+        hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+        masterPriceKgs: prices.masterPriceKgs,
+        recommendedRetailPriceKgs: retailPrices.recommendedRetailPriceKgs,
+        minimumSellingPriceKgs: retailPrices.minimumRetailPriceKgs,
+        maximumRetailPriceKgs: retailPrices.maximumRetailPriceKgs,
+        enableMaximumRetailPrice,
+        maximumRetailMarkupPercent: effectiveMaximumRetailMarkupPercent,
+        masterMarkupPercent: prices.masterMarkupPercent,
         ...nextMarkups,
         reason: dto.reason,
         historyFieldName: 'hqBranchWholesaleMarkupPercent',
@@ -2239,12 +2258,10 @@ export class PricingCatalogService {
     if (!product) throw new NotFoundException('Product not found');
 
     const cost = await this.fifoService.getLatestHqCostPrice(product.id);
-    const prices = pricesFromMarkups(cost.costPriceKgs, {
-      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+    const hqTransferBaseKgs = resolveHqTransferBasePriceKgs({
+      hqBranchWholesalePriceKgs: product.hqBranchWholesalePriceKgs,
+      costPriceKgs: cost.costPriceKgs,
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
     });
 
     return {
@@ -2255,7 +2272,7 @@ export class PricingCatalogService {
         defaultRetailMaximumMarkupPercent: 0,
         defaultWholesaleMaximumMarkupPercent: 0,
       },
-      effectiveBranchPriceKgs: prices.hqBranchWholesalePriceKgs,
+      effectiveBranchPriceKgs: hqTransferBaseKgs,
     };
   }
 
@@ -2530,90 +2547,33 @@ export class PricingCatalogService {
   }
 
   private async toEngineRetailCatalogRow(
-    product: Parameters<PricingCatalogService['formatRetailCatalogRow']>[0],
+    product: Parameters<PricingCatalogService['formatRetailCatalogRow']>[0] & {
+      hqBranchWholesalePriceKgs?: Prisma.Decimal | number | null;
+    },
     displayBranch: Awaited<ReturnType<PricingCatalogService['resolveCatalogDisplayBranch']>>,
   ) {
     const cost = await this.fifoService.getPricingCostBasis(product.id);
-    const masterPrices = pricesFromMarkups(cost.costPriceKgs, {
-      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+    const hqTransferBaseKgs = resolveHqTransferBasePriceKgs({
+      hqBranchWholesalePriceKgs: product.hqBranchWholesalePriceKgs,
+      costPriceKgs: cost.costPriceKgs,
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
     });
-
-    // Markup-derived row for editable fields only; displayed prices overwritten by Engine.
-    const baseRow = this.formatRetailCatalogRow(product, masterPrices.hqBranchWholesalePriceKgs);
-
-    if (!displayBranch) {
-      return {
-        ...baseRow,
-        masterBranchPriceKgs: masterPrices.hqBranchWholesalePriceKgs,
-        masterMinimumRetailPriceKgs: baseRow.minimumRetailPriceKgs,
-        masterRecommendedRetailPriceKgs: baseRow.recommendedRetailPriceKgs,
-        masterMaximumRetailPriceKgs: baseRow.maximumRetailPriceKgs,
-        ruleApplied: false,
-        appliedRuleType: null,
-        pricingProfileId: null,
-        pricingProfileName: null,
-        pricingPolicyVersionId: null,
-        displayBranchId: null,
-        displayBranchName: null,
-      };
-    }
-
-    const [branchPurchase] = await Promise.all([
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.BRANCH_PURCHASE,
-      }),
-    ]);
-
-    const masterBranchPriceKgs = branchPurchase.baseBranchPriceKgs;
-    const effectiveBranchPriceKgs = branchPurchase.resolvedPriceKgs;
-    const category = this.defaultCategoryMaximumFields(product.productCategory);
-    const markupRow = buildRetailMarkupRow(
-      product as unknown as RetailMarkupInput & { id: string },
-      category,
-      effectiveBranchPriceKgs,
-    );
-    const masterMarkupRow = buildRetailMarkupRow(
-      product as unknown as RetailMarkupInput & { id: string },
-      category,
-      masterBranchPriceKgs,
-    );
+    const baseRow = this.formatRetailCatalogRow(product, hqTransferBaseKgs);
 
     return {
       ...baseRow,
-      effectiveBranchPriceKgs,
-      minimumRetailMarkupPercent: markupRow.minimumRetailMarkupPercent,
-      minimumRetailPriceKgs: markupRow.minimumRetailPriceKgs,
-      recommendedRetailMarkupPercent: markupRow.recommendedRetailMarkupPercent,
-      recommendedRetailPriceKgs: markupRow.recommendedRetailPriceKgs,
-      inheritedMaximumRetailMarkupPercent: markupRow.inheritedMaximumRetailMarkupPercent,
-      maximumRetailMarkupOverridePercent: markupRow.maximumRetailMarkupOverridePercent,
-      effectiveMaximumRetailMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
-      maximumRetailMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
-      maximumRetailPriceKgs: markupRow.maximumRetailPriceKgs,
-      maximumRetailMarkupSource: markupRow.maximumRetailMarkupSource,
-      validationStatus: markupRow.validationStatus,
-      validationErrors: markupRow.validationErrors,
-      masterBranchPriceKgs,
-      masterMinimumRetailPriceKgs: masterMarkupRow.minimumRetailPriceKgs,
-      masterRecommendedRetailPriceKgs: masterMarkupRow.recommendedRetailPriceKgs,
-      masterMaximumRetailPriceKgs: masterMarkupRow.maximumRetailPriceKgs,
-      ruleApplied: this.isRuleApplied(
-        branchPurchase.appliedRuleType,
-        masterBranchPriceKgs,
-        effectiveBranchPriceKgs,
-      ),
-      appliedRuleType: branchPurchase.appliedRuleType,
-      pricingProfileId: branchPurchase.pricingProfileId,
-      pricingProfileName: branchPurchase.pricingProfileName,
-      pricingPolicyVersionId: branchPurchase.pricingPolicyVersionId,
-      displayBranchId: displayBranch.id,
-      displayBranchName: displayBranch.name,
+      effectiveBranchPriceKgs: hqTransferBaseKgs,
+      masterBranchPriceKgs: hqTransferBaseKgs,
+      masterMinimumRetailPriceKgs: baseRow.minimumRetailPriceKgs,
+      masterRecommendedRetailPriceKgs: baseRow.recommendedRetailPriceKgs,
+      masterMaximumRetailPriceKgs: baseRow.maximumRetailPriceKgs,
+      ruleApplied: false,
+      appliedRuleType: null,
+      pricingProfileId: displayBranch?.priceProfile?.id ?? null,
+      pricingProfileName: displayBranch?.priceProfile?.name ?? null,
+      pricingPolicyVersionId: null,
+      displayBranchId: displayBranch?.id ?? null,
+      displayBranchName: displayBranch?.name ?? null,
     };
   }
 

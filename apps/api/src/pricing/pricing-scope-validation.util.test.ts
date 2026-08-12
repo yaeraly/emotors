@@ -53,4 +53,17 @@ describe('pricing scope validation separation', () => {
     assert.equal(PRICING_POLICY_SCOPE.HQ_CATALOG, 'HQ_CATALOG');
     assert.equal(PRICING_POLICY_SCOPE.BRANCH_PROFILE, 'BRANCH_PROFILE');
   });
+
+  it('retail catalog list uses HQ transfer base, not franchise engine branch purchase', () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'pricing-catalog.service.ts'),
+      'utf8',
+    );
+    const blockStart = source.indexOf('private async toEngineRetailCatalogRow(');
+    const blockEnd = source.indexOf('\n  private async toEngineWholesaleCatalogRow(', blockStart);
+    const block = source.slice(blockStart, blockEnd);
+
+    assert.match(block, /resolveHqTransferBasePriceKgs\(/);
+    assert.doesNotMatch(block, /PricingEnginePriceType\.BRANCH_PURCHASE/);
+  });
 });

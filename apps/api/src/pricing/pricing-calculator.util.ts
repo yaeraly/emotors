@@ -85,6 +85,17 @@ export function applyHqBranchWholesaleMarkup(
   return applyMarkupRoundUp(costPrice, markupPercent, config);
 }
 
+/** Authoritative HQ Продажа филиалам base — feeds Retail Закупка when present. */
+export function resolveHqTransferBasePriceKgs(input: {
+  hqBranchWholesalePriceKgs?: number | string | { toString(): string } | null;
+  costPriceKgs: number;
+  hqBranchWholesaleMarkupPercent: number;
+}) {
+  const stored = Number(input.hqBranchWholesalePriceKgs ?? 0);
+  if (stored > 0) return stored;
+  return applyHqBranchWholesaleMarkup(input.costPriceKgs, input.hqBranchWholesaleMarkupPercent);
+}
+
 /**
  * Branch order price: cost × (1 + markup%) with centralized rounding (Prisma Decimal).
  * Used by BranchPriceResolverService — single source for franchise branch purchase price.
@@ -634,6 +645,7 @@ export function validatePricingTiers(input: {
   if (input.minimumSellingPriceKgs > input.recommendedRetailPriceKgs + 0.01) {
     return 'Minimum selling price cannot exceed recommended retail price';
   }
+  // Full-tier validation (updateProductPricing bundle). Not applied to HQ_TRANSFER markup-only saves.
   if (input.wholesalePriceKgs > input.recommendedRetailPriceKgs + 0.01) {
     return 'Wholesale price cannot exceed recommended retail price';
   }
