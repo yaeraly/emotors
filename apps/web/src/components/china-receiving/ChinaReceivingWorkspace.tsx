@@ -750,18 +750,28 @@ function ChinaReceivingEditableView({
       ) : null}
 
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+        <table className="w-full min-w-[720px] table-auto divide-y divide-slate-200 text-xs">
           <thead className="bg-slate-50 text-left font-bold text-slate-500">
             <tr>
-              <th className="px-2 py-2">{t('chinaReceiving.col.product')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.expectedShort')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.actualShort')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.damagedShort')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.shortageShort')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.overageShort')}</th>
-              <th className="px-2 py-2">{t('chinaReceiving.col.notesShort')}</th>
+              <th className="min-w-[10rem] px-2 py-2 text-left">{t('chinaReceiving.col.product')}</th>
+              <th className="w-px whitespace-nowrap px-2 py-2 text-center">
+                {t('chinaReceiving.col.expectedShort')}
+              </th>
+              <th className="w-px whitespace-nowrap px-2 py-2 text-center">
+                {t('chinaReceiving.col.actualShort')}
+              </th>
+              <th className="w-px whitespace-nowrap px-2 py-2 text-center">
+                {t('chinaReceiving.col.damagedShort')}
+              </th>
+              <th className="w-px whitespace-nowrap px-2 py-2 text-center">
+                {t('chinaReceiving.col.shortageShort')}
+              </th>
+              <th className="w-px whitespace-nowrap px-2 py-2 text-center">
+                {t('chinaReceiving.col.overageShort')}
+              </th>
+              <th className="min-w-[8rem] max-w-[14rem] px-2 py-2">{t('chinaReceiving.col.notesShort')}</th>
               {canEdit ? (
-                <th className="w-24 px-2 py-2">{t('chinaReceiving.col.actionsShort')}</th>
+                <th className="w-px whitespace-nowrap px-2 py-2">{t('chinaReceiving.col.actionsShort')}</th>
               ) : null}
             </tr>
           </thead>
@@ -785,52 +795,50 @@ function ChinaReceivingEditableView({
               const noteValue = row?.note ?? '';
               return (
                 <tr key={item.id} className={bg}>
-                  <td className="px-2 py-2">
-                    <p className="truncate font-medium text-slate-900" title={item.productName}>
-                      {item.productName}
-                    </p>
+                  <td className="px-2 py-2 align-top">
+                    <p className="whitespace-normal break-words font-medium text-slate-900">{item.productName}</p>
                   </td>
-                  <td className="px-2 py-2 text-center">{item.expectedQuantity}</td>
-                  <td className="px-2 py-2">
+                  <td className="w-px whitespace-nowrap px-2 py-2 text-center">{item.expectedQuantity}</td>
+                  <td className="w-px whitespace-nowrap px-2 py-2 text-center">
                     {canEdit ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.actualQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'actualQuantity', e.target.value)}
-                        className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
+                        className="w-16 min-w-[3.5rem] rounded border border-slate-300 px-1.5 py-1 text-center"
                         title={t('chinaReceiving.col.actualShort')}
                       />
                     ) : (
-                      <span className="block text-center">{actual}</span>
+                      <span>{actual}</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="w-px whitespace-nowrap px-2 py-2 text-center">
                     {canEdit ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.damagedQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'damagedQuantity', e.target.value)}
-                        className={`w-full rounded border px-1.5 py-1 text-center ${damaged > 0 ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-300'}`}
+                        className={`w-16 min-w-[3.5rem] rounded border px-1.5 py-1 text-center ${damaged > 0 ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-300'}`}
                         title={t('chinaReceiving.col.damagedShort')}
                       />
                     ) : (
-                      <span className={`block text-center ${damaged > 0 ? 'font-semibold text-orange-700' : ''}`}>{damaged}</span>
+                      <span className={damaged > 0 ? 'font-semibold text-orange-700' : ''}>{damaged}</span>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-center font-semibold text-red-600">
+                  <td className="w-px whitespace-nowrap px-2 py-2 text-center font-semibold text-red-600">
                     {shortage > 0 ? shortage : '-'}
                   </td>
-                  <td className="px-2 py-2 text-center font-semibold text-emerald-600">
+                  <td className="w-px whitespace-nowrap px-2 py-2 text-center font-semibold text-emerald-600">
                     {overage > 0 ? overage : '-'}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="min-w-[8rem] max-w-[14rem] px-2 py-2">
                     {canEdit ? (
                       <input
                         value={noteValue}
                         onChange={(e) => updateRow(item.id, 'note', e.target.value)}
-                        className="w-full rounded border border-slate-300 px-1.5 py-1"
+                        className="w-full min-w-[8rem] max-w-[14rem] rounded border border-slate-300 px-1.5 py-1"
                         title={noteValue || t('chinaReceiving.col.notesShort')}
                         placeholder={t('chinaReceiving.col.notesShort')}
                       />
@@ -839,7 +847,7 @@ function ChinaReceivingEditableView({
                     )}
                   </td>
                   {canEdit ? (
-                    <td className="px-2 py-2">
+                    <td className="w-px whitespace-nowrap px-2 py-2">
                       <button
                         type="button"
                         disabled={row?.saveState === 'saving'}
