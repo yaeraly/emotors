@@ -3514,6 +3514,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqReturn.financeStatus.APPROVED': 'Ырасталды',
     'branchHqReturn.financeStatus.REJECTED': 'Четке кагылды',
     'branchHqReturn.financeStatus.NOT_REQUIRED': 'Керек эмес',
+    'branchHqReturn.searchProduct': 'Товар издөө',
+    'branchHqReturn.nothingFound': 'Эч нерсе табылган жок',
+    'branchHqReturn.available': 'Жеткиликтүү',
+    'branchHqReturn.alreadyAdded': 'Кошулган',
 
   },
   ru: {
@@ -7328,6 +7332,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqReturn.financeStatus.APPROVED': 'Подтверждена',
     'branchHqReturn.financeStatus.REJECTED': 'Отклонена',
     'branchHqReturn.financeStatus.NOT_REQUIRED': 'Не требуется',
+    'branchHqReturn.searchProduct': 'Поиск товара',
+    'branchHqReturn.nothingFound': 'Ничего не найдено',
+    'branchHqReturn.available': 'Доступно',
+    'branchHqReturn.alreadyAdded': 'Уже добавлен',
 
   },
   en: {
@@ -11088,6 +11096,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqReturn.financeStatus.APPROVED': 'Approved',
     'branchHqReturn.financeStatus.REJECTED': 'Rejected',
     'branchHqReturn.financeStatus.NOT_REQUIRED': 'Not required',
+    'branchHqReturn.searchProduct': 'Search product',
+    'branchHqReturn.nothingFound': 'Nothing found',
+    'branchHqReturn.available': 'Available',
+    'branchHqReturn.alreadyAdded': 'Already added',
 
   },
 };

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { BranchWarehouseStockProductCombobox } from '@/components/BranchWarehouseStockProductCombobox';
 import { apiFetch } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import type {
@@ -84,10 +85,18 @@ export default function NewBranchHqReturnPage() {
       .finally(() => setLoadingStock(false));
   }, [t]);
 
-  const availableProducts = useMemo(() => {
-    const used = new Set(lines.map((line) => line.productId));
-    return stock.filter((row) => !used.has(row.productId));
-  }, [lines, stock]);
+  const stockOptions = useMemo(
+    () =>
+      stock.map((row) => ({
+        productId: row.productId,
+        productName: row.productName,
+        productCode: row.productCode,
+        availableQuantity: Number(row.availableQuantity ?? row.quantityOnHand ?? 0),
+      })),
+    [stock],
+  );
+
+  const addedProductIds = useMemo(() => lines.map((line) => line.productId), [lines]);
 
   function addLine() {
     setError('');
@@ -190,24 +199,20 @@ export default function NewBranchHqReturnPage() {
 
         <form onSubmit={onSubmit} className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-              <select
+            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <BranchWarehouseStockProductCombobox
+                label={t('branchHqReturn.product')}
                 value={selectedProductId}
-                onChange={(event) => setSelectedProductId(event.target.value)}
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                disabled={loadingStock}
-              >
-                <option value="">{t('branchHqReturn.selectProduct')}</option>
-                {availableProducts.map((row) => (
-                  <option key={row.productId} value={row.productId}>
-                    {row.productCode} — {row.productName} ({row.availableQuantity})
-                  </option>
-                ))}
-              </select>
+                options={stockOptions}
+                excludedProductIds={addedProductIds}
+                loading={loadingStock}
+                onChange={setSelectedProductId}
+              />
               <button
                 type="button"
                 onClick={addLine}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                disabled={loadingStock || !selectedProductId}
+                className="h-fit rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {t('branchHqReturn.addItem')}
               </button>
