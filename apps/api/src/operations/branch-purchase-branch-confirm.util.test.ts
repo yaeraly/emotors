@@ -75,7 +75,7 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     assert.equal(sumBranchPurchaseCommercialAgreementTotalKgs(lines), 1000);
   });
 
-  it('HQ Branch internal transfer profit is zero while amount unchanged', () => {
+  it('HQ Branch internal transfer uses FIFO cost with zero profit', () => {
     const hqItem = {
       ...approvedItem,
       resolvedBranchPriceKgs: 36245.25,
@@ -90,9 +90,10 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
       { branchType: 'HQ_BRANCH' },
     );
     assert.equal(lines.length, 1);
-    assert.equal(lines[0].totalPrice, 72490.5);
-    assert.equal(lines[0].totalCost, 72490.5);
+    assert.equal(lines[0].totalPrice, 63148.89);
+    assert.equal(lines[0].totalCost, 63148.89);
     assert.equal(lines[0].profit, 0);
+    assert.notEqual(lines[0].totalPrice, 72490.5);
   });
 
   it('missing estimatedLineProductCostKgs does not block branch agreement (TRA002 regression)', () => {
@@ -167,7 +168,7 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     assert.notEqual(lines[0].quantity, partialItem.quantity);
   });
 
-  it('HQ Branch agreement line cost may differ from stored FIFO snapshot — must not block confirm', () => {
+  it('HQ Branch agreement line cost equals stored FIFO snapshot', () => {
     const hqItem = {
       ...approvedItem,
       resolvedBranchPriceKgs: 36245.25,
@@ -184,8 +185,9 @@ describe('branch purchase branch confirm — no live FIFO at agreement', () => {
     const storedInventory = sumPersistedApprovedInventoryCostKgs([hqItem]);
     const agreementInventory = sumBranchPurchaseCommercialAgreementInventoryCostKgs(lines);
     assert.equal(storedInventory, 63148.89);
-    assert.equal(agreementInventory, 72490.5);
-    assert.notEqual(storedInventory, agreementInventory);
+    assert.equal(agreementInventory, 63148.89);
+    assert.equal(storedInventory, agreementInventory);
+    assert.equal(sumBranchPurchaseCommercialAgreementTotalKgs(lines), 63148.89);
   });
 
   it('confirmBranchPurchaseRequest does not run FIFO cost reconciliation', () => {

@@ -83,9 +83,9 @@ describe('HQ Branch at-cost permanent invariant', () => {
     const payableTotals = sanitized.items.map((item) =>
       Number((item as { totalAmount?: number }).totalAmount ?? 0),
     );
-    assert.equal(sumDisplayMoneyTotals(payableTotals), driftedUnitTimesQty);
-    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), driftedUnitTimesQty);
-    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_1_TOTAL);
+    assert.equal(sumDisplayMoneyTotals(payableTotals), HQ_BATCH_1_TOTAL);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_1_TOTAL);
+    assert.notEqual(driftedUnitTimesQty, HQ_BATCH_1_TOTAL);
 
     const fifoPayableTotals = lines.map((line) =>
       resolveBranchPurchaseLinePayableAmount({
@@ -106,7 +106,7 @@ describe('HQ Branch at-cost permanent invariant', () => {
     assert.equal(costParity.differenceKgs, 0);
   });
 
-  it('Case 1b — BPR-1786370094023: inventory FIFO 822036.20 stays separate from BPR commercial Сумма', () => {
+  it('Case 1b — BPR-1786370094023: HQ Branch BPR Сумма equals inventory FIFO 822036.20', () => {
     const lines = buildExactBatchLines(HQ_BATCH_2_TOTAL, 55, 10);
     const hqSource = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
     assert.equal(hqSource, HQ_BATCH_2_TOTAL);
@@ -141,14 +141,14 @@ describe('HQ Branch at-cost permanent invariant', () => {
       true,
     );
 
-    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), commercialUnitTimesQty);
+    assert.equal(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_2_TOTAL);
     assert.equal(
       sumDisplayMoneyTotals(
         sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
       ),
-      commercialUnitTimesQty,
+      HQ_BATCH_2_TOTAL,
     );
-    assert.notEqual(Number(sanitized.totalEstimatedAmount ?? 0), HQ_BATCH_2_TOTAL);
+    assert.notEqual(commercialUnitTimesQty, HQ_BATCH_2_TOTAL);
   });
 
   it('Case 2 — fractional unit cost: display rounding must not alter authoritative line total', () => {

@@ -122,7 +122,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.equal(roundDisplayMoney(productCost - estimated), 0);
   });
 
-  it('keeps BPR commercial Сумма separate from FIFO product cost for at-cost orders', () => {
+  it('HQ Branch BPR Сумма equals FIFO product cost for at-cost orders', () => {
     const lines = buildChinaBatchLines();
     const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
     const commercialUnitTimesQty = sumDisplayMoneyTotals(
@@ -133,7 +133,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     const response = toBranchPurchaseRequestResponse({
       status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
       reviewedAt: new Date(),
-      totalEstimatedAmount: CHINA_BATCH_TOTAL, // stale FIFO header
+      totalEstimatedAmount: CHINA_BATCH_TOTAL,
       transportCostKgs: 0,
       branch: { branchType: BranchType.HQ_BRANCH },
       items: lines.map((line) => ({
@@ -147,8 +147,9 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       })),
     });
     assert.equal(response.totalProductCostKgs, CHINA_BATCH_TOTAL);
-    assert.equal(response.totalEstimatedAmount, commercialUnitTimesQty);
-    assert.notEqual(response.totalEstimatedAmount, response.totalProductCostKgs);
+    assert.equal(response.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.equal(response.totalEstimatedAmount, response.totalProductCostKgs);
+    assert.notEqual(commercialUnitTimesQty, CHINA_BATCH_TOTAL);
     assert.equal(productCost, CHINA_BATCH_TOTAL);
   });
 
@@ -166,7 +167,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.match(BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE, /Ориентировочная сумма/);
   });
 
-  it('Branch Sales sanitize keeps Сумма equal to commercial saved price × qty', () => {
+  it('Branch Sales sanitize keeps HQ_BRANCH Сумма equal to FIFO product cost', () => {
     const lines = buildChinaBatchLines();
     const commercialEstimated = sumDisplayMoneyTotals(
       lines.map((line) =>
@@ -177,7 +178,7 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       {
         status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
         reviewedAt: new Date(),
-        totalEstimatedAmount: CHINA_BATCH_TOTAL, // stale FIFO header
+        totalEstimatedAmount: CHINA_BATCH_TOTAL,
         transportCostKgs: 0,
         branch: { branchType: BranchType.HQ_BRANCH },
         items: lines.map((line, index) => ({
@@ -196,14 +197,14 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
       },
       true,
     );
-    assert.equal(sanitized.totalEstimatedAmount, commercialEstimated);
+    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
     assert.equal(sanitized.totalProductCostKgs, undefined);
     const lineSum = sumDisplayMoneyTotals(
       sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
     );
-    assert.equal(lineSum, commercialEstimated);
+    assert.equal(lineSum, CHINA_BATCH_TOTAL);
     assert.notEqual(commercialEstimated, CHINA_BATCH_TOTAL);
-    assert.notEqual(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.notEqual(sanitized.totalEstimatedAmount, commercialEstimated);
   });
 
   it('reconcileHqBranchTransferCostParity enforces FIFO = payable = order total', () => {

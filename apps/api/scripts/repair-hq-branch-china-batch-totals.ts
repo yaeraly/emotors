@@ -1,28 +1,25 @@
 /**
  * Repair HQ Branch BPR totals that drifted via rounded display unit × quantity.
  *
+ * Uses the stored FIFO snapshot (`estimatedLineProductCostKgs`) — never live FIFO
+ * (layers may already be consumed) and never unit × qty reconstruction.
+ *
  * Examples:
+ *   BPR-1785478341861  914368.98 → 914369.80 (−0.82)
  *   BPR-1786271735303  914369.08 → 914369.80 (−0.72)
  *   BPR-1786370094023  822036.39 → 822036.20 (+0.19)
  *
  * Usage:
- *   cd apps/api && npx tsx scripts/repair-hq-branch-china-batch-totals.ts BPR-1786271735303 BPR-1786370094023
- *   cd apps/api && npx tsx scripts/repair-hq-branch-china-batch-totals.ts --apply BPR-1786271735303
+ *   cd apps/api && npx tsx scripts/repair-hq-branch-china-batch-totals.ts BPR-1785478341861
+ *   cd apps/api && npx tsx scripts/repair-hq-branch-china-batch-totals.ts --apply BPR-1785478341861
  */
 import { PrismaClient } from '@prisma/client';
+import { deriveDisplayUnitCost, roundDisplayMoney } from '../src/pricing/product-cost-precision.util';
+import { shouldTransferBranchPurchaseAtCost } from '../src/operations/branch-purchase-estimated-amount.util';
 import {
-  deriveDisplayUnitCost,
-  roundDisplayMoney,
-  sumDisplayMoneyTotals,
-} from '../src/pricing/product-cost-precision.util';
-import { resolveBranchPurchaseFifoLineCost } from '../src/operations/branch-purchase-fifo-cost.util';
-import {
-  resolveBranchPurchaseLinePayableAmount,
-  shouldTransferBranchPurchaseAtCost,
-} from '../src/operations/branch-purchase-estimated-amount.util';
-import { computeBranchPurchaseHqReviewLineAmountKgs } from '../src/operations/branch-purchase-review-totals.util';
-import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
-import type { PrismaService } from '../src/prisma/prisma.service';
+  planHqBranchBprRepairFromStoredFifo,
+  sumHqBranchStoredFifoSnapshots,
+} from '../src/operations/repair-hq-branch-stored-fifo.util';
 
 const args = process.argv.slice(2);
 const apply = args.includes('--apply');
@@ -37,7 +34,6 @@ if (!lookups.length) {
 
 async function main() {
   const prisma = new PrismaClient();
-  const pricingFifoService = new PricingFifoService(prisma as unknown as PrismaService);
 
   for (const lookup of lookups) {
     const bpr = await prisma.branchPurchaseRequest.findFirst({
@@ -46,7 +42,7 @@ async function main() {
         OR: [{ requestNumber: lookup }, { id: lookup }],
       },
       include: {
-        branch: { select: { name: true, code: true, branchType: true, hqToBranchMarkupPercent: true } },
+        branch: { select: { name: true, code: true, branchType: true } },
         items: { orderBy: { position: 'asc' } },
       },
     });
@@ -61,102 +57,38 @@ async function main() {
     console.log('Branch:', bpr.branch.name, branchType);
     console.log('Stored BPR total:', Number(bpr.totalEstimatedAmount));
     console.log('HQ Branch at-cost:', shouldTransferBranchPurchaseAtCost(branchType));
-    console.log('--- STEP 1 forensics headers printed after line scan ---');
 
     if (!shouldTransferBranchPurchaseAtCost(branchType)) {
       console.log('SKIP: not HQ_BRANCH');
       continue;
     }
 
-    const warehouseId = bpr.assignedHqWarehouseId;
-    if (!warehouseId) {
-      console.error('No assigned HQ warehouse');
-      continue;
-    }
+    const plan = planHqBranchBprRepairFromStoredFifo({
+      branchType,
+      storedHeaderTotalKgs: bpr.totalEstimatedAmount,
+      items: bpr.items,
+    });
+    const sumFifo = sumHqBranchStoredFifoSnapshots(bpr.items);
 
-    await pricingFifoService.syncFifoBatchesFromHqStockMovements();
+    console.log('SUM stored FIFO snapshots (estimatedLineProductCostKgs):', sumFifo);
+    console.log('Authoritative BPR total after repair:', plan.newHeaderTotalKgs);
+    console.log('Stored BPR total before repair:', plan.oldHeaderTotalKgs);
+    console.log(
+      'Difference (stored header - FIFO):',
+      roundDisplayMoney(plan.oldHeaderTotalKgs - plan.newHeaderTotalKgs),
+    );
 
-    let sumFifo = 0;
-    let sumStoredLine = 0;
-    let sumUnitTimesQty = 0;
-    const linePatches: Array<{
-      itemId: string;
-      productName: string;
-      quantity: number;
-      oldLine: number;
-      newLine: number;
-      unitTimesQty: number;
-      difference: number;
-    }> = [];
-
-    for (const item of bpr.items) {
-      const qty = item.approvedQuantity ?? item.quantity;
-      if (qty <= 0) continue;
-
-      const fifoCost = await resolveBranchPurchaseFifoLineCost(pricingFifoService, prisma, {
-        productId: item.productId,
-        warehouseId,
-        quantity: qty,
-        branchType,
-        hqToBranchMarkupPercent: Number(bpr.branch.hqToBranchMarkupPercent ?? 0),
-        fallbackUnitCost: Number(item.estimatedUnitCost ?? 0),
-        fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? 0),
-      });
-
-      const authoritative = resolveBranchPurchaseLinePayableAmount({
-        branchType,
-        quantity: qty,
-        estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
-        unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
-        hasPricingPolicy: true,
-      });
-      const fromReviewUtil = computeBranchPurchaseHqReviewLineAmountKgs({
-        quantity: item.quantity,
-        approvedQuantity: item.approvedQuantity,
-        lineStatus: item.lineStatus,
-        resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
-        totalAmount: item.totalAmount,
-        approvedLineTotalKgs: item.approvedLineTotalKgs,
-        estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
-        branchType,
-      });
-      const oldLine = roundDisplayMoney(Number(item.totalAmount ?? 0));
-      const displayUnit = deriveDisplayUnitCost(authoritative, qty);
-      const unitTimesQty = roundDisplayMoney(displayUnit * qty);
-
-      sumFifo = roundDisplayMoney(sumFifo + authoritative);
-      sumStoredLine = roundDisplayMoney(sumStoredLine + oldLine);
-      sumUnitTimesQty = roundDisplayMoney(sumUnitTimesQty + unitTimesQty);
-
+    for (const patch of plan.linePatches) {
       console.log('---');
-      console.log('Product:', item.productName);
-      console.log('Qty transferred:', qty);
-      console.log('Raw FIFO/inventory cost:', fifoCost.estimatedLineProductCostKgs);
-      console.log('Authoritative transfer cost:', authoritative);
-      console.log('Review util cost:', fromReviewUtil);
-      console.log('Displayed unit price:', displayUnit);
-      console.log('BPR line total (stored):', oldLine);
-      console.log('unit×qty (forbidden):', unitTimesQty);
-      console.log('Difference (stored - authoritative):', roundDisplayMoney(oldLine - authoritative));
-
-      if (Math.abs(oldLine - authoritative) > 0.009 || Math.abs(fromReviewUtil - authoritative) > 0.009) {
-        linePatches.push({
-          itemId: item.id,
-          productName: item.productName,
-          quantity: qty,
-          oldLine,
-          newLine: authoritative,
-          unitTimesQty,
-          difference: roundDisplayMoney(oldLine - authoritative),
-        });
-      }
+      console.log('Product:', patch.productName);
+      console.log('SKU:', patch.sku);
+      console.log('Qty transferred:', patch.quantity);
+      console.log('Stored FIFO snapshot:', patch.fifoSnapshotKgs);
+      console.log('BPR line total (stored):', patch.oldLineKgs);
+      console.log('unit×qty (forbidden):', patch.unitTimesQtyKgs);
+      console.log('Authoritative line total:', patch.newLineKgs);
+      console.log('Difference (stored - FIFO):', patch.differenceKgs);
     }
-
-    console.log('SUM FIFO/inventory costs:', sumFifo);
-    console.log('SUM stored BPR line costs:', sumStoredLine);
-    console.log('SUM unit×qty (drift source):', sumUnitTimesQty);
-    console.log('Stored BPR total:', Number(bpr.totalEstimatedAmount));
-    console.log('Difference (stored header - FIFO):', roundDisplayMoney(Number(bpr.totalEstimatedAmount) - sumFifo));
 
     if (!apply) {
       console.log('Dry-run only. Re-run with --apply to persist.');
@@ -164,22 +96,20 @@ async function main() {
     }
 
     await prisma.$transaction(async (tx) => {
-      for (const patch of linePatches) {
-        const unit = deriveDisplayUnitCost(patch.newLine, patch.quantity);
+      for (const patch of plan.linePatches) {
+        const unit = deriveDisplayUnitCost(patch.newLineKgs, patch.quantity);
         await tx.branchPurchaseRequestItem.update({
           where: { id: patch.itemId },
           data: {
-            estimatedLineProductCostKgs: patch.newLine,
-            estimatedUnitCost: unit,
-            totalAmount: patch.newLine,
-            approvedLineTotalKgs: patch.newLine,
+            totalAmount: patch.newLineKgs,
+            approvedLineTotalKgs: patch.newLineKgs,
             resolvedBranchPriceKgs: unit,
           },
         });
       }
       await tx.branchPurchaseRequest.update({
         where: { id: bpr.id },
-        data: { totalEstimatedAmount: sumFifo },
+        data: { totalEstimatedAmount: plan.newHeaderTotalKgs },
       });
 
       if (bpr.convertedOrderId) {
@@ -190,8 +120,8 @@ async function main() {
           const bprItem = bpr.items.find((row) => row.productId === orderItem.productId);
           if (!bprItem) continue;
           const qty = bprItem.approvedQuantity ?? bprItem.quantity;
-          const patch = linePatches.find((row) => row.itemId === bprItem.id);
-          const lineTotal = patch?.newLine ?? roundDisplayMoney(Number(bprItem.totalAmount ?? 0));
+          const patch = plan.linePatches.find((row) => row.itemId === bprItem.id);
+          const lineTotal = patch?.newLineKgs ?? roundDisplayMoney(Number(bprItem.estimatedLineProductCostKgs ?? 0));
           const unit = deriveDisplayUnitCost(lineTotal, qty);
           await tx.branchDistributionOrderItem.update({
             where: { id: orderItem.id },
@@ -204,10 +134,13 @@ async function main() {
             },
           });
         }
-        const orderTotal = sumFifo;
         await tx.branchDistributionOrder.update({
           where: { id: bpr.convertedOrderId },
-          data: { totalAmount: orderTotal, totalCost: orderTotal, totalProfit: 0 },
+          data: {
+            totalAmount: plan.newHeaderTotalKgs,
+            totalCost: plan.newHeaderTotalKgs,
+            totalProfit: 0,
+          },
         });
         const invoice = await tx.branchInvoice.findFirst({
           where: {
@@ -221,8 +154,8 @@ async function main() {
           await tx.branchInvoice.update({
             where: { id: invoice.id },
             data: {
-              totalAmount: orderTotal,
-              debtAmount: roundDisplayMoney(Math.max(orderTotal - paid, 0)),
+              totalAmount: plan.newHeaderTotalKgs,
+              debtAmount: roundDisplayMoney(Math.max(plan.newHeaderTotalKgs - paid, 0)),
             },
           });
         }
@@ -237,17 +170,18 @@ async function main() {
           entityId: bpr.id,
           metadata: {
             requestNumber: bpr.requestNumber,
-            oldTotal: Number(bpr.totalEstimatedAmount),
-            newTotal: sumFifo,
-            difference: roundDisplayMoney(sumFifo - Number(bpr.totalEstimatedAmount)),
-            linePatchCount: linePatches.length,
+            oldTotal: plan.oldHeaderTotalKgs,
+            newTotal: plan.newHeaderTotalKgs,
+            difference: roundDisplayMoney(plan.newHeaderTotalKgs - plan.oldHeaderTotalKgs),
+            linePatchCount: plan.linePatches.length,
+            source: 'stored_estimatedLineProductCostKgs',
             timestamp: new Date().toISOString(),
           },
         },
       });
     });
 
-    console.log('APPLIED. New BPR total:', sumFifo);
+    console.log('APPLIED. New BPR total:', plan.newHeaderTotalKgs);
   }
 
   await prisma.$disconnect();

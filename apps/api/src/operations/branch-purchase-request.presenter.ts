@@ -7,11 +7,9 @@ import {
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
 import {
-  resolveBranchPurchaseBranchLineTotalKgs,
   resolveBranchPurchaseBranchUnitPriceKgs,
   resolveBranchPurchaseCommercialLineTotalKgs,
   resolveBranchPurchaseDraftLineTotalKgs,
-  sumBranchPurchaseBranchLineTotalsKgs,
   sumBranchPurchaseCommercialLineTotalsKgs,
   sumBranchPurchaseDraftLineTotalsKgs,
 } from './branch-purchase-branch-display.util';
@@ -440,9 +438,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const pendingHqSalesReview = isPendingHqSalesReviewStatus(request.status);
   const branchType = request.branch?.branchType ?? request.branchType ?? null;
 
-  // HQ_BRANCH: strip internal cost fields for branch users, but keep the same commercial
-  // BPR snapshot (qty × saved Цена для филиала) used by HQ Sales / Accountant / CEO / Cashier.
-  // Inventory FIFO remains on estimatedLineProductCostKgs and must not replace Сумма.
+  // HQ_BRANCH: strip internal cost fields for branch users, but keep the same
+  // FIFO transfer snapshot used by HQ Sales / Accountant / CEO / Cashier.
+  // Never rebuild Сумма from rounded display unit × quantity.
   if (transferAtCost) {
     const sanitizedItems = request.items.map((item) => {
         const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
@@ -473,13 +471,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
           : pendingHqSalesReview && !reviewed
             ? commercialLineTotal > 0
               ? commercialLineTotal
-              : resolveBranchPurchaseBranchLineTotalKgs({
-                  quantity: item.quantity,
-                  branchPurchasePriceKgs: branchUnitPrice,
-                  resolvedBranchPriceKgs: branchUnitPrice,
-                  totalAmount: 0,
-                  transferAtCost: false,
-                })
+              : resolveBranchPurchaseDraftLineTotalKgs(draftLineContext)
             : commercialLineTotal;
         return {
           id: item.id,
@@ -552,12 +544,27 @@ export function sanitizeBranchPurchaseRequest<T extends {
         ? roundDisplayMoney(
             Number(full.totalEstimatedAmount ?? 0) > 0
               ? Number(full.totalEstimatedAmount)
-              : sumBranchPurchaseBranchLineTotalsKgs(
-                  sanitizedItems.map((item) => ({
-                    quantity: item.quantity,
-                    branchPurchasePriceKgs: item.branchPurchasePriceKgs,
-                    totalAmount: item.totalAmount,
-                  })),
+              : sumBranchPurchaseDraftLineTotalsKgs(
+                  sanitizedItems.map((item) =>
+                    resolveDraftLinePricingContext(
+                      {
+                        quantity: item.quantity,
+                        branchPurchasePriceKgs: item.branchPurchasePriceKgs,
+                        resolvedBranchPriceKgs: item.branchPurchasePriceKgs,
+                        totalAmount: item.totalAmount,
+                        estimatedLineProductCostKgs: fullItemsById.get(item.id ?? '')
+                          ?.estimatedLineProductCostKgs,
+                        hasPricingPolicyAtSubmit: (
+                          fullItemsById.get(item.id ?? '') as
+                            | { hasPricingPolicyAtSubmit?: boolean | null }
+                            | undefined
+                        )?.hasPricingPolicyAtSubmit,
+                        hasPricingPolicyAtReview: fullItemsById.get(item.id ?? '')
+                          ?.hasPricingPolicyAtReview,
+                      },
+                      request.branch?.branchType ?? request.branchType ?? null,
+                    ),
+                  ),
                 ),
           )
         : full.totalEstimatedAmount;

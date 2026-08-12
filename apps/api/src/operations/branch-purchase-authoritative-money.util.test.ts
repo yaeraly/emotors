@@ -13,7 +13,21 @@ import { sanitizeBranchPurchaseRequest, toBranchPurchaseRequestResponse } from '
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 
 describe('BPR authoritative commercial money', () => {
-  it('BPR-1786450868586: 2 × 36245.25 = 72490.50 (not live-cost 72823.21)', () => {
+  it('HQ_BRANCH uses FIFO snapshot even when unit×qty differs (72823.21 not 72490.50)', () => {
+    const item = {
+      quantity: 2,
+      resolvedBranchPriceKgs: 36245.25,
+      wholesalePriceKgs: 36245.25,
+      estimatedLineProductCostKgs: 72823.21,
+      totalAmount: 72490.5,
+      branchType: 'HQ_BRANCH',
+    };
+    assert.equal(calculateBprLineTotalKgs(item, 'draft'), 72823.21);
+    assert.equal(calculateBprOrderTotalKgs([item], 'draft'), 72823.21);
+    assert.notEqual(calculateBprOrderTotalKgs([item], 'draft'), 72490.5);
+  });
+
+  it('franchise still uses frozen unit × qty (72490.50 not live-cost 72823.21)', () => {
     const item = {
       quantity: 2,
       resolvedBranchPriceKgs: 36245.25,
@@ -27,7 +41,7 @@ describe('BPR authoritative commercial money', () => {
     assert.notEqual(calculateBprOrderTotalKgs([item], 'draft'), 72823.21);
   });
 
-  it('draft list/detail presenter both return 72490.50 from saved price', () => {
+  it('draft list/detail presenter both return FIFO 72823.21 for HQ Branch', () => {
     const request = {
       status: BranchPurchaseRequestStatus.DRAFT,
       reviewedAt: null,
@@ -51,9 +65,9 @@ describe('BPR authoritative commercial money', () => {
     };
     const full = toBranchPurchaseRequestResponse(request);
     const sanitized = sanitizeBranchPurchaseRequest(request, true);
-    assert.equal(full.totalEstimatedAmount, 72490.5);
-    assert.equal(sanitized.totalEstimatedAmount, 72490.5);
-    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 72490.5);
+    assert.equal(full.totalEstimatedAmount, 72823.21);
+    assert.equal(sanitized.totalEstimatedAmount, 72823.21);
+    assert.equal((sanitized.items[0] as { totalAmount?: number }).totalAmount, 72823.21);
   });
 
   it('submit without quantity change is money-neutral', () => {
@@ -118,7 +132,7 @@ describe('BPR authoritative commercial money', () => {
     assert.equal(calculateBprLineTotalKgs({ ...saved, estimatedLineProductCostKgs: 99999 }, 'draft'), 72490.5);
   });
 
-  it('Branch Accountant invoice line uses BPR commercial snapshot not FIFO', () => {
+  it('HQ Branch invoice line uses FIFO snapshot, not rounded unit × qty', () => {
     const invoiceLine = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'p1',
       sku: 'S',
@@ -127,15 +141,14 @@ describe('BPR authoritative commercial money', () => {
       approvedQuantity: 2,
       lineStatus: 'APPROVED',
       resolvedBranchPriceKgs: 36245.25,
-      totalAmount: 72490.5,
-      approvedLineTotalKgs: 72490.5,
+      totalAmount: 72823.21,
+      approvedLineTotalKgs: 72823.21,
       estimatedLineProductCostKgs: 72823.21,
       branchType: 'HQ_BRANCH',
     });
     assert.equal(invoiceLine.quantity, 2);
-    assert.equal(invoiceLine.unitPrice, 36245.25);
-    assert.equal(invoiceLine.lineTotal, 72490.5);
-    assert.notEqual(invoiceLine.lineTotal, 72823.21);
+    assert.equal(invoiceLine.lineTotal, 72823.21);
+    assert.notEqual(invoiceLine.lineTotal, 72490.5);
   });
 
   it('resolveBprMoneyStage maps lifecycle statuses', () => {
@@ -147,7 +160,7 @@ describe('BPR authoritative commercial money', () => {
     );
   });
 
-  it('all downstream roles share the same commercial total when qty/price unchanged', () => {
+  it('all downstream HQ_BRANCH roles share the FIFO total when qty/price unchanged', () => {
     const items = [
       {
         quantity: 2,
@@ -158,6 +171,7 @@ describe('BPR authoritative commercial money', () => {
         approvedLineTotalKgs: 72490.5,
         totalAmount: 72490.5,
         estimatedLineProductCostKgs: 72823.21,
+        branchType: 'HQ_BRANCH',
       },
     ];
     const stages = [
@@ -165,9 +179,8 @@ describe('BPR authoritative commercial money', () => {
       'pending_hq_review',
       'reviewed',
     ] as const;
-    // Draft/pending use requested qty; reviewed uses approved qty — same values here.
     for (const stage of stages) {
-      assert.equal(calculateBprOrderTotalKgs(items, stage), 72490.5);
+      assert.equal(calculateBprOrderTotalKgs(items, stage), 72823.21);
     }
     const roleStatuses = [
       'PENDING_BRANCH_CONFIRMATION',
@@ -180,9 +193,9 @@ describe('BPR authoritative commercial money', () => {
     ];
     for (const status of roleStatuses) {
       const stage = resolveBprMoneyStage({ status, reviewedAt: new Date() });
-      assert.equal(calculateBprOrderTotalKgs(items, stage), 72490.5);
+      assert.equal(calculateBprOrderTotalKgs(items, stage), 72823.21);
       assert.equal(
-        assertBprMoneyNeutralTransition(72490.5, calculateBprOrderTotalKgs(items, stage)).ok,
+        assertBprMoneyNeutralTransition(72823.21, calculateBprOrderTotalKgs(items, stage)).ok,
         true,
       );
     }

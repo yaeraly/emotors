@@ -7,7 +7,7 @@ import {
 } from './branch-purchase-invoice-lines.util';
 
 describe('branch purchase approved invoice lines', () => {
-  it('HQ_BRANCH uses commercial saved price × qty (not FIFO inventory cost)', () => {
+  it('HQ_BRANCH uses FIFO line total (not rounded unit × qty)', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-reducer',
       sku: 'RED-18',
@@ -28,7 +28,7 @@ describe('branch purchase approved invoice lines', () => {
     assert.equal(line.unitPrice, 1963.59);
   });
 
-  it('HQ_BRANCH ignores FIFO drift and keeps commercial unit×qty snapshot', () => {
+  it('HQ_BRANCH preserves FIFO remainder instead of unit×qty snapshot', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-main',
       sku: 'MAIN',
@@ -44,11 +44,11 @@ describe('branch purchase approved invoice lines', () => {
       branchType: 'HQ_BRANCH',
     });
 
-    assert.equal(line.lineTotal, 162317.32);
-    assert.notEqual(line.lineTotal, 162317.33);
+    assert.equal(line.lineTotal, 162317.33);
+    assert.notEqual(line.lineTotal, 162317.32);
   });
 
-  it('keeps HQ_BRANCH commercial payable when FIFO inventory cost differs', () => {
+  it('HQ_BRANCH payable is FIFO inventory cost when it differs from unit×qty', () => {
     const line = resolveBranchPurchaseApprovedInvoiceLine({
       productId: 'prod-main',
       sku: 'MAIN',
@@ -64,8 +64,8 @@ describe('branch purchase approved invoice lines', () => {
       branchType: 'HQ_BRANCH',
     });
 
-    assert.equal(line.lineTotal, 67870.14);
-    assert.notEqual(line.lineTotal, 72490.5);
+    assert.equal(line.lineTotal, 72490.5);
+    assert.notEqual(line.lineTotal, 67870.14);
   });
 
   it('invoice total equals sum of approved BPR commercial line snapshots', () => {

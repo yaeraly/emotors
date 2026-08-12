@@ -5,6 +5,7 @@ import {
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
 import { resolveBranchPurchaseBranchUnitPriceKgs } from './branch-purchase-branch-display.util';
+import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
@@ -72,8 +73,9 @@ export function resolveBranchPurchaseApprovedInvoiceLine(
     };
   }
 
-  const unitPrice =
-    branchUnit != null && branchUnit > 0
+  const unitPrice = shouldTransferBranchPurchaseAtCost(item.branchType)
+    ? deriveDisplayUnitCost(lineTotal, quantity)
+    : branchUnit != null && branchUnit > 0
       ? branchUnit
       : deriveDisplayUnitCost(lineTotal, quantity);
 

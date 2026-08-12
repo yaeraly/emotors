@@ -9,6 +9,7 @@ import {
   roundMoneyKgs,
   subtractMoney,
   sumMoney,
+  toMoneyDecimal,
   toStoredMoneyKgs,
   type MoneyInput,
 } from './money';
@@ -93,7 +94,21 @@ export function reconcileDistribution(input: {
   };
 }
 
-/** Detect-only: branch FIFO created vs remaining inventory valuation. */
+export function reconcileHqBranchBprToFifo(input: {
+  fifoLineCostsKgs: MoneyInput[];
+  bprLineTotalsKgs: MoneyInput[];
+  bprHeaderTotalKgs: MoneyInput;
+}): { ok: boolean; differenceKgs: number } {
+  const fifo = sumMoney(input.fifoLineCostsKgs);
+  const lines = sumMoney(input.bprLineTotalsKgs);
+  const header = toMoneyDecimal(input.bprHeaderTotalKgs);
+  const ok = isMoneyEqual(fifo, lines) && isMoneyEqual(lines, header);
+  return {
+    ok,
+    differenceKgs: toStoredMoneyKgs(subtractMoney(fifo, header)),
+  };
+}
+
 export function reconcileBranchInventory(input: {
   branchId?: string;
   hqBranchTransferKgs: MoneyInput;

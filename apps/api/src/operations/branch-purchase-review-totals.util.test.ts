@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
+import { deriveDisplayUnitCost } from '../pricing/product-cost-precision.util';
 import {
   computeBranchPurchaseHqReviewLineAmountKgs,
   resolveBranchPurchaseHqReviewEffectiveQuantity,
@@ -168,7 +169,7 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
     );
   });
 
-  it('approved HQ_BRANCH line uses commercial saved price (67870.14 not FIFO 72490.50)', () => {
+  it('approved HQ_BRANCH line uses FIFO snapshot (72490.50 not unit×qty 67870.14)', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 2,
@@ -181,36 +182,38 @@ describe('sumBranchPurchaseHqReviewLineAmountsKgs', () => {
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      67870.14,
+      72490.5,
     );
   });
 
-  it('HQ_BRANCH restores commercial unit×qty when persisted payable drifted to FIFO', () => {
+  it('HQ_BRANCH keeps FIFO remainder and does not restore unit×qty', () => {
     assert.equal(
       computeBranchPurchaseHqReviewLineAmountKgs({
         quantity: 11,
         approvedQuantity: 11,
         lineStatus: BranchPurchaseRequestLineStatus.APPROVED,
         resolvedBranchPriceKgs: 14756.12,
-        totalAmount: 162317.33, // stale FIFO payable
+        totalAmount: 162317.33,
         approvedLineTotalKgs: 162317.33,
         estimatedLineProductCostKgs: 162317.33,
         branchType: 'HQ_BRANCH',
         hasPricingPolicyAtReview: true,
       }),
-      162317.32, // 11 × 14756.12
+      162317.33,
     );
   });
 
-  it('saved order-line unit price prefers frozen Цена для филиала snapshot', () => {
+  it('HQ_BRANCH display unit is derived from FIFO line total, not commercial unit×qty', () => {
+    const fifo = 72823.21;
     const savedUnit = resolveBranchPurchaseSavedOrderLineUnitPriceKgs({
       quantity: 2,
       totalAmount: 72490.5,
       resolvedBranchPriceKgs: 36245.25,
-      estimatedLineProductCostKgs: 72823.21,
+      estimatedLineProductCostKgs: fifo,
       branchType: 'HQ_BRANCH',
     });
-    assert.equal(savedUnit, 36245.25);
+    assert.equal(savedUnit, deriveDisplayUnitCost(fifo, 2));
+    assert.notEqual(savedUnit, 36245.25);
   });
 });
 

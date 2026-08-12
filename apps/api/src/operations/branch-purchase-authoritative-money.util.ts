@@ -1,18 +1,18 @@
 import { BranchPurchaseRequestLineStatus } from '@prisma/client';
 import { isMoneyEqual, multiplyMoney, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import {
+  allocateLayerConsumptionCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
+import { shouldTransferBranchPurchaseAtCost } from './branch-purchase-estimated-amount.util';
 
 /**
- * Authoritative BPR commercial money.
+ * Authoritative BPR money.
  *
- * BPR commercial totals (Сумма / totalEstimatedAmount / invoice payable) always use
- * the frozen order-line Цена для филиала snapshot × effective quantity.
- *
- * Inventory FIFO (`estimatedLineProductCostKgs`) is a separate concept and must not
- * replace the commercial BPR amount on role/status transitions.
+ * Franchise / dealer: frozen Цена для филиала × effective quantity.
+ * HQ Branch (markup 0%): exact FIFO/inventory line cost. Never reconstruct from
+ * rounded display unit × quantity (that is the 914369.80 → 914368.98 drift).
  */
 
 export type BprMoneyLine = {
@@ -24,6 +24,8 @@ export type BprMoneyLine = {
   wholesalePriceKgs?: unknown;
   totalAmount?: unknown;
   approvedLineTotalKgs?: unknown;
+  estimatedLineProductCostKgs?: unknown;
+  branchType?: string | null;
 };
 
 export type BprMoneyStage = 'draft' | 'pending_hq_review' | 'reviewed';
@@ -71,11 +73,10 @@ export function getBprEffectiveQuantity(
 }
 
 /**
- * Authoritative commercial line total:
- * effectiveQuantity × saved order-line Цена для филиала.
+ * Authoritative commercial line total.
  *
- * Prefer a persisted approvedLineTotal/totalAmount only when it already matches
- * that commercial formula (avoids replacing a correct snapshot with a rebuild).
+ * HQ Branch: FIFO/inventory line cost (`estimatedLineProductCostKgs`).
+ * Other branches: effectiveQuantity × saved order-line Цена для филиала.
  */
 export function calculateBprLineTotalKgs(
   item: BprMoneyLine,
@@ -83,6 +84,10 @@ export function calculateBprLineTotalKgs(
 ): number {
   const qty = getBprEffectiveQuantity(item, stage);
   if (qty <= 0) return 0;
+
+  if (shouldTransferBranchPurchaseAtCost(item.branchType)) {
+    return resolveHqBranchBprLineTotalKgs(item, qty);
+  }
 
   const unit = getBprSavedOrderLineUnitPriceKgs(item);
   const commercial =
@@ -97,7 +102,6 @@ export function calculateBprLineTotalKgs(
       if (commercial <= 0 || approved === commercial) {
         return approved;
       }
-      // Persisted payable drifted from saved price × qty — restore commercial snapshot.
       return commercial;
     }
   }
@@ -106,6 +110,38 @@ export function calculateBprLineTotalKgs(
 
   const stored = roundDisplayMoney(Number(item.totalAmount ?? 0));
   return stored > 0 ? stored : 0;
+}
+
+/**
+ * HQ Office → HQ Branch: payable line = exact FIFO snapshot.
+ * Final remaining qty of a snapshot uses the exact remaining cost, never unit × qty.
+ */
+function resolveHqBranchBprLineTotalKgs(item: BprMoneyLine, qty: number): number {
+  const requested = Math.max(Number(item.quantity ?? 0), 0);
+  const fifo = toStoredMoneyKgs(toMoneyDecimal(item.estimatedLineProductCostKgs));
+  const approvedStored =
+    item.approvedLineTotalKgs != null
+      ? toStoredMoneyKgs(toMoneyDecimal(item.approvedLineTotalKgs))
+      : 0;
+  const stored = toStoredMoneyKgs(toMoneyDecimal(item.totalAmount));
+
+  if (fifo > 0) {
+    if (qty === requested || requested <= 0) {
+      return fifo;
+    }
+    if (approvedStored > 0 && isMoneyEqual(approvedStored, fifo)) {
+      return fifo;
+    }
+    return allocateLayerConsumptionCost({
+      layerTotalCostKgs: fifo,
+      layerBaseQuantity: requested,
+      remainingQuantity: requested,
+      takeQuantity: qty,
+    });
+  }
+  if (approvedStored > 0) return approvedStored;
+  if (stored > 0) return stored;
+  return 0;
 }
 
 export function calculateBprOrderTotalKgs(

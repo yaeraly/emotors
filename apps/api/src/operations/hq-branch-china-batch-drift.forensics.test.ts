@@ -142,10 +142,10 @@ function assertAuthoritativePath(batch: typeof BATCH_1, lines: DriftLine[]) {
   );
   assert.equal(fifoInventory, batch.sourceTotal);
 
-  // BPR commercial Сумма uses saved Цена для филиала × qty (may differ from FIFO).
   const commercialTotal = sumDisplayMoneyTotals(
     lines.map((line) => roundDisplayMoney(line.unitDisplay * line.quantity)),
   );
+  // BPR Сумма uses exact FIFO line cost, not rounded display unit × qty.
   const reviewTotal = sumDisplayMoneyTotals(
     lines.map((line) =>
       computeBranchPurchaseHqReviewLineAmountKgs({
@@ -153,14 +153,14 @@ function assertAuthoritativePath(batch: typeof BATCH_1, lines: DriftLine[]) {
         approvedQuantity: line.quantity,
         lineStatus: 'APPROVED',
         resolvedBranchPriceKgs: line.unitDisplay,
-        totalAmount: line.totalCostKgs, // stale FIFO payable must not win
+        totalAmount: line.totalCostKgs,
         approvedLineTotalKgs: line.totalCostKgs,
         estimatedLineProductCostKgs: line.totalCostKgs,
         branchType: 'HQ_BRANCH',
       }),
     ),
   );
-  assert.equal(reviewTotal, commercialTotal);
+  assert.equal(reviewTotal, batch.sourceTotal);
   assert.notEqual(commercialTotal, batch.sourceTotal);
 
   const costParity = reconcileHqBranchTransferCostParity({
@@ -204,8 +204,8 @@ function assertAuthoritativePath(batch: typeof BATCH_1, lines: DriftLine[]) {
     },
     true,
   );
-  assert.equal(Number(sanitized.totalEstimatedAmount), commercialTotal);
-  assert.notEqual(Number(sanitized.totalEstimatedAmount), batch.sourceTotal);
+  assert.equal(Number(sanitized.totalEstimatedAmount), batch.sourceTotal);
+  assert.notEqual(commercialTotal, batch.sourceTotal);
 }
 
 describe('HQ Branch China batch drift forensics (Case C)', () => {

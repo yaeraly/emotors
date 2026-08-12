@@ -86,9 +86,8 @@ export function resolveBranchPurchaseSavedSubmitLineTotalKgs(item: {
 /**
  * Authoritative approved/commercial line total for every BPR lifecycle stage.
  *
- * Always uses saved order-line Цена для филиала × effective quantity.
- * Inventory FIFO (`estimatedLineProductCostKgs`) is kept separately and must not
- * replace BPR commercial Сумма on role transitions.
+ * HQ Branch: exact FIFO/inventory line cost.
+ * Other branches: saved order-line Цена для филиала × effective quantity.
  */
 export function computeBranchPurchaseHqReviewLineAmountKgs(item: {
   quantity: number;

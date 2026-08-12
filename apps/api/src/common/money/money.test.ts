@@ -11,7 +11,7 @@ import {
   remainingFifoLayerMoney,
   toStoredMoneyKgs,
 } from './money';
-import { assertMoneyChainReconciles, reconcileMoneyChain, reconcileProcurement } from './money.reconciliation';
+import { assertMoneyChainReconciles, reconcileHqBranchBprToFifo, reconcileMoneyChain, reconcileProcurement } from './money.reconciliation';
 import { allocateLayerConsumptionCost } from '../../pricing/product-cost-precision.util';
 import { resolveHqBranchTransferLineCostKgs } from '../../operations/hq-branch-transfer-cost.util';
 
@@ -56,6 +56,24 @@ describe('authoritative Decimal money architecture', () => {
     const allocated = distributeMoneyToTarget([33.333, 33.333, 33.334], 100);
     assertAllocationReconciles(100, allocated, 'procurement allocation');
     assert.equal(toStoredMoneyKgs(allocated.reduce((sum, row) => sum.plus(row))), 100);
+  });
+
+  it('HQ Branch BPR total equals FIFO line sum (never unit×qty)', () => {
+    const fifo = [33.34, 33.33, 33.33];
+    const bpr = reconcileHqBranchBprToFifo({
+      fifoLineCostsKgs: fifo,
+      bprLineTotalsKgs: fifo,
+      bprHeaderTotalKgs: 100,
+    });
+    assert.equal(bpr.ok, true);
+    assert.equal(bpr.differenceKgs, 0);
+    const drifted = reconcileHqBranchBprToFifo({
+      fifoLineCostsKgs: fifo,
+      bprLineTotalsKgs: [33.33, 33.33, 33.33],
+      bprHeaderTotalKgs: 99.99,
+    });
+    assert.equal(drifted.ok, false);
+    assert.equal(drifted.differenceKgs, 0.01);
   });
 
   it('HQ → HQ Branch chain has zero difference at every stage', () => {

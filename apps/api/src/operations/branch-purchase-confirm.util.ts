@@ -8,6 +8,7 @@ import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
 } from '../pricing/product-cost-precision.util';
+import { applyHqBranchInternalDistributionProfit } from '../distribution/hq-branch-distribution-profit.util';
 import { resolveBranchPurchaseApprovedInvoiceLine } from './branch-purchase-invoice-lines.util';
 
 export type ConfirmedDistributionLineInput = {
@@ -93,27 +94,33 @@ export function buildDistributionLinesFromConfirmedRequestItems(
     }
     const unitCost = deriveDisplayUnitCost(lineCost, quantity);
 
-    lines.push({
-      productId: product.id,
-      sku: product.sku,
-      productName: product.name,
-      quantity,
-      unitCost,
-      unitPrice,
-      totalCost: lineCost,
-      totalPrice: linePrice,
-      profit: roundDisplayMoney(linePrice - lineCost),
-      pricingPolicyVersionId: item.pricingPolicyVersionId,
-      pricingProfileId: item.pricingProfileId,
-      resolvedPriceKgs: unitPrice,
-      baseCostKgs: Number(item.estimatedUnitCost ?? unitCost),
-      baseBranchPriceKgs: unitPrice,
-      appliedRuleType: item.appliedRuleType,
-      appliedRuleId: item.appliedRuleId,
-      appliedAdjustmentMode: item.appliedAdjustmentMode,
-      appliedAdjustmentValue: item.appliedAdjustmentValue != null ? Number(item.appliedAdjustmentValue) : null,
-      priceResolvedAt: item.priceResolvedAt,
-    });
+    lines.push(
+      applyHqBranchInternalDistributionProfit(
+        {
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          quantity,
+          unitCost,
+          unitPrice,
+          totalCost: lineCost,
+          totalPrice: linePrice,
+          profit: roundDisplayMoney(linePrice - lineCost),
+          pricingPolicyVersionId: item.pricingPolicyVersionId,
+          pricingProfileId: item.pricingProfileId,
+          resolvedPriceKgs: unitPrice,
+          baseCostKgs: Number(item.estimatedUnitCost ?? unitCost),
+          baseBranchPriceKgs: unitPrice,
+          appliedRuleType: item.appliedRuleType,
+          appliedRuleId: item.appliedRuleId,
+          appliedAdjustmentMode: item.appliedAdjustmentMode,
+          appliedAdjustmentValue:
+            item.appliedAdjustmentValue != null ? Number(item.appliedAdjustmentValue) : null,
+          priceResolvedAt: item.priceResolvedAt,
+        },
+        options?.branchType,
+      ),
+    );
   }
 
   return lines;
