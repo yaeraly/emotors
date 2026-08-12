@@ -118,6 +118,13 @@ import {
 } from './china-domestic-transport-lock.util';
 import { buildHqReceivingValidationResult } from './hq-receiving-validation.util';
 import { listCargoReceiptAttachmentsForOrder } from './cargo-receipt-attachments.util';
+import {
+  assessProcurementRestore,
+  canCancelProcurementOrderStatus,
+  captureProcurementFinancialSnapshot,
+  inferPreviousStatusFromAudit,
+  procurementFinancialSnapshotsEqual,
+} from './procurement-order-restore.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -1894,6 +1901,9 @@ export class ProcurementService {
   }
 
   updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus, reason?: string) {
+    if (status === ProcurementOrderStatus.CANCELLED) {
+      return this.cancelProcurementOrder(user, id, reason);
+    }
     if (status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
       throw new BadRequestException('Use receive-to-hq workflow to post inventory into HQ warehouse');
     }
@@ -1963,6 +1973,200 @@ export class ProcurementService {
           reason,
         );
       }
+      return this.toProcurementOrderResponse(updated);
+    });
+  }
+
+  cancelProcurementOrder(user: AuthUser, id: string, reason?: string) {
+    this.assertCanManageProcurement(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: this.procurementOrderInclude(),
+      });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+
+      if (existing.status === ProcurementOrderStatus.CANCELLED) {
+        return this.toProcurementOrderResponse(existing);
+      }
+
+      if (!canCancelProcurementOrderStatus(existing.status)) {
+        throw new BadRequestException('Received or closed procurement orders cannot be cancelled');
+      }
+
+      const previousStatus = existing.status;
+      const oldValue = this.pickProcurementAuditFields(existing);
+      const cancelledAt = new Date();
+
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          status: ProcurementOrderStatus.CANCELLED,
+          previousStatusBeforeCancellation: previousStatus,
+          cancelledAt,
+          cancelledById: user.id,
+          cancelReason: reason?.trim() || null,
+        },
+        include: this.procurementOrderInclude(),
+      });
+
+      await this.auditProcurement(
+        tx,
+        user,
+        'PROCUREMENT_CANCELLED',
+        id,
+        oldValue,
+        this.pickProcurementAuditFields(updated),
+        reason,
+        {
+          previousStatus,
+          cancelledBy: user.id,
+          cancelledAt: cancelledAt.toISOString(),
+        },
+      );
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.PROCUREMENT_STATUS_CHANGED,
+        entityType: 'ProcurementOrder',
+        entityId: id,
+        referenceNumber: updated.orderNumber,
+        message: `Procurement ${updated.orderNumber} was cancelled.`,
+      });
+
+      return this.toProcurementOrderResponse(updated);
+    });
+  }
+
+  restoreProcurementOrder(user: AuthUser, id: string, reason?: string) {
+    this.assertCanManageProcurement(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: this.procurementOrderInclude(),
+      });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+
+      if (existing.status !== ProcurementOrderStatus.CANCELLED) {
+        throw new BadRequestException('Procurement order is not cancelled');
+      }
+
+      const audits = await tx.auditLog.findMany({
+        where: { entity: 'ProcurementOrder', entityId: id },
+        orderBy: { timestamp: 'desc' },
+        select: { action: true, timestamp: true, metadata: true },
+      });
+      const inferredPreviousStatus = inferPreviousStatusFromAudit(audits);
+      const assessment = assessProcurementRestore({
+        status: existing.status,
+        deletedAt: existing.deletedAt,
+        previousStatusBeforeCancellation: existing.previousStatusBeforeCancellation,
+        inferredPreviousStatus,
+        supplierPaymentStatus: existing.supplierPaymentStatus,
+        totalPaidKgs: existing.totalPaidKgs,
+        totalPaidYuan: existing.totalPaidYuan,
+        invoiceReviewStatus: existing.invoiceReviewStatus,
+        supplierPayments: existing.supplierPayments ?? [],
+      });
+
+      if (!assessment.canRestore || !assessment.restoredStatus) {
+        throw new BadRequestException(
+          assessment.blockingReasons.join('; ') || 'Procurement order cannot be restored',
+        );
+      }
+
+      const financialBefore = captureProcurementFinancialSnapshot({
+        totalYuan: existing.totalYuan,
+        totalPaidYuan: existing.totalPaidYuan,
+        totalPaidKgs: existing.totalPaidKgs,
+        remainingYuan: existing.remainingYuan,
+        supplierPaymentStatus: existing.supplierPaymentStatus,
+        supplierPayments: existing.supplierPayments ?? [],
+      });
+      const paymentCountBefore = existing.supplierPayments?.length ?? 0;
+      const receivingCountBefore = await tx.procurementGoodsReceiving.count({
+        where: { procurementOrderId: id, deletedAt: null },
+      });
+      const stockMovementCountBefore = await tx.stockMovement.count({
+        where: { referenceId: id },
+      });
+
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          status: assessment.restoredStatus,
+          previousStatusBeforeCancellation: null,
+          cancelledAt: null,
+          cancelledById: null,
+          cancelReason: null,
+        },
+        include: this.procurementOrderInclude(),
+      });
+
+      const financialAfter = captureProcurementFinancialSnapshot({
+        totalYuan: updated.totalYuan,
+        totalPaidYuan: updated.totalPaidYuan,
+        totalPaidKgs: updated.totalPaidKgs,
+        remainingYuan: updated.remainingYuan,
+        supplierPaymentStatus: updated.supplierPaymentStatus,
+        supplierPayments: updated.supplierPayments ?? [],
+      });
+
+      if (!procurementFinancialSnapshotsEqual(financialBefore, financialAfter)) {
+        throw new BadRequestException('Financial integrity check failed during procurement restore');
+      }
+
+      const paymentCountAfter = await tx.procurementSupplierPayment.count({
+        where: { procurementOrderId: id },
+      });
+      if (paymentCountAfter !== paymentCountBefore) {
+        throw new BadRequestException('Payment records changed during procurement restore');
+      }
+
+      const receivingCountAfter = await tx.procurementGoodsReceiving.count({
+        where: { procurementOrderId: id, deletedAt: null },
+      });
+      if (receivingCountAfter !== receivingCountBefore) {
+        throw new BadRequestException('Warehouse receipts changed during procurement restore');
+      }
+
+      const stockMovementCountAfter = await tx.stockMovement.count({
+        where: { referenceId: id },
+      });
+      if (stockMovementCountAfter !== stockMovementCountBefore) {
+        throw new BadRequestException('Inventory movements changed during procurement restore');
+      }
+
+      await this.auditProcurement(
+        tx,
+        user,
+        'PROCUREMENT_RESTORED',
+        id,
+        {
+          status: ProcurementOrderStatus.CANCELLED,
+          financialSnapshot: financialBefore,
+        },
+        {
+          status: assessment.restoredStatus,
+          financialSnapshot: financialAfter,
+        },
+        reason,
+        {
+          fromStatus: ProcurementOrderStatus.CANCELLED,
+          restoredStatus: assessment.restoredStatus,
+          previousStatus: assessment.restoredStatus,
+        },
+      );
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.PROCUREMENT_STATUS_CHANGED,
+        entityType: 'ProcurementOrder',
+        entityId: id,
+        referenceNumber: updated.orderNumber,
+        message: `Procurement ${updated.orderNumber} was restored to ${assessment.restoredStatus}.`,
+      });
+
       return this.toProcurementOrderResponse(updated);
     });
   }
@@ -3895,6 +4099,8 @@ export class ProcurementService {
           100,
       ) / 100;
 
+    const restoreEligibility = await this.buildRestoreEligibility(order);
+
     return {
       ...order,
       totalCostKgs: toApiMoneyKgs(order.totalCostKgs),
@@ -4006,6 +4212,60 @@ export class ProcurementService {
           blockingInvoices: receivingValidation.blockingInvoices,
         };
       })(),
+      restoreEligibility,
+    };
+  }
+
+  private async buildRestoreEligibility(order: any) {
+    const supplierPayments = order.supplierPayments ?? [];
+    const hasConfirmedFinancialActivity = assessProcurementRestore({
+      status: order.status,
+      deletedAt: order.deletedAt ?? null,
+      previousStatusBeforeCancellation: order.previousStatusBeforeCancellation,
+      inferredPreviousStatus: null,
+      supplierPaymentStatus: order.supplierPaymentStatus,
+      totalPaidKgs: order.totalPaidKgs,
+      totalPaidYuan: order.totalPaidYuan,
+      invoiceReviewStatus: order.invoiceReviewStatus,
+      supplierPayments,
+    }).hasConfirmedFinancialActivity;
+
+    if (order.status !== ProcurementOrderStatus.CANCELLED) {
+      return {
+        canRestore: false,
+        restoredStatus: null,
+        blockingReasons: ['ORDER_NOT_CANCELLED'],
+        hasConfirmedFinancialActivity,
+        previousStatusBeforeCancellation: order.previousStatusBeforeCancellation ?? null,
+        inferredPreviousStatus: null,
+      };
+    }
+
+    const audits = await this.prisma.auditLog.findMany({
+      where: { entity: 'ProcurementOrder', entityId: order.id },
+      orderBy: { timestamp: 'desc' },
+      select: { action: true, timestamp: true, metadata: true },
+    });
+    const inferredPreviousStatus = inferPreviousStatusFromAudit(audits);
+    const assessment = assessProcurementRestore({
+      status: order.status,
+      deletedAt: order.deletedAt ?? null,
+      previousStatusBeforeCancellation: order.previousStatusBeforeCancellation,
+      inferredPreviousStatus,
+      supplierPaymentStatus: order.supplierPaymentStatus,
+      totalPaidKgs: order.totalPaidKgs,
+      totalPaidYuan: order.totalPaidYuan,
+      invoiceReviewStatus: order.invoiceReviewStatus,
+      supplierPayments,
+    });
+
+    return {
+      canRestore: assessment.canRestore,
+      restoredStatus: assessment.restoredStatus,
+      blockingReasons: assessment.blockingReasons,
+      hasConfirmedFinancialActivity: assessment.hasConfirmedFinancialActivity,
+      previousStatusBeforeCancellation: order.previousStatusBeforeCancellation ?? null,
+      inferredPreviousStatus,
     };
   }
 

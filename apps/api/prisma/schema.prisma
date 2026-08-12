@@ -1659,6 +1659,7 @@ model User {
   sentInstallmentEarlyPaymentsToCashier             BranchInstallmentEarlyPaymentRequest[] @relation("InstallmentEarlyPaymentCashierSender")
   createdProcurementOrders                        ProcurementOrder[]                  @relation("ProcurementOrderCreator")
   approvedProcurementOrders                       ProcurementOrder[]                  @relation("ProcurementOrderApprover")
+  cancelledProcurementOrders                      ProcurementOrder[]                  @relation("ProcurementOrderCanceller")
   assignedServiceOrders                           ServiceOrder[]                      @relation("ServiceOrderMaster")
   createdServiceOrders                            ServiceOrder[]                      @relation("ServiceOrderCreator")
   uploadedServiceOrderPhotos                      ServiceOrderPhoto[]                 @relation("ServiceOrderPhotoUploader")
@@ -3351,6 +3352,11 @@ model ProcurementOrder {
   hqWarehouseId                         String
   hqWarehouse                           Warehouse                              @relation(fields: [hqWarehouseId], references: [id])
   status                                ProcurementOrderStatus                 @default(DRAFT)
+  previousStatusBeforeCancellation      ProcurementOrderStatus?
+  cancelledAt                           DateTime?
+  cancelledById                         String?
+  cancelledBy                           User?                                  @relation("ProcurementOrderCanceller", fields: [cancelledById], references: [id])
+  cancelReason                          String?
   currency                              String                                 @default("CNY")
   defaultYuanRate                       Decimal                                @default(0) @db.Decimal(14, 4)
   defaultUsdRate                        Decimal                                @default(0) @db.Decimal(14, 4)
@@ -3467,6 +3473,8 @@ model ProcurementOrder {
   @@index([invoiceReviewStatus])
   @@index([supplierPaymentStatus])
   @@index([costConfirmationStatus])
+  @@index([cancelledAt])
+  @@index([cancelledById])
 }
 
 model ProcurementSvhToHqTransport {

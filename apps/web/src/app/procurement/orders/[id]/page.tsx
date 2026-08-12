@@ -226,6 +226,17 @@ type ProcurementOrder = {
   chinaDomesticTransportUnlockExpiresAt?: string | null;
   chinaDomesticTransportUnlockReason?: string | null;
   chinaDomesticTransportUnlockedBy?: { fullName?: string } | null;
+  restoreEligibility?: {
+    canRestore: boolean;
+    restoredStatus: string | null;
+    blockingReasons: string[];
+    hasConfirmedFinancialActivity: boolean;
+    previousStatusBeforeCancellation?: string | null;
+    inferredPreviousStatus?: string | null;
+  };
+  previousStatusBeforeCancellation?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
 };
 
 type AuditLog = { id: string; action: string; timestamp: string; user?: { fullName: string } };
@@ -306,6 +317,8 @@ function ProcurementOrderDetailPageContent() {
   const [activeTab, setActiveTab] = useState<OrderDetailTab>(
     ORDER_DETAIL_TABS.some((tab) => tab.id === initialTab) ? initialTab : 'general',
   );
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     const tab = searchParams.get('tab') as OrderDetailTab | null;
@@ -769,12 +782,47 @@ function ProcurementOrderDetailPageContent() {
   async function action(path: string) {
     setError('');
     /* toast clear */ void 0;
+    if (path === 'cancel') {
+      if (order?.restoreEligibility?.hasConfirmedFinancialActivity) {
+        setCancelConfirmOpen(true);
+        return;
+      }
+      await performCancel();
+      return;
+    }
     try {
       await apiFetch(`/procurement/orders/${id}/${path}`, { method: 'POST' });
       toast.success(t('common.success'));
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function performCancel() {
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(t('common.success'));
+      setCancelConfirmOpen(false);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function restoreOrder() {
+    if (!order?.restoreEligibility?.canRestore) return;
+    setRestoring(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/restore`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(t('procurement.orders.restoreSuccess'));
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -1091,6 +1139,12 @@ function ProcurementOrderDetailPageContent() {
                 )}
               </div>
               <Info label={t('procurement.orders.status')} value={t(supplierPaymentSummary.statusTranslationKey)} />
+              {order.status === 'CANCELLED' ? (
+                <Info
+                  label={t('procurement.orders.workflowStatus')}
+                  value={t(`status.${order.status}`)}
+                />
+              ) : null}
               <Info
                 label={t('procurement.orders.warehouse')}
                 value={order.hqWarehouse?.name ?? t('procurement.orders.hqWarehouseNotAssigned')}
@@ -1128,6 +1182,47 @@ function ProcurementOrderDetailPageContent() {
               {t('procurement.orders.exchangeRateOnPaymentHint')}
             </p>
           </section>
+          ) : null}
+
+          {activeTab === 'general' && order.status === 'CANCELLED' ? (
+            <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+              <p className="text-sm text-amber-900">{t('procurement.orders.cancelledBanner')}</p>
+              {order.restoreEligibility?.canRestore && canEditOrder ? (
+                <button
+                  type="button"
+                  disabled={restoring}
+                  onClick={() => void restoreOrder()}
+                  className="mt-4 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {restoring ? t('common.loading') : t('procurement.orders.restoreOrder')}
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+
+          {cancelConfirmOpen ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+              <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
+                <h3 className="text-lg font-bold text-slate-900">{t('procurement.orders.cancelWithPaymentsTitle')}</h3>
+                <p className="mt-3 text-sm text-slate-600">{t('procurement.orders.cancelWithPaymentsMessage')}</p>
+                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCancelConfirmOpen(false)}
+                    className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void performCancel()}
+                    className="rounded-xl bg-red-600 px-4 py-2 font-semibold text-white"
+                  >
+                    {t('distribution.cancel')}
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : null}
 
           {activeTab === 'payments' && canSeePayments ? (

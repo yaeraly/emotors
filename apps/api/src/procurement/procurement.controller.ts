@@ -936,7 +936,15 @@ export class ProcurementController {
 
   @Post('orders/:id/cancel')
   @RequirePermissions('procurement.manage')
-  cancelProcurementOrder(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) { return this.service.updateProcurementStatus(user, id, 'CANCELLED' as any, dto?.reason); }
+  cancelProcurementOrder(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.cancelProcurementOrder(user, id, dto?.reason);
+  }
+
+  @Post('orders/:id/restore')
+  @RequirePermissions('procurement.manage')
+  restoreProcurementOrder(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.restoreProcurementOrder(user, id, dto?.reason);
+  }
 
   @Post('purchase-orders')
   @RequirePermissions('procurement.manage')
