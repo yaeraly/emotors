@@ -9,6 +9,7 @@ import { BranchCeoModule } from './branch-ceo/branch-ceo.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { CustomerPriceListModule } from './customers/customer-price-list.module';
 import { CustomersModule } from './customers/customers.module';
+import { BranchReturnsModule } from './branch-returns/branch-returns.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { ExpansionModule } from './expansion/expansion.module';
 import { BranchAccountantModule } from './branch-accountant/branch-accountant.module';
@@ -51,6 +52,7 @@ import { BusinessDateModule } from './business-date/business-date.module';
     CustomersModule,
     CustomerPriceListModule,
     DistributionModule,
+    BranchReturnsModule,
     InventoryModule,
     InventoryCountModule,
     HqWarehouseModule,

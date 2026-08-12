@@ -1,7 +1,7 @@
 import {
   sortDistributionOrderItemsForPickingDisplay,
   type DistributionOrderItemPickingDisplayRow,
-} from '@/lib/distribution-order-picking-display.util';
+} from './distribution-order-picking-display.util';
 
 export type BranchHqReturnPickingDisplayRow = DistributionOrderItemPickingDisplayRow;
 

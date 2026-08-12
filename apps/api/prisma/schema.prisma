@@ -1120,6 +1120,47 @@ enum PayrollStatus {
   CANCELLED
 }
 
+
+enum BranchHqReturnStatus {
+  DRAFT
+  PENDING_BRANCH_APPROVAL
+  BRANCH_APPROVED
+  READY_TO_SHIP
+  PICKING
+  PACKED
+  SHIPPED_TO_HQ
+  RECEIVED_AT_HQ
+  HQ_ACCEPTED
+  COMPLETED
+  REJECTED
+  CANCELLED
+  DISCREPANCY
+}
+
+enum BranchHqReturnReason {
+  SURPLUS
+  ORDER_ERROR
+  DEFECT
+  MALFUNCTION
+  EXCHANGE
+  HQ_DECISION
+  OTHER
+}
+
+enum BranchHqReturnCondition {
+  NEW
+  USED
+  DEFECTIVE
+  DAMAGED
+}
+
+enum BranchHqReturnFinancialAdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NOT_REQUIRED
+}
+
 model Branch {
   id                        String                        @id @default(cuid())
   name                      String
@@ -1204,6 +1245,7 @@ model Branch {
   financeInvestments        FinanceInvestment[]
   cashierShifts             CashierShift[]
   franchiseSupportTasks     FranchiseSupportTask[]
+  branchHqReturns           BranchHqReturn[]
   convertedFromCustomers    Customer[]                    @relation("CustomerFranchiseConversion")
   hqB2bSales                HqB2bSale[]
   customerPriceLists        CustomerPriceList[]
@@ -1637,6 +1679,13 @@ model User {
   employeeKpis                                    EmployeeKPI[]                       @relation("EmployeeKPIEmployee")
   userRoles                                       UserRole[]
   assignedUserRoles                               UserRole[]                          @relation("UserRoleAssigner")
+  createdBranchHqReturns                         BranchHqReturn[]                    @relation("BranchHqReturnCreator")
+  approvedBranchHqReturns                         BranchHqReturn[]                    @relation("BranchHqReturnApprover")
+  rejectedBranchHqReturns                         BranchHqReturn[]                    @relation("BranchHqReturnRejecter")
+  shippedBranchHqReturns                          BranchHqReturn[]                    @relation("BranchHqReturnShipper")
+  receivedBranchHqReturns                         BranchHqReturn[]                    @relation("BranchHqReturnReceiver")
+  pickedBranchHqReturnItems                       BranchHqReturnItem[]                @relation("BranchHqReturnItemPickedBy")
+  decidedBranchHqReturnFinancialAdjustments       BranchHqReturnFinancialAdjustment[] @relation("BranchHqReturnFinancialDecider")
   loginHistory                                    LoginHistory[]
   auditLogs                                       AuditLog[]
   procurementSupplierPayments                     ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentCreator")
@@ -2367,6 +2416,8 @@ model Warehouse {
   assignedBranchRequests        BranchPurchaseRequest[]             @relation("BranchRequestAssignedHqWarehouse")
   branchRequestShortages        BranchRequestShortage[]             @relation("BranchRequestShortageWarehouse")
   hqStockBookings               HqStockBooking[]
+  sourceBranchHqReturns         BranchHqReturn[]                    @relation("BranchHqReturnSourceWarehouse")
+  destinationBranchHqReturns    BranchHqReturn[]                    @relation("BranchHqReturnDestinationWarehouse")
   createdAt                     DateTime                            @default(now())
   updatedAt                     DateTime                            @updatedAt
   deletedAt                     DateTime?
@@ -2502,6 +2553,7 @@ model Product {
   hqStockBookings                       HqStockBooking[]
   stockMovements                        StockMovement[]
   inventoryBalances                     InventoryBalance[]
+  branchHqReturnItems                   BranchHqReturnItem[]
   saleItems                             SaleItem[]
   hqB2bSaleItems                        HqB2bSaleItem[]
   distributionOrderItems                BranchDistributionOrderItem[]
@@ -2635,6 +2687,7 @@ model FifoInventoryBatch {
   referenceId                    String?
   saleAllocations                SaleFifoAllocation[]
   distributionAllocations        DistributionFifoAllocation[]
+  branchHqReturnAllocations      BranchHqReturnFifoAllocation[]
   createdAt                      DateTime                     @default(now())
   updatedAt                      DateTime                     @updatedAt
 
@@ -6202,3 +6255,163 @@ model FranchiseSupportTask {
   @@index([createdById])
   @@index([dueAt])
 }
+
+model BranchHqReturn {
+  id                       String                                  @id @default(cuid())
+  returnNumber             String                                  @unique
+  branchId                 String
+  branch                   Branch                                  @relation(fields: [branchId], references: [id])
+  sourceWarehouseId        String
+  sourceWarehouse          Warehouse                               @relation("BranchHqReturnSourceWarehouse", fields: [sourceWarehouseId], references: [id])
+  destinationWarehouseId   String
+  destinationWarehouse     Warehouse                               @relation("BranchHqReturnDestinationWarehouse", fields: [destinationWarehouseId], references: [id])
+  status                   BranchHqReturnStatus                    @default(DRAFT)
+  totalQuantity            Int                                     @default(0)
+  totalLineCount           Int                                     @default(0)
+  totalReturnValueKgs      Decimal                                 @default(0) @db.Decimal(14, 2)
+  inTransitQuantity        Int                                     @default(0)
+  note                     String?
+  rejectionReason          String?
+  createdById              String
+  createdBy                User                                    @relation("BranchHqReturnCreator", fields: [createdById], references: [id])
+  approvedById             String?
+  approvedBy               User?                                   @relation("BranchHqReturnApprover", fields: [approvedById], references: [id])
+  approvedAt               DateTime?
+  rejectedById             String?
+  rejectedBy               User?                                   @relation("BranchHqReturnRejecter", fields: [rejectedById], references: [id])
+  rejectedAt               DateTime?
+  packedAt                 DateTime?
+  shippedById              String?
+  shippedBy                User?                                   @relation("BranchHqReturnShipper", fields: [shippedById], references: [id])
+  shippedAt                DateTime?
+  receivedById             String?
+  receivedBy               User?                                   @relation("BranchHqReturnReceiver", fields: [receivedById], references: [id])
+  receivedAt               DateTime?
+  completedAt              DateTime?
+  version                  Int                                     @default(0)
+  items                    BranchHqReturnItem[]
+  fifoAllocations          BranchHqReturnFifoAllocation[]
+  discrepancies            BranchHqReturnDiscrepancy[]
+  financialAdjustment      BranchHqReturnFinancialAdjustment?
+  createdAt                DateTime                                @default(now())
+  updatedAt                DateTime                                @updatedAt
+  deletedAt                DateTime?
+
+  @@index([branchId])
+  @@index([sourceWarehouseId])
+  @@index([destinationWarehouseId])
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model BranchHqReturnItem {
+  id                   String                         @id @default(cuid())
+  returnId             String
+  returnOrder          BranchHqReturn                 @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product                        @relation(fields: [productId], references: [id])
+  sku                  String
+  productName          String
+  quantity             Int
+  availableAtCreate    Int                            @default(0)
+  reason               BranchHqReturnReason
+  condition            BranchHqReturnCondition        @default(NEW)
+  comment              String?
+  unitCostKgs          Decimal                        @default(0) @db.Decimal(14, 2)
+  lineReturnValueKgs   Decimal                        @default(0) @db.Decimal(14, 2)
+  shippedQuantity      Int                            @default(0)
+  receivedQuantity     Int                            @default(0)
+  damagedQuantity      Int                            @default(0)
+  differenceQuantity   Int                            @default(0)
+  inTransitQuantity    Int                            @default(0)
+  hqCondition          BranchHqReturnCondition?
+  hqReceivingNote      String?
+  pickedAt             DateTime?
+  pickedByUserId       String?
+  pickedBy             User?                          @relation("BranchHqReturnItemPickedBy", fields: [pickedByUserId], references: [id])
+  sourceDistributionOrderId     String?
+  sourceDistributionOrderItemId String?
+  fifoAllocations      BranchHqReturnFifoAllocation[]
+  discrepancies        BranchHqReturnDiscrepancy[]
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  @@index([returnId])
+  @@index([productId])
+  @@index([pickedByUserId])
+}
+
+model BranchHqReturnFifoAllocation {
+  id                String                   @id @default(cuid())
+  returnId          String
+  returnOrder       BranchHqReturn           @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  returnItemId      String
+  returnItem        BranchHqReturnItem       @relation(fields: [returnItemId], references: [id], onDelete: Cascade)
+  fifoBatchId       String
+  fifoBatch         FifoInventoryBatch       @relation(fields: [fifoBatchId], references: [id])
+  productId         String
+  quantity          Int
+  unitCostKgs       Decimal                  @db.Decimal(14, 2)
+  totalCostKgs      Decimal                  @db.Decimal(14, 2)
+  /** RESERVED at branch approval; CONSUMED at shipment; HQ_RECEIVED after HQ accept */
+  status            String                   @default("RESERVED")
+  sourceReferenceType String?
+  sourceReferenceId   String?
+  hqFifoBatchId     String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  @@index([returnId])
+  @@index([returnItemId])
+  @@index([fifoBatchId])
+  @@index([productId])
+  @@index([status])
+}
+
+model BranchHqReturnDiscrepancy {
+  id               String             @id @default(cuid())
+  returnId         String
+  returnOrder      BranchHqReturn     @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  returnItemId     String
+  returnItem       BranchHqReturnItem @relation(fields: [returnItemId], references: [id], onDelete: Cascade)
+  productId        String
+  expectedQuantity Int
+  receivedQuantity Int
+  differenceQuantity Int
+  comment          String?
+  createdById      String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([returnItemId])
+  @@index([returnId])
+  @@index([productId])
+  @@index([createdById])
+}
+
+model BranchHqReturnFinancialAdjustment {
+  id                     String                                   @id @default(cuid())
+  returnId               String                                   @unique
+  returnOrder            BranchHqReturn                           @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  branchId               String
+  status                 BranchHqReturnFinancialAdjustmentStatus  @default(PENDING)
+  acceptedReturnValueKgs Decimal                                  @db.Decimal(14, 2)
+  currentDebtKgs         Decimal                                  @default(0) @db.Decimal(14, 2)
+  suggestedCreditKgs     Decimal                                  @default(0) @db.Decimal(14, 2)
+  appliedCreditKgs       Decimal                                  @default(0) @db.Decimal(14, 2)
+  resultingDebtKgs       Decimal                                  @default(0) @db.Decimal(14, 2)
+  remainingCreditKgs     Decimal                                  @default(0) @db.Decimal(14, 2)
+  decidedById            String?
+  decidedBy              User?                                    @relation("BranchHqReturnFinancialDecider", fields: [decidedById], references: [id])
+  decidedAt              DateTime?
+  decisionNote           String?
+  version                Int                                      @default(0)
+  createdAt              DateTime                                 @default(now())
+  updatedAt              DateTime                                 @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+  @@index([decidedById])
+}
+

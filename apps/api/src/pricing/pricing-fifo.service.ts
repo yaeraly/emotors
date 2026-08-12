@@ -1554,9 +1554,15 @@ export class PricingFifoService {
     client: PrismaTx,
     batches: T[],
   ): Promise<T[]> {
+    const nonSaleableReturnRefs = new Set([
+      'BRANCH_HQ_RETURN_DEFECTIVE',
+      'BRANCH_HQ_RETURN_DAMAGED',
+      'BRANCH_HQ_RETURN_USED',
+    ]);
     const business: T[] = [];
     for (const batch of batches) {
       if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) continue;
+      if (batch.referenceType && nonSaleableReturnRefs.has(batch.referenceType)) continue;
       if (!batch.stockMovementId) {
         business.push(batch);
         continue;
