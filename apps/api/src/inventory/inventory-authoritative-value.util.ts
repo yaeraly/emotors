@@ -1,5 +1,5 @@
 import { Prisma, type WarehouseType } from '@prisma/client';
-import { toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
+import { toExactMoney, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import {
   computeLayerRemainingCostKgs,
   deriveDisplayUnitCost,
@@ -18,13 +18,22 @@ type FifoBatchRow = {
   remainingQuantity: number;
   initialQuantity: number;
   unitCostKgs: unknown;
+  originalLayerCostKgs?: unknown;
+  remainingLayerCostKgs?: unknown;
   stockMovementId?: string | null;
 };
 
 async function mapFifoLayerTotals(
   tx: PrismaTx,
   batches: FifoBatchRow[],
-): Promise<Array<{ remainingQuantity: number; layerTotalCostKgs: number; layerBaseQuantity: number }>> {
+): Promise<
+  Array<{
+    remainingQuantity: number;
+    layerTotalCostKgs: number;
+    layerBaseQuantity: number;
+    remainingLayerCostKgs?: number;
+  }>
+> {
   const movementIds = batches
     .map((batch) => batch.stockMovementId)
     .filter((id): id is string => Boolean(id));
@@ -37,24 +46,44 @@ async function mapFifoLayerTotals(
   const movementById = new Map(movements.map((movement) => [movement.id, movement]));
 
   return batches.map((batch) => {
-    const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
     const remainingQuantity = Math.max(0, Math.floor(Number(batch.remainingQuantity)));
+    const persistedRemaining = toMoneyDecimal(batch.remainingLayerCostKgs);
+    if (remainingQuantity > 0 && persistedRemaining.gt(0)) {
+      const layerBaseQuantity =
+        batch.initialQuantity > 0 ? Math.floor(Number(batch.initialQuantity)) : remainingQuantity;
+      return {
+        remainingQuantity,
+        layerTotalCostKgs: Number(toExactMoney(batch.originalLayerCostKgs ?? persistedRemaining).toFixed(15)),
+        layerBaseQuantity,
+        remainingLayerCostKgs: Number(persistedRemaining.toFixed(15)),
+      };
+    }
+    const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
     const layerBaseQuantity =
       batch.initialQuantity > 0
         ? Math.floor(Number(batch.initialQuantity))
         : movement
           ? Math.abs(Math.floor(Number(movement.quantity)))
           : remainingQuantity;
-    const movementTotal = movement ? roundDisplayMoney(movement.totalCostKgs ?? 0) : 0;
+    const movementTotal =
+      movement && toMoneyDecimal(movement.totalCostKgs).gt(0)
+        ? Number(toExactMoney(movement.totalCostKgs).toFixed(15))
+        : 0;
     const fallbackTotal =
       layerBaseQuantity > 0
-        ? toStoredMoneyKgs(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQuantity))
+        ? Number(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQuantity).toFixed(15))
         : 0;
-    // Fully consumed layers contribute zero remaining warehouse value.
-    const layerTotalCostKgs = remainingQuantity <= 0 ? 0 : movementTotal > 0 ? movementTotal : fallbackTotal;
+    const original =
+      toMoneyDecimal(batch.originalLayerCostKgs).gt(0)
+        ? Number(toExactMoney(batch.originalLayerCostKgs).toFixed(15))
+        : remainingQuantity <= 0
+          ? 0
+          : movementTotal > 0
+            ? movementTotal
+            : fallbackTotal;
     return {
       remainingQuantity,
-      layerTotalCostKgs,
+      layerTotalCostKgs: original,
       layerBaseQuantity,
     };
   });
@@ -66,11 +95,15 @@ export function sumActiveRemainingFifoLayerValues(
     remainingQuantity: number;
     originalLayerValueKgs: number;
     layerBaseQuantity: number;
+    remainingLayerCostKgs?: number;
   }>,
 ): number {
   const values = layers.map((layer) => {
     const remaining = Math.max(0, Math.floor(Number(layer.remainingQuantity)));
     if (remaining <= 0) return 0;
+    if (layer.remainingLayerCostKgs != null && layer.remainingLayerCostKgs > 0) {
+      return layer.remainingLayerCostKgs;
+    }
     return computeLayerRemainingCostKgs(
       layer.originalLayerValueKgs,
       layer.layerBaseQuantity,
@@ -97,6 +130,8 @@ export async function sumProductFifoRemainingValueKgs(
       remainingQuantity: true,
       initialQuantity: true,
       unitCostKgs: true,
+      originalLayerCostKgs: true,
+      remainingLayerCostKgs: true,
       stockMovementId: true,
     },
   });
@@ -104,11 +139,13 @@ export async function sumProductFifoRemainingValueKgs(
 
   const layers = await mapFifoLayerTotals(tx, batches);
   const lineValues = layers.map((layer) =>
-    computeLayerRemainingCostKgs(
-      layer.layerTotalCostKgs,
-      layer.layerBaseQuantity,
-      layer.remainingQuantity,
-    ),
+    layer.remainingLayerCostKgs != null && layer.remainingQuantity > 0
+      ? layer.remainingLayerCostKgs
+      : computeLayerRemainingCostKgs(
+          layer.layerTotalCostKgs,
+          layer.layerBaseQuantity,
+          layer.remainingQuantity,
+        ),
   );
   return sumDisplayMoneyTotals(lineValues);
 }
@@ -125,6 +162,8 @@ export async function sumWarehouseFifoRemainingValueKgs(tx: PrismaTx, warehouseI
       remainingQuantity: true,
       initialQuantity: true,
       unitCostKgs: true,
+      originalLayerCostKgs: true,
+      remainingLayerCostKgs: true,
       stockMovementId: true,
     },
   });
@@ -132,11 +171,13 @@ export async function sumWarehouseFifoRemainingValueKgs(tx: PrismaTx, warehouseI
 
   const layers = await mapFifoLayerTotals(tx, batches);
   const lineValues = layers.map((layer) =>
-    computeLayerRemainingCostKgs(
-      layer.layerTotalCostKgs,
-      layer.layerBaseQuantity,
-      layer.remainingQuantity,
-    ),
+    layer.remainingLayerCostKgs != null && layer.remainingQuantity > 0
+      ? layer.remainingLayerCostKgs
+      : computeLayerRemainingCostKgs(
+          layer.layerTotalCostKgs,
+          layer.layerBaseQuantity,
+          layer.remainingQuantity,
+        ),
   );
   return sumDisplayMoneyTotals(lineValues);
 }
@@ -332,7 +373,7 @@ export async function assertInventoryCountLinesMatchAuthoritativeValuation(
     unitCostKgs: unknown;
   }>,
   isHqWarehouse: boolean,
-  toleranceKgs = 0.01,
+  toleranceKgs = 0,
 ): Promise<{ ok: boolean; mismatches: Array<{ itemId: string; productId: string; expected: number; actual: number }> }> {
   const mismatches: Array<{ itemId: string; productId: string; expected: number; actual: number }> = [];
 
@@ -457,6 +498,8 @@ export async function inspectWarehouseFifoBalanceParity(
       remainingQuantity: true,
       initialQuantity: true,
       unitCostKgs: true,
+      originalLayerCostKgs: true,
+      remainingLayerCostKgs: true,
       stockMovementId: true,
     },
   });
@@ -489,11 +532,13 @@ export async function inspectWarehouseFifoBalanceParity(
     const layerTotals = await mapFifoLayerTotals(tx, productBatches);
     const fifoRemainingValueKgs = sumDisplayMoneyTotals(
       layerTotals.map((layer) =>
-        computeLayerRemainingCostKgs(
-          layer.layerTotalCostKgs,
-          layer.layerBaseQuantity,
-          layer.remainingQuantity,
-        ),
+        layer.remainingLayerCostKgs != null && layer.remainingQuantity > 0
+          ? layer.remainingLayerCostKgs
+          : computeLayerRemainingCostKgs(
+              layer.layerTotalCostKgs,
+              layer.layerBaseQuantity,
+              layer.remainingQuantity,
+            ),
       ),
     );
 

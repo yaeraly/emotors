@@ -9,6 +9,7 @@ import {
   isBusinessProcurementReceiptReference,
   isSeedStockMovementReference,
 } from './pricing-fifo-business-layer.util';
+import { buildFifoLayerMoneyFromLine } from '../common/money/fifo-layer-cost';
 import {
   computeFifoRemainingFromMovement,
   computeFifoReservedOnBatch,
@@ -818,7 +819,10 @@ export async function repairHqFifoFromReceipts(
             warehouseId: receipt.warehouseId,
             stockMovementId: movementId,
             receivedAt: receipt.receivedAt,
-            unitCostKgs: receipt.unitLandedCostKgs,
+            ...buildFifoLayerMoneyFromLine({
+              quantity: receipt.receivedQuantity,
+              authoritativeLineTotal: receipt.totalLandedCostKgs,
+            }),
             initialQuantity: receipt.receivedQuantity,
             remainingQuantity,
             reservedQuantity: 0,
@@ -887,7 +891,11 @@ export async function repairHqFifoFromReceipts(
     await client.fifoInventoryBatch.update({
       where: { id: existingFifo.id },
       data: {
-        unitCostKgs: receipt.unitLandedCostKgs,
+        ...buildFifoLayerMoneyFromLine({
+          quantity: receipt.receivedQuantity,
+          authoritativeLineTotal: receipt.totalLandedCostKgs,
+          remainingQuantity,
+        }),
         initialQuantity: receipt.receivedQuantity,
         remainingQuantity,
         reservedQuantity,
@@ -973,7 +981,12 @@ export async function repairHqFifoFromReceipts(
         warehouseId: movement.warehouseId,
         stockMovementId: movement.id,
         receivedAt: movement.createdAt,
-        unitCostKgs: unitLandedCostKgs,
+        ...buildFifoLayerMoneyFromLine({
+          quantity: receivedQty,
+          authoritativeLineTotal:
+            n(movement.totalCostKgs) > 0 ? movement.totalCostKgs : unitLandedCostKgs * receivedQty,
+          remainingQuantity,
+        }),
         initialQuantity: receivedQty,
         remainingQuantity,
         reservedQuantity: 0,

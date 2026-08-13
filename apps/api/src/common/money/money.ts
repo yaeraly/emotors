@@ -1,12 +1,18 @@
 import { Prisma } from '@prisma/client';
 import {
   MONEY_ROUNDING,
+  MONEY_SCALE_EXACT_UNIT,
   MONEY_SCALE_INTERNAL,
   MONEY_SCALE_KGS,
   type MoneyInput,
 } from './money.types';
 
-export { MONEY_ROUNDING, MONEY_SCALE_INTERNAL, MONEY_SCALE_KGS };
+export {
+  MONEY_ROUNDING,
+  MONEY_SCALE_EXACT_UNIT,
+  MONEY_SCALE_INTERNAL,
+  MONEY_SCALE_KGS,
+};
 export type { MoneyInput };
 
 const ZERO = new Prisma.Decimal(0);
@@ -29,6 +35,9 @@ export function toMoneyDecimal(value: MoneyInput | unknown): Prisma.Decimal {
     return ZERO;
   }
 }
+
+/** Spec alias: coerce any money input to Prisma.Decimal without JS float math. */
+export const toDecimal = toMoneyDecimal;
 
 export function addMoney(a: MoneyInput, b: MoneyInput): Prisma.Decimal {
   return toMoneyDecimal(a).plus(toMoneyDecimal(b));
@@ -68,7 +77,35 @@ export function isMoneyEqual(a: MoneyInput, b: MoneyInput): boolean {
   return toMoneyDecimal(a).eq(toMoneyDecimal(b));
 }
 
-/** Final KGS storage/display boundary only (2 dp, half-up). */
+/** Spec alias: exact Decimal equality. No epsilon. */
+export const moneyEquals = isMoneyEqual;
+
+/** High-precision money stored on exactUnitCost / layer cost fields (scale 15). */
+export function toExactMoney(value: MoneyInput | unknown): Prisma.Decimal {
+  return toMoneyDecimal(value).toDecimalPlaces(MONEY_SCALE_EXACT_UNIT, MONEY_ROUNDING);
+}
+
+/**
+ * exactUnitCost = authoritativeLineTotal / quantity.
+ * Never rounds to 2 decimals. Never used to rebuild the line total.
+ */
+export function toExactUnitCost(authoritativeLineTotal: MoneyInput, quantity: MoneyInput): Prisma.Decimal {
+  const qty = toMoneyDecimal(quantity);
+  const total = toMoneyDecimal(authoritativeLineTotal);
+  if (qty.lte(0) || total.lte(0)) return ZERO;
+  return toExactMoney(total.div(qty));
+}
+
+/** JSON / API wire format: decimal string, never a JSON number. */
+export function serializeMoney(value: MoneyInput | unknown): string {
+  return toMoneyDecimal(value).toFixed();
+}
+
+export function serializeExactUnitCost(value: MoneyInput): string {
+  return toExactMoney(value).toFixed(MONEY_SCALE_EXACT_UNIT);
+}
+
+/** Final KGS display / paid-currency boundary only (2 dp, half-up). */
 export function roundMoneyKgs(value: MoneyInput): Prisma.Decimal {
   return toMoneyDecimal(value).toDecimalPlaces(MONEY_SCALE_KGS, MONEY_ROUNDING);
 }
@@ -81,11 +118,15 @@ export function toInternalMoney(value: MoneyInput): Prisma.Decimal {
   return toMoneyDecimal(value).toDecimalPlaces(MONEY_SCALE_INTERNAL, MONEY_ROUNDING);
 }
 
+/**
+ * Fail-closed: exact Decimal equality.
+ * Do not ignore 0.01 / 0.001 differences. Display rounding is not accounting truth.
+ */
 export function assertMoneyEqual(expected: MoneyInput, actual: MoneyInput, context: string): void {
-  const left = roundMoneyKgs(expected);
-  const right = roundMoneyKgs(actual);
+  const left = toMoneyDecimal(expected);
+  const right = toMoneyDecimal(actual);
   if (!left.eq(right)) {
-    throw new Error(`${context}: expected ${left.toFixed(MONEY_SCALE_KGS)} got ${right.toFixed(MONEY_SCALE_KGS)}`);
+    throw new Error(`${context}: expected ${left.toFixed()} got ${right.toFixed()}`);
   }
 }
 
@@ -103,9 +144,27 @@ export function assertAllocationReconciles(
   assertMoneyEqual(sourceTotal, sumMoney(allocated), context);
 }
 
+function toWholeQuantity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.trunc(value));
+}
+
 /**
- * Distribute a 2dp target across shares; remainder lands on the last qualifying line.
- * SUM(result) === round(target) exactly.
+ * Distribute a target across shares with last-line remainder.
+ * SUM(result) === target exactly. No 2dp rounding — inventory/allocation path.
+ */
+export function distributeExactMoney(rawAmounts: MoneyInput[], targetTotal: MoneyInput): Prisma.Decimal[] {
+  if (rawAmounts.length === 0) return [];
+  const target = toMoneyDecimal(targetTotal);
+  if (rawAmounts.length === 1) return [target];
+  const head = rawAmounts.slice(0, -1).map((amount) => toExactMoney(amount));
+  const last = toExactMoney(target.minus(sumMoney(head)));
+  return [...head, last];
+}
+
+/**
+ * Distribute a 2dp paid-currency target across shares; remainder lands on the last qualifying line.
+ * SUM(result) === round(target) exactly. Display/payment boundary only.
  */
 export function distributeMoneyToTarget(rawAmounts: MoneyInput[], targetTotal: MoneyInput): Prisma.Decimal[] {
   if (rawAmounts.length === 0) return [];
@@ -127,7 +186,7 @@ export function distributeMoneyToTarget(rawAmounts: MoneyInput[], targetTotal: M
 /**
  * FIFO remaining-cost consume.
  * When take covers the last remaining units, consumedCost = exact remainingLayerCost.
- * Never reconstructs from rounded unit × qty.
+ * Never reconstructs from rounded unit × qty. Never rounds to 2dp internally.
  */
 export function consumeFifoLayerMoney(input: {
   originalLayerCost: MoneyInput;
@@ -140,9 +199,110 @@ export function consumeFifoLayerMoney(input: {
   remainingCost: Prisma.Decimal;
   remainingQuantity: number;
 } {
-  const take = Math.max(0, Math.floor(Number(input.takeQuantity) || 0));
-  const remainingQty = Math.max(0, Math.floor(Number(input.remainingQuantity) || 0));
-  const baseQty = Math.max(0, Math.floor(Number(input.layerBaseQuantity) || 0));
+  const take = toWholeQuantity(input.takeQuantity);
+  const remainingQty = toWholeQuantity(input.remainingQuantity);
+  const baseQty = toWholeQuantity(input.layerBaseQuantity);
+  const original = toMoneyDecimal(input.originalLayerCost);
+
+  if (take <= 0 || remainingQty <= 0 || baseQty <= 0 || original.lte(0)) {
+    return {
+      consumedCost: ZERO,
+      remainingCost: remainingQty <= 0 ? ZERO : toExactMoney(original),
+      remainingQuantity: remainingQty,
+    };
+  }
+
+  const remainingCost = toExactMoney(
+    input.remainingLayerCost != null
+      ? input.remainingLayerCost
+      : remainingFifoLayerMoney({
+          originalLayerCost: original,
+          layerBaseQuantity: baseQty,
+          remainingQuantity: remainingQty,
+        }),
+  );
+
+  if (take >= remainingQty) {
+    return {
+      consumedCost: remainingCost,
+      remainingCost: ZERO,
+      remainingQuantity: 0,
+    };
+  }
+
+  const consumedCost = toExactMoney(remainingCost.mul(take).div(remainingQty));
+  return {
+    consumedCost,
+    remainingCost: toExactMoney(remainingCost.minus(consumedCost)),
+    remainingQuantity: remainingQty - take,
+  };
+}
+
+/** Remaining layer money: original − cost of already consumed qty. High precision. */
+export function remainingFifoLayerMoney(input: {
+  originalLayerCost: MoneyInput;
+  layerBaseQuantity: number;
+  remainingQuantity: number;
+}): Prisma.Decimal {
+  const remainingQty = toWholeQuantity(input.remainingQuantity);
+  const baseQty = toWholeQuantity(input.layerBaseQuantity);
+  const original = toMoneyDecimal(input.originalLayerCost);
+  if (remainingQty <= 0 || baseQty <= 0 || original.lte(0)) return ZERO;
+  if (remainingQty >= baseQty) return toExactMoney(original);
+  const consumedQty = baseQty - remainingQty;
+  const consumedCost = toExactMoney(original.mul(consumedQty).div(baseQty));
+  return toExactMoney(original.minus(consumedCost));
+}
+
+/** Sequential consume of a layer; SUM(consumed) + final remaining === original. */
+export function consumeFifoLayerSequence(
+  originalLayerCost: MoneyInput,
+  layerBaseQuantity: number,
+  takes: number[],
+): {
+  consumed: Prisma.Decimal[];
+  remainingCost: Prisma.Decimal;
+  remainingQuantity: number;
+} {
+  const original = toMoneyDecimal(originalLayerCost);
+  const consumed: Prisma.Decimal[] = [];
+  let remainingCost = toExactMoney(original);
+  let remainingQuantity = toWholeQuantity(layerBaseQuantity);
+  for (const take of takes) {
+    const step = consumeFifoLayerMoney({
+      originalLayerCost: original,
+      layerBaseQuantity,
+      remainingQuantity,
+      takeQuantity: take,
+      remainingLayerCost: remainingCost,
+    });
+    consumed.push(step.consumedCost);
+    remainingCost = step.remainingCost;
+    remainingQuantity = step.remainingQuantity;
+  }
+  return { consumed, remainingCost, remainingQuantity };
+}
+
+/** Paid KGS from CNY × rate. Round only at the KGS payment boundary. */
+export function multiplyCnyByRate(cny: MoneyInput, rate: MoneyInput): Prisma.Decimal {
+  return roundMoneyKgs(multiplyMoney(cny, rate));
+}
+
+/** 2dp remainder-safe FIFO consume for display/legacy number APIs only. */
+export function consumeFifoLayerMoneyKgs(input: {
+  originalLayerCost: MoneyInput;
+  layerBaseQuantity: number;
+  remainingQuantity: number;
+  takeQuantity: number;
+  remainingLayerCost?: MoneyInput;
+}): {
+  consumedCost: Prisma.Decimal;
+  remainingCost: Prisma.Decimal;
+  remainingQuantity: number;
+} {
+  const take = toWholeQuantity(input.takeQuantity);
+  const remainingQty = toWholeQuantity(input.remainingQuantity);
+  const baseQty = toWholeQuantity(input.layerBaseQuantity);
   const original = roundMoneyKgs(input.originalLayerCost);
 
   if (take <= 0 || remainingQty <= 0 || baseQty <= 0 || original.lte(0)) {
@@ -156,7 +316,7 @@ export function consumeFifoLayerMoney(input: {
   const remainingCost = roundMoneyKgs(
     input.remainingLayerCost != null
       ? input.remainingLayerCost
-      : remainingFifoLayerMoney({
+      : remainingFifoLayerMoneyKgs({
           originalLayerCost: original,
           layerBaseQuantity: baseQty,
           remainingQuantity: remainingQty,
@@ -179,51 +339,17 @@ export function consumeFifoLayerMoney(input: {
   };
 }
 
-/** Remaining layer money: original − rounded cost of already consumed qty. */
-export function remainingFifoLayerMoney(input: {
+export function remainingFifoLayerMoneyKgs(input: {
   originalLayerCost: MoneyInput;
   layerBaseQuantity: number;
   remainingQuantity: number;
 }): Prisma.Decimal {
-  const remainingQty = Math.max(0, Math.floor(Number(input.remainingQuantity) || 0));
-  const baseQty = Math.max(0, Math.floor(Number(input.layerBaseQuantity) || 0));
+  const remainingQty = toWholeQuantity(input.remainingQuantity);
+  const baseQty = toWholeQuantity(input.layerBaseQuantity);
   const original = roundMoneyKgs(input.originalLayerCost);
   if (remainingQty <= 0 || baseQty <= 0 || original.lte(0)) return ZERO;
   if (remainingQty >= baseQty) return original;
   const consumedQty = baseQty - remainingQty;
   const consumedCost = roundMoneyKgs(original.mul(consumedQty).div(baseQty));
   return roundMoneyKgs(original.minus(consumedCost));
-}
-
-/** Sequential consume of a layer; SUM(consumed) + final remaining === original. */
-export function consumeFifoLayerSequence(
-  originalLayerCost: MoneyInput,
-  layerBaseQuantity: number,
-  takes: number[],
-): {
-  consumed: Prisma.Decimal[];
-  remainingCost: Prisma.Decimal;
-  remainingQuantity: number;
-} {
-  const original = roundMoneyKgs(originalLayerCost);
-  const consumed: Prisma.Decimal[] = [];
-  let remainingCost = original;
-  let remainingQuantity = Math.max(0, Math.floor(layerBaseQuantity));
-  for (const take of takes) {
-    const step = consumeFifoLayerMoney({
-      originalLayerCost: original,
-      layerBaseQuantity,
-      remainingQuantity,
-      takeQuantity: take,
-      remainingLayerCost: remainingCost,
-    });
-    consumed.push(step.consumedCost);
-    remainingCost = step.remainingCost;
-    remainingQuantity = step.remainingQuantity;
-  }
-  return { consumed, remainingCost, remainingQuantity };
-}
-
-export function multiplyCnyByRate(cny: MoneyInput, rate: MoneyInput): Prisma.Decimal {
-  return roundMoneyKgs(multiplyMoney(cny, rate));
 }

@@ -11,6 +11,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { pricesFromMarkups } from '../pricing/pricing-calculator.util';
+import { deriveExactUnitCost } from '../pricing/product-cost-precision.util';
 import { DEFAULT_EXPENSE_ALLOCATION } from './landed-cost-allocation.util';
 import {
   buildLogisticsWithCargo,
@@ -42,6 +43,7 @@ import { resolveProcurementLogisticsInput } from './transport-logistics.util';
 import { summarizeSupplierPayments, roundMoney } from './supplier-payment.util';
 import { resolveMovementCostUpdates } from './landed-cost-sync-movements.util';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
+import { toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 
 export type RecalculateProcurementOrderOptions = {
   reason?: string;
@@ -345,7 +347,7 @@ export class LandedCostService {
 
       const lineSupplierCostKgs = roundMoney(
         calculated.items.reduce(
-          (sum, item) => sum + item.costKgs * item.effectiveQuantity,
+          (sum, item) => sum + toStoredMoneyKgs(toMoneyDecimal(item.costKgs).mul(item.effectiveQuantity)),
           0,
         ),
       );
@@ -388,7 +390,7 @@ export class LandedCostService {
             bankFeeAllocKgs: next.bankFeeAllocKgs,
             otherAllocKgs: next.otherAllocKgs,
             transportCostKgs: next.transportCostKgs,
-            finalCostKgs: next.finalCostKgs,
+            finalCostKgs: deriveExactUnitCost(next.totalCostKgs, next.effectiveQuantity),
             totalYuan: next.totalYuan,
             totalCostKgs: next.totalCostKgs,
           },
@@ -461,7 +463,7 @@ export class LandedCostService {
           allocatedPackagingKgs: next.packagingAllocKgs,
           allocatedOtherExpensesKgs: next.otherAllocKgs,
           totalLandedCostKgs: next.totalCostKgs,
-          unitLandedCostKgs: next.finalCostKgs,
+          unitLandedCostKgs: deriveExactUnitCost(next.totalCostKgs, next.effectiveQuantity),
           calculationVersion: nextVersion,
           isFinalized: alreadyReceived,
           isProvisional: calculated.isProvisional && !alreadyReceived,
@@ -970,7 +972,7 @@ export class LandedCostService {
           where: { id: item.productId },
           data: {
             purchasePriceYuan: item.purchasePriceYuan as any,
-            latestYuanRate: next.costKgs > 0 ? (item.yuanRate as any) : product.latestYuanRate,
+            latestYuanRate: toMoneyDecimal(next.costKgs).gt(0) ? (item.yuanRate as any) : product.latestYuanRate,
             purchaseCostKgs: next.costKgs,
             transportCostKgs: next.transportCostKgs,
             finalCostKgs: unitCostKgs,

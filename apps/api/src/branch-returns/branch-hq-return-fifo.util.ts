@@ -1,8 +1,7 @@
+import { sumMoney, toMoneyDecimal } from '../common/money/money';
 import {
-  allocateLayerConsumptionCost,
-  deriveDisplayUnitCost,
-  roundDisplayMoney,
-  sumDisplayMoneyTotals,
+  allocateLayerConsumptionCostExact,
+  deriveExactUnitCost,
 } from '../pricing/product-cost-precision.util';
 
 export type BranchHqReturnFifoLayerInput = {
@@ -12,6 +11,7 @@ export type BranchHqReturnFifoLayerInput = {
   unitCostKgs: number;
   /** Authoritative layer total cost for initialQuantity when available. */
   layerTotalCostKgs?: number;
+  remainingLayerCostKgs?: number;
   initialQuantity?: number;
   sourceReferenceType?: string | null;
   sourceReferenceId?: string | null;
@@ -50,7 +50,7 @@ export function previewBranchHqReturnFifoConsumption(
 
   let remaining = requested;
   const lines: BranchHqReturnFifoConsumeLine[] = [];
-  const lineTotals: number[] = [];
+  const lineTotals: Array<string | number> = [];
 
   for (const layer of layers) {
     if (remaining <= 0) break;
@@ -62,23 +62,26 @@ export function previewBranchHqReturnFifoConsumption(
 
     const baseQty =
       Math.max(0, Math.floor(Number(layer.initialQuantity ?? 0))) || remainingQty || take;
-    const layerTotal =
+    const layerTotal = toMoneyDecimal(
       Number(layer.layerTotalCostKgs ?? 0) > 0
-        ? Number(layer.layerTotalCostKgs)
-        : roundDisplayMoney(Number(layer.unitCostKgs) * baseQty);
+        ? layer.layerTotalCostKgs
+        : toMoneyDecimal(layer.unitCostKgs).mul(baseQty),
+    );
 
-    if (!(layerTotal > 0) || !(Number(layer.unitCostKgs) > 0)) {
+    if (layerTotal.lte(0) || toMoneyDecimal(layer.unitCostKgs).lte(0)) {
       throw new Error(
         `Missing authoritative FIFO cost for layer ${layer.batchId}. Return shipment is blocked until inventory cost lineage is fixed.`,
       );
     }
 
-    const totalCostKgs = allocateLayerConsumptionCost({
+    const consumed = allocateLayerConsumptionCostExact({
       layerTotalCostKgs: layerTotal,
       layerBaseQuantity: baseQty,
       remainingQuantity: remainingQty,
       takeQuantity: take,
+      remainingLayerCostKgs: layer.remainingLayerCostKgs,
     });
+    const totalCostKgs = Number(consumed.toFixed(15));
     if (!(totalCostKgs > 0)) {
       throw new Error(
         `FIFO layer ${layer.batchId} produced zero return cost. Return shipment is blocked.`,
@@ -88,22 +91,23 @@ export function previewBranchHqReturnFifoConsumption(
     lines.push({
       batchId: layer.batchId,
       quantity: take,
-      unitCostKgs: roundDisplayMoney(Number(layer.unitCostKgs)),
+      unitCostKgs: Number(deriveExactUnitCost(consumed, take).toFixed(15)),
       totalCostKgs,
       sourceReferenceType: layer.sourceReferenceType ?? null,
       sourceReferenceId: layer.sourceReferenceId ?? null,
     });
-    lineTotals.push(totalCostKgs);
+    lineTotals.push(consumed.toFixed(15));
     remaining -= take;
   }
 
   const allocatedQty = requested - remaining;
-  const totalCostKgs = sumDisplayMoneyTotals(lineTotals);
+  const totalCostExact = sumMoney(lineTotals);
+  const totalCostKgs = Number(totalCostExact.toFixed(15));
   return {
     lines,
     allocatedQty,
     totalCostKgs,
-    unitCostKgs: deriveDisplayUnitCost(totalCostKgs, allocatedQty),
+    unitCostKgs: Number(deriveExactUnitCost(totalCostExact, allocatedQty).toFixed(15)),
   };
 }
 
@@ -150,24 +154,23 @@ export function buildHqReturnedFifoLayersFromConsumedAllocations(
     const take = Math.min(Math.max(0, row.quantity), remaining);
     if (take <= 0) continue;
 
-    const authoritativeTotal = Number(row.totalCostKgs);
-    const totalCostKgs =
+    const authoritativeTotal = toMoneyDecimal(row.totalCostKgs);
+    const consumed =
       take >= row.quantity
-        ? roundDisplayMoney(authoritativeTotal)
-        : roundDisplayMoney(
-            allocateLayerConsumptionCost({
-              layerTotalCostKgs: authoritativeTotal,
-              layerBaseQuantity: row.quantity,
-              remainingQuantity: row.quantity,
-              takeQuantity: take,
-            }),
-          );
+        ? authoritativeTotal
+        : allocateLayerConsumptionCostExact({
+            layerTotalCostKgs: authoritativeTotal,
+            layerBaseQuantity: row.quantity,
+            remainingQuantity: row.quantity,
+            takeQuantity: take,
+          });
+    const totalCostKgs = Number(consumed.toFixed(15));
 
     lines.push({
       allocationId: row.id,
       sourceFifoBatchId: row.fifoBatchId,
       quantity: take,
-      unitCostKgs: roundDisplayMoney(Number(row.unitCostKgs)),
+      unitCostKgs: Number(deriveExactUnitCost(consumed, take).toFixed(15)),
       totalCostKgs,
       sourceReferenceType: row.sourceReferenceType ?? null,
       sourceReferenceId: row.sourceReferenceId ?? null,

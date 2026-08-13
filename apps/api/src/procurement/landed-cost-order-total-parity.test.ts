@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { distributeRoundedAmounts } from './landed-cost-allocation.util';
 import { sumRoundedMoney } from './landed-cost-money.util';
 import { calculateLandedCosts } from './landed-cost.util';
+import { isMoneyEqual, sumMoney, toStoredMoneyKgs } from '../common/money/money';
 
 const ESTIMATED_FULL_LANDED_COST = 914369.8;
 
@@ -62,11 +63,11 @@ describe('landed cost order total parity', () => {
       },
     );
 
-    const productCostSum = sumRoundedMoney(result.items.map((item) => item.totalCostKgs));
+    const productCostSum = sumMoney(result.items.map((item) => item.totalCostKgs));
     const estimatedFullCost = result.totalCostKgs;
 
-    assert.equal(estimatedFullCost, productCostSum);
-    assert.equal(Math.abs(estimatedFullCost - productCostSum), 0);
+    assert.ok(isMoneyEqual(estimatedFullCost, productCostSum));
+    assert.equal(toStoredMoneyKgs(estimatedFullCost), ESTIMATED_FULL_LANDED_COST);
   });
 
   it('documents 914369.80 batch: remainder reconciles product table to header', () => {
@@ -94,10 +95,10 @@ describe('landed cost order total parity', () => {
 
     const beforeReconcilePattern = sumRoundedMoney(
       result.items.map((item) =>
-        Math.round((item.finalCostKgs * item.effectiveQuantity + Number.EPSILON) * 100) / 100,
+        Math.round((toStoredMoneyKgs(item.finalCostKgs) * item.effectiveQuantity + Number.EPSILON) * 100) / 100,
       ),
     );
-    assert.notEqual(beforeReconcilePattern, result.totalCostKgs);
-    assert.equal(result.totalCostKgs, sumRoundedMoney(result.items.map((item) => item.totalCostKgs)));
+    assert.notEqual(beforeReconcilePattern, toStoredMoneyKgs(result.totalCostKgs));
+    assert.ok(isMoneyEqual(result.totalCostKgs, sumMoney(result.items.map((item) => item.totalCostKgs))));
   });
 });

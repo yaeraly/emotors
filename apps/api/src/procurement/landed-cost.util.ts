@@ -1,16 +1,20 @@
 import { Prisma } from '@prisma/client';
 import {
-  allocateExpenseAmount,
+  allocateExpenseAmountExact,
   buildAllocationTotals,
   DEFAULT_EXPENSE_ALLOCATION,
-  distributeRoundedAmounts,
+  distributeExactAmounts,
   ExpenseAllocationKey,
   ExpenseAllocationMethod,
   hasPendingWeightForExpense,
   type AllocationLineContext,
 } from './landed-cost-allocation.util';
-import { roundMoneyDecimal, sumRoundedMoney, toMoneyDecimal } from './landed-cost-money.util';
-import { distributeAuthoritativeLineTotal, deriveDisplayUnitCost } from '../pricing/product-cost-precision.util';
+import { roundMoneyDecimal, sumMoneyDecimals, toMoneyDecimal } from './landed-cost-money.util';
+import {
+  distributeExactAuthoritativeLineTotal,
+  deriveExactUnitCost,
+} from '../pricing/product-cost-precision.util';
+import { toExactMoney } from '../common/money/money';
 
 export type LogisticsCosts = {
   chinaDomesticTransportKgs: number;
@@ -46,21 +50,21 @@ export type LandedCostItemResult = LandedCostItemInput & {
   lineNetWeightKg: number;
   linePackagingWeightKg: number;
   lineShipmentWeightKg: number;
-  costKgs: number;
-  basePurchaseCostKgs: number;
+  costKgs: Prisma.Decimal | number;
+  basePurchaseCostKgs: Prisma.Decimal | number;
   totalWeightKg: number;
-  chinaDomesticAllocKgs: number;
-  chinaExportAllocKgs: number;
-  localTransportAllocKgs: number;
-  packagingAllocKgs: number;
-  customsAllocKgs: number;
-  insuranceAllocKgs: number;
-  bankFeeAllocKgs: number;
-  otherAllocKgs: number;
-  transportCostKgs: number;
-  finalCostKgs: number;
+  chinaDomesticAllocKgs: Prisma.Decimal | number;
+  chinaExportAllocKgs: Prisma.Decimal | number;
+  localTransportAllocKgs: Prisma.Decimal | number;
+  packagingAllocKgs: Prisma.Decimal | number;
+  customsAllocKgs: Prisma.Decimal | number;
+  insuranceAllocKgs: Prisma.Decimal | number;
+  bankFeeAllocKgs: Prisma.Decimal | number;
+  otherAllocKgs: Prisma.Decimal | number;
+  transportCostKgs: Prisma.Decimal | number;
+  finalCostKgs: Prisma.Decimal | number;
   totalYuan: number;
-  totalCostKgs: number;
+  totalCostKgs: Prisma.Decimal | number;
   hasKnownWeight: boolean;
 };
 
@@ -68,7 +72,7 @@ export type LandedCostOrderResult = {
   items: LandedCostItemResult[];
   totalYuan: number;
   totalTransportCostKgs: number;
-  totalCostKgs: number;
+  totalCostKgs: Prisma.Decimal | number;
   totalNetWeightKg: number;
   totalPackagingWeightKg: number;
   totalShipmentWeightKg: number;
@@ -200,12 +204,10 @@ export function calculateLandedCosts(
     const lineNetWeightKg = resolvedWeight.hasKnownWeight
       ? roundWeight(effectiveQuantity * netWeightKg)
       : 0;
-    const costKgs = roundMoney(
+    const costKgs = toExactMoney(
       toMoneyDecimal(item.purchasePriceYuan || 0).mul(toMoneyDecimal(item.yuanRate || 0)),
     );
-    const basePurchaseCostKgs = roundMoney(
-      toMoneyDecimal(costKgs).mul(toMoneyDecimal(effectiveQuantity)),
-    );
+    const basePurchaseCostKgs = toExactMoney(toMoneyDecimal(costKgs).mul(toMoneyDecimal(effectiveQuantity)));
     return {
       ...item,
       effectiveQuantity,
@@ -277,7 +279,7 @@ export function calculateLandedCosts(
     hasPendingWeightForExpense(key, allocationMethods, Number(resolvedLogistics[key] ?? 0), allocationLines),
   );
 
-  const expenseAllocations: Record<ExpenseAllocationKey, number[]> = {
+  const expenseAllocations: Record<ExpenseAllocationKey, Prisma.Decimal[]> = {
     chinaDomesticTransportKgs: [],
     chinaExportTransportKgs: [],
     localTransportKgs: [],
@@ -291,13 +293,13 @@ export function calculateLandedCosts(
   for (const key of Object.keys(expenseAllocations) as ExpenseAllocationKey[]) {
     const amount = Number(resolvedLogistics[key] ?? 0);
     const method = allocationMethods[key] ?? DEFAULT_EXPENSE_ALLOCATION[key];
-    expenseAllocations[key] = distributeRoundedAmounts(
-      allocationLines.map((line) => allocateExpenseAmount(method, amount, line, allocationTotals)),
+    expenseAllocations[key] = distributeExactAmounts(
+      allocationLines.map((line) => allocateExpenseAmountExact(method, amount, line, allocationTotals)),
       amount,
     );
   }
 
-  const totalLogisticsCost = sumRoundedMoney([
+  const totalLogisticsCostDecimal = sumMoneyDecimals([
     resolvedLogistics.chinaDomesticTransportKgs || 0,
     resolvedLogistics.chinaExportTransportKgs || 0,
     resolvedLogistics.localTransportKgs || 0,
@@ -307,39 +309,18 @@ export function calculateLandedCosts(
     resolvedLogistics.bankFeeCostKgs || 0,
     resolvedLogistics.otherExpenseKgs || 0,
   ]);
+  const totalLogisticsCost = roundMoney(totalLogisticsCostDecimal);
 
   const calculatedItems: LandedCostItemResult[] = withShipment.map((item, index) => {
-    const chinaDomesticAllocKgs = expenseAllocations.chinaDomesticTransportKgs[index];
-    const chinaExportAllocKgs = expenseAllocations.chinaExportTransportKgs[index];
-    const localTransportAllocKgs = expenseAllocations.localTransportKgs[index];
-    const packagingAllocKgs = expenseAllocations.packagingCostKgs[index];
-    const customsAllocKgs = expenseAllocations.customsCostKgs[index];
-    const insuranceAllocKgs = expenseAllocations.insuranceCostKgs[index];
-    const bankFeeAllocKgs = expenseAllocations.bankFeeCostKgs[index];
-    const otherAllocKgs = expenseAllocations.otherExpenseKgs[index];
-    const totalLineLogistics = roundMoney(
-      chinaDomesticAllocKgs +
-        chinaExportAllocKgs +
-        localTransportAllocKgs +
-        packagingAllocKgs +
-        customsAllocKgs +
-        insuranceAllocKgs +
-        bankFeeAllocKgs +
-        otherAllocKgs,
-    );
-    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
-    const totalYuan = roundMoney(
-      toMoneyDecimal(item.quantity).mul(toMoneyDecimal(item.purchasePriceYuan || 0)),
-    );
-    const totalCostKgs =
-      effectiveQty > 0 ? roundMoney(toMoneyDecimal(item.basePurchaseCostKgs).plus(totalLineLogistics)) : 0;
-    const transportCostKgs =
-      effectiveQty > 0 ? roundMoney(toMoneyDecimal(totalLineLogistics).div(effectiveQty)) : 0;
-    const finalCostKgs =
-      effectiveQty > 0 ? roundMoney(toMoneyDecimal(item.costKgs).plus(transportCostKgs)) : 0;
-
-    return {
-      ...item,
+    const chinaDomesticAllocKgs = expenseAllocations.chinaDomesticTransportKgs[index] ?? new Prisma.Decimal(0);
+    const chinaExportAllocKgs = expenseAllocations.chinaExportTransportKgs[index] ?? new Prisma.Decimal(0);
+    const localTransportAllocKgs = expenseAllocations.localTransportKgs[index] ?? new Prisma.Decimal(0);
+    const packagingAllocKgs = expenseAllocations.packagingCostKgs[index] ?? new Prisma.Decimal(0);
+    const customsAllocKgs = expenseAllocations.customsCostKgs[index] ?? new Prisma.Decimal(0);
+    const insuranceAllocKgs = expenseAllocations.insuranceCostKgs[index] ?? new Prisma.Decimal(0);
+    const bankFeeAllocKgs = expenseAllocations.bankFeeCostKgs[index] ?? new Prisma.Decimal(0);
+    const otherAllocKgs = expenseAllocations.otherExpenseKgs[index] ?? new Prisma.Decimal(0);
+    const totalLineLogistics = sumMoneyDecimals([
       chinaDomesticAllocKgs,
       chinaExportAllocKgs,
       localTransportAllocKgs,
@@ -348,43 +329,68 @@ export function calculateLandedCosts(
       insuranceAllocKgs,
       bankFeeAllocKgs,
       otherAllocKgs,
-      transportCostKgs,
-      finalCostKgs,
-      totalYuan,
-      totalCostKgs,
-    };
-  });
-
-  const totalPurchaseKgs = sumRoundedMoney(prepared.map((item) => item.basePurchaseCostKgs));
-  const authoritativeOrderTotal = sumRoundedMoney([totalPurchaseKgs, totalLogisticsCost]);
-  const rawLineTotals = calculatedItems.map((item) => item.totalCostKgs);
-  const reconciledLineTotals = distributeAuthoritativeLineTotal(rawLineTotals, authoritativeOrderTotal);
-  const reconciledItems = calculatedItems.map((item, index) => {
-    const totalCostKgs = reconciledLineTotals[index] ?? 0;
+    ]);
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const totalYuan = roundMoney(
+      toMoneyDecimal(item.quantity).mul(toMoneyDecimal(item.purchasePriceYuan || 0)),
+    );
+    const lineTotal =
+      effectiveQty > 0
+        ? toExactMoney(toMoneyDecimal(item.basePurchaseCostKgs).plus(totalLineLogistics))
+        : new Prisma.Decimal(0);
     const transportCostKgs =
-      effectiveQty > 0
-        ? roundMoney(toMoneyDecimal(totalCostKgs).minus(toMoneyDecimal(item.basePurchaseCostKgs)))
-        : 0;
+      effectiveQty > 0 ? toExactMoney(totalLineLogistics.div(effectiveQty)) : new Prisma.Decimal(0);
     const finalCostKgs =
-      effectiveQty > 0
-        ? deriveDisplayUnitCost(totalCostKgs, effectiveQty)
-        : 0;
+      effectiveQty > 0 ? deriveExactUnitCost(lineTotal, effectiveQty) : new Prisma.Decimal(0);
+
     return {
       ...item,
-      transportCostKgs:
-        effectiveQty > 0 ? roundMoney(toMoneyDecimal(transportCostKgs).div(effectiveQty)) : 0,
-      finalCostKgs,
-      totalCostKgs,
+      chinaDomesticAllocKgs: toExactMoney(chinaDomesticAllocKgs),
+      chinaExportAllocKgs: toExactMoney(chinaExportAllocKgs),
+      localTransportAllocKgs: toExactMoney(localTransportAllocKgs),
+      packagingAllocKgs: toExactMoney(packagingAllocKgs),
+      customsAllocKgs: toExactMoney(customsAllocKgs),
+      insuranceAllocKgs: toExactMoney(insuranceAllocKgs),
+      bankFeeAllocKgs: toExactMoney(bankFeeAllocKgs),
+      otherAllocKgs: toExactMoney(otherAllocKgs),
+      transportCostKgs: toExactMoney(transportCostKgs),
+      finalCostKgs: toExactMoney(finalCostKgs),
+      totalYuan,
+      totalCostKgs: toExactMoney(lineTotal),
     };
   });
 
-  const costPerKg = allocationBaseWeight > 0 ? roundRate(totalLogisticsCost / allocationBaseWeight) : 0;
-  const totalCostKgs = authoritativeOrderTotal;
+  const totalPurchaseKgs = sumMoneyDecimals(prepared.map((item) => item.basePurchaseCostKgs));
+  const authoritativeOrderTotal = toExactMoney(totalPurchaseKgs.plus(totalLogisticsCostDecimal));
+  const rawLineTotals = calculatedItems.map((item) => item.totalCostKgs);
+  const reconciledLineTotals = distributeExactAuthoritativeLineTotal(
+    rawLineTotals,
+    authoritativeOrderTotal,
+  );
+  const reconciledItems = calculatedItems.map((item, index) => {
+    const lineTotal = reconciledLineTotals[index] ?? new Prisma.Decimal(0);
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const transportLine =
+      effectiveQty > 0
+        ? toExactMoney(lineTotal.minus(toMoneyDecimal(item.basePurchaseCostKgs)))
+        : new Prisma.Decimal(0);
+    const exactUnit =
+      effectiveQty > 0 ? deriveExactUnitCost(lineTotal, effectiveQty) : new Prisma.Decimal(0);
+    return {
+      ...item,
+      transportCostKgs: effectiveQty > 0 ? toExactMoney(transportLine.div(effectiveQty)) : new Prisma.Decimal(0),
+      finalCostKgs: toExactMoney(exactUnit),
+      totalCostKgs: toExactMoney(lineTotal),
+    };
+  });
+
+  const costPerKg =
+    allocationBaseWeight > 0 ? roundRate(Number(authoritativeOrderTotal.toFixed(15)) / allocationBaseWeight) : 0;
+  const totalCostKgs = toExactMoney(authoritativeOrderTotal);
   const isProvisional = pendingWeight;
   const landedCostStatus: LandedCostOrderResult['landedCostStatus'] = pendingWeight
     ? 'PENDING_WEIGHT'
-    : totalCostKgs > 0
+    : toMoneyDecimal(totalCostKgs).gt(0)
       ? 'CALCULATED'
       : 'READY_TO_CALCULATE';
 

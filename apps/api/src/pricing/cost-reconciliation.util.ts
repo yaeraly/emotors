@@ -1,3 +1,4 @@
+import { isMoneyEqual, subtractMoney, toStoredMoneyKgs } from '../common/money/money';
 import { roundDisplayMoney, sumDisplayMoneyTotals } from './product-cost-precision.util';
 
 /** Final KGS totals must match exactly — no tolerance for landed-cost parity. */
@@ -24,10 +25,10 @@ export function compareAuthoritativeCostTotals(
   label: string,
   toleranceKgs = LANDED_COST_PARITY_TOLERANCE_KGS,
 ): CostReconciliationResult {
-  const expected = roundDisplayMoney(expectedKgs);
-  const actual = roundDisplayMoney(actualKgs);
-  const differenceKgs = roundDisplayMoney(actual - expected);
-  const ok = Math.abs(differenceKgs) <= toleranceKgs;
+  const differenceKgs = toStoredMoneyKgs(subtractMoney(actualKgs, expectedKgs));
+  const ok = isMoneyEqual(expectedKgs, actualKgs);
+  const expected = toStoredMoneyKgs(expectedKgs);
+  const actual = toStoredMoneyKgs(actualKgs);
   const message = ok
     ? `${label}: totals match (${expected} KGS)`
     : `${label}: expected ${expected} KGS, actual ${actual} KGS, difference ${differenceKgs} KGS`;

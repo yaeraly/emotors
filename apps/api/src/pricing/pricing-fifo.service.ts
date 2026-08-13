@@ -14,10 +14,12 @@ import {
   type PricingCostBasisSource,
 } from './pricing-cost-basis.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
-import { assertMoneyEqual, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
+import { assertMoneyEqual, toExactMoney, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
+import { buildFifoLayerMoneyFromLine, consumePersistedFifoLayer } from '../common/money/fifo-layer-cost';
 import {
   allocateLayerConsumptionCost,
   deriveDisplayUnitCost,
+  deriveExactUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from './product-cost-precision.util';
@@ -92,6 +94,7 @@ type FifoPreviewLine = {
   totalPriceKgs: number;
   markupPercent: number;
   profitKgs: number;
+  authoritativeLineTotal?: Prisma.Decimal;
 };
 
 function roundMoney(value: number) {
@@ -190,13 +193,29 @@ export class PricingFifoService {
         minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
       };
       const batchPrices = this.calculateBatchPrices(unitCostKgs, markups);
+      const receivedQty = Math.abs(Number(movement.quantity));
+      const authoritativeLineTotal = toMoneyDecimal(movement.totalCostKgs).gt(0)
+        ? movement.totalCostKgs
+        : toMoneyDecimal(unitCostKgs).mul(receivedQty);
 
       if (existing) {
-        if (Math.abs(Number(existing.unitCostKgs) - unitCostKgs) > 0.009 && unitCostKgs > 0) {
+        const needsLayerMoney =
+          toMoneyDecimal(existing.originalLayerCostKgs).lte(0) ||
+          toMoneyDecimal(existing.remainingLayerCostKgs).lte(0) && existing.remainingQuantity > 0;
+        const unitChanged =
+          unitCostKgs > 0 && !toMoneyDecimal(existing.unitCostKgs).eq(toExactMoney(unitCostKgs));
+        if (needsLayerMoney || unitChanged) {
+          const layerMoney = buildFifoLayerMoneyFromLine({
+            quantity: existing.initialQuantity > 0 ? existing.initialQuantity : receivedQty,
+            authoritativeLineTotal,
+            remainingQuantity: existing.remainingQuantity,
+          });
           await client.fifoInventoryBatch.update({
             where: { id: existing.id },
             data: {
-              unitCostKgs,
+              unitCostKgs: layerMoney.unitCostKgs,
+              originalLayerCostKgs: layerMoney.originalLayerCostKgs,
+              remainingLayerCostKgs: layerMoney.remainingLayerCostKgs,
               wholesalePriceKgs: batchPrices.wholesalePriceKgs,
               hqBranchWholesalePriceKgs: batchPrices.hqBranchWholesalePriceKgs,
               recommendedRetailPriceKgs: batchPrices.recommendedRetailPriceKgs,
@@ -221,8 +240,19 @@ export class PricingFifoService {
       });
       const consumedQty =
         Number(saleConsumed._sum.quantity ?? 0) + Number(distributionConsumed._sum.quantity ?? 0);
-      const receivedQty = Math.abs(Number(movement.quantity));
       const remaining = Math.max(receivedQty - consumedQty, 0);
+      const layerMoney = buildFifoLayerMoneyFromLine({
+        quantity: receivedQty,
+        authoritativeLineTotal,
+        remainingQuantity: remaining,
+      });
+      if (toMoneyDecimal(movement.totalCostKgs).gt(0)) {
+        assertMoneyEqual(
+          movement.totalCostKgs,
+          layerMoney.originalLayerCostKgs,
+          `HQ FIFO create vs procurement movement ${movement.id}`,
+        );
+      }
 
       const batch = await client.fifoInventoryBatch.create({
         data: {
@@ -230,7 +260,9 @@ export class PricingFifoService {
           warehouseId: movement.warehouseId,
           stockMovementId: movement.id,
           receivedAt: movement.createdAt,
-          unitCostKgs,
+          unitCostKgs: layerMoney.unitCostKgs,
+          originalLayerCostKgs: layerMoney.originalLayerCostKgs,
+          remainingLayerCostKgs: layerMoney.remainingLayerCostKgs,
           wholesaleMarkupPercent: markups.wholesaleMarkupPercent,
           wholesalePriceKgs: batchPrices.wholesalePriceKgs,
           hqBranchWholesaleMarkupPercent: markups.hqBranchWholesaleMarkupPercent,
@@ -690,6 +722,7 @@ export class PricingFifoService {
           totalPriceKgs: linePrice,
           markupPercent,
           profitKgs: roundMoney(linePrice - lineCost),
+          authoritativeLineTotal: toExactMoney(lineCost),
         });
       }
       const allocatedQty = input.quantity - remainingToAllocate;
@@ -762,6 +795,7 @@ export class PricingFifoService {
         totalPriceKgs: line.totalPriceKgs,
         markupPercent: line.markupPercent ?? markupPercent,
         profitKgs: line.profitKgs,
+        authoritativeLineTotal: line.authoritativeLineTotal,
       })),
       allocatedQty: built.allocatedQty,
     };
@@ -859,11 +893,13 @@ export class PricingFifoService {
           fifoBatchId: line.batchId,
           productId: input.productId,
           quantity: line.quantity,
-          unitCostKgs: line.unitCostKgs,
+          unitCostKgs: line.authoritativeLineTotal != null
+            ? deriveExactUnitCost(line.authoritativeLineTotal, line.quantity)
+            : line.unitCostKgs,
           unitPriceKgs: line.unitPriceKgs,
           wholesalePriceKgs: line.wholesalePriceKgs,
           hqBranchWholesalePriceKgs: line.hqBranchWholesalePriceKgs,
-          totalCostKgs: line.totalCostKgs,
+          totalCostKgs: line.authoritativeLineTotal ?? toExactMoney(line.totalCostKgs),
           totalPriceKgs: line.totalPriceKgs,
           markupPercent: line.markupPercent,
           profitKgs: line.profitKgs,
@@ -978,11 +1014,32 @@ export class PricingFifoService {
       const lines: FifoPreviewLine[] = [];
 
       for (const row of reserved) {
+        const batch = await tx.fifoInventoryBatch.findUnique({
+          where: { id: row.fifoBatchId },
+        });
+        if (!batch) {
+          throw new Error(`FIFO layer ${row.fifoBatchId} missing during distribution consume`);
+        }
+        const original = toMoneyDecimal(batch.originalLayerCostKgs).gt(0)
+          ? batch.originalLayerCostKgs
+          : toMoneyDecimal(batch.unitCostKgs).mul(
+              batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+            );
+        const step = consumePersistedFifoLayer({
+          originalLayerCost: original,
+          remainingLayerCost: toMoneyDecimal(batch.remainingLayerCostKgs).gt(0)
+            ? batch.remainingLayerCostKgs
+            : original,
+          layerBaseQuantity: batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+          remainingQuantity: batch.remainingQuantity,
+          takeQuantity: row.quantity,
+        });
         await tx.fifoInventoryBatch.update({
           where: { id: row.fifoBatchId },
           data: {
             remainingQuantity: { decrement: row.quantity },
             reservedQuantity: { decrement: row.quantity },
+            remainingLayerCostKgs: step.remainingCost,
           },
         });
 
@@ -1065,10 +1122,39 @@ export class PricingFifoService {
     }
 
     for (const line of preview.lines) {
-      await tx.fifoInventoryBatch.update({
-        where: { id: line.batchId },
-        data: { remainingQuantity: { decrement: line.quantity } },
-      });
+      const batch = await tx.fifoInventoryBatch.findUnique({ where: { id: line.batchId } });
+      let consumedCost = line.authoritativeLineTotal ?? toExactMoney(line.totalCostKgs);
+      let exactUnitCost = deriveExactUnitCost(consumedCost, line.quantity);
+      if (batch) {
+        const original = toMoneyDecimal(batch.originalLayerCostKgs).gt(0)
+          ? batch.originalLayerCostKgs
+          : toMoneyDecimal(batch.unitCostKgs).mul(
+              batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+            );
+        const step = consumePersistedFifoLayer({
+          originalLayerCost: original,
+          remainingLayerCost: toMoneyDecimal(batch.remainingLayerCostKgs).gt(0)
+            ? batch.remainingLayerCostKgs
+            : original,
+          layerBaseQuantity: batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+          remainingQuantity: batch.remainingQuantity,
+          takeQuantity: line.quantity,
+        });
+        consumedCost = step.consumedCost;
+        exactUnitCost = step.exactUnitCost;
+        await tx.fifoInventoryBatch.update({
+          where: { id: line.batchId },
+          data: {
+            remainingQuantity: { decrement: line.quantity },
+            remainingLayerCostKgs: step.remainingCost,
+          },
+        });
+      } else {
+        await tx.fifoInventoryBatch.update({
+          where: { id: line.batchId },
+          data: { remainingQuantity: { decrement: line.quantity } },
+        });
+      }
 
       await tx.distributionFifoAllocation.create({
         data: {
@@ -1077,11 +1163,11 @@ export class PricingFifoService {
           fifoBatchId: line.batchId,
           productId: input.productId,
           quantity: line.quantity,
-          unitCostKgs: line.unitCostKgs,
+          unitCostKgs: exactUnitCost,
           unitPriceKgs: line.unitPriceKgs,
           wholesalePriceKgs: line.wholesalePriceKgs,
           hqBranchWholesalePriceKgs: line.hqBranchWholesalePriceKgs,
-          totalCostKgs: line.totalCostKgs,
+          totalCostKgs: consumedCost,
           totalPriceKgs: line.totalPriceKgs,
           markupPercent: line.markupPercent,
           profitKgs: line.profitKgs,
@@ -1128,7 +1214,7 @@ export class PricingFifoService {
     },
   ) {
     let remainingToConsume = input.quantity;
-    const lineCosts: number[] = [];
+    const lineCosts: Array<number | Prisma.Decimal> = [];
 
     const batches = await tx.fifoInventoryBatch.findMany({
       where: {
@@ -1150,22 +1236,33 @@ export class PricingFifoService {
       const layerBaseQty =
         mappedLayer?.layerBaseQuantity ??
         (batch.initialQuantity > 0 ? batch.initialQuantity : take);
-      const layerTotalCostKgs =
-        mappedLayer?.layerTotalCostKgs && mappedLayer.layerTotalCostKgs > 0
-          ? mappedLayer.layerTotalCostKgs
-          : toStoredMoneyKgs(toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQty));
-      const lineCost = allocateLayerConsumptionCost({
-        layerTotalCostKgs,
+      const originalLayerCost =
+        toMoneyDecimal((batch as { originalLayerCostKgs?: unknown }).originalLayerCostKgs).gt(0)
+          ? (batch as { originalLayerCostKgs: unknown }).originalLayerCostKgs
+          : mappedLayer?.layerTotalCostKgs != null && toMoneyDecimal(mappedLayer.layerTotalCostKgs).gt(0)
+            ? mappedLayer.layerTotalCostKgs
+            : toMoneyDecimal(batch.unitCostKgs).mul(layerBaseQty);
+      const remainingLayerCost = toMoneyDecimal(
+        (batch as { remainingLayerCostKgs?: unknown }).remainingLayerCostKgs,
+      ).gt(0)
+        ? (batch as { remainingLayerCostKgs: unknown }).remainingLayerCostKgs
+        : undefined;
+      const step = consumePersistedFifoLayer({
+        originalLayerCost,
+        remainingLayerCost: remainingLayerCost ?? originalLayerCost,
         layerBaseQuantity: layerBaseQty,
         remainingQuantity: batch.remainingQuantity,
         takeQuantity: take,
       });
-      lineCosts.push(lineCost);
+      lineCosts.push(step.consumedCost);
       remainingToConsume -= take;
 
       await tx.fifoInventoryBatch.update({
         where: { id: batch.id },
-        data: { remainingQuantity: batch.remainingQuantity - take },
+        data: {
+          remainingQuantity: step.remainingQuantity,
+          remainingLayerCostKgs: step.remainingCost,
+        },
       });
 
       await tx.saleFifoAllocation.create({
@@ -1175,8 +1272,8 @@ export class PricingFifoService {
           fifoBatchId: batch.id,
           productId: input.productId,
           quantity: take,
-          unitCostKgs: batch.unitCostKgs,
-          totalCostKgs: lineCost,
+          unitCostKgs: step.exactUnitCost,
+          totalCostKgs: step.consumedCost,
         },
       });
 
@@ -1192,7 +1289,7 @@ export class PricingFifoService {
             saleItemId: input.saleItemId,
             quantity: take,
             unitCostKgs: Number(batch.unitCostKgs),
-            totalCostKgs: lineCost,
+            totalCostKgs: step.consumedCost.toFixed(),
             timestamp: new Date().toISOString(),
           } as Prisma.InputJsonValue,
         },
@@ -1229,6 +1326,8 @@ export class PricingFifoService {
       referenceId?: string | null;
       wholesalePriceKgs: unknown;
       hqBranchWholesalePriceKgs: unknown;
+      originalLayerCostKgs?: unknown;
+      remainingLayerCostKgs?: unknown;
       reservedQuantity?: number;
     }>,
   ) {
@@ -1265,15 +1364,15 @@ export class PricingFifoService {
         })
       : [];
     const orderItemById = new Map(orderItems.map((row) => [row.id, row]));
-    const procurementLineByReceiptProduct = new Map<string, { totalCostKgs: number; quantity: number }>();
+    const procurementLineByReceiptProduct = new Map<string, { totalCostKgs: Prisma.Decimal; quantity: number }>();
     for (const receivingItem of receivingItems) {
       if (!receivingItem.procurementItemId) continue;
       const orderLine = orderItemById.get(receivingItem.procurementItemId);
-      if (!orderLine || Number(orderLine.totalCostKgs) <= 0) continue;
+      if (!orderLine || toMoneyDecimal(orderLine.totalCostKgs).lte(0)) continue;
       procurementLineByReceiptProduct.set(
         `${receivingItem.receivingId}:${receivingItem.productId}`,
         {
-          totalCostKgs: Number(orderLine.totalCostKgs),
+          totalCostKgs: toExactMoney(orderLine.totalCostKgs),
           quantity: Number(orderLine.quantity),
         },
       );
@@ -1288,9 +1387,11 @@ export class PricingFifoService {
             ? Math.abs(Number(movement.quantity))
             : batch.remainingQuantity;
 
-      let layerTotalCostKgs = 0;
-      if (movement && Number(movement.totalCostKgs) > 0) {
-        layerTotalCostKgs = Number(movement.totalCostKgs);
+      let layerTotalCostKgs: Prisma.Decimal | number = 0;
+      if (toMoneyDecimal(batch.originalLayerCostKgs).gt(0)) {
+        layerTotalCostKgs = toExactMoney(batch.originalLayerCostKgs);
+      } else if (movement && toMoneyDecimal(movement.totalCostKgs).gt(0)) {
+        layerTotalCostKgs = toExactMoney(movement.totalCostKgs);
       } else if (
         batch.referenceId &&
         batch.productId &&
@@ -1298,27 +1399,30 @@ export class PricingFifoService {
       ) {
         const orderLine = procurementLineByReceiptProduct.get(`${batch.referenceId}:${batch.productId}`);
         if (orderLine) {
-          layerTotalCostKgs = roundDisplayMoney(orderLine.totalCostKgs);
+          layerTotalCostKgs = toExactMoney(orderLine.totalCostKgs);
         }
       }
 
-      if (layerTotalCostKgs <= 0) {
+      if (toMoneyDecimal(layerTotalCostKgs).lte(0)) {
         const unitCostKgs = resolveAuthoritativeFifoLayerUnitCost({
           initialQuantity: batch.initialQuantity,
-          batchUnitCostKgs: Number(batch.unitCostKgs),
+          batchUnitCostKgs: batch.unitCostKgs,
           movementQuantity: movement?.quantity,
-          movementUnitCostKgs: movement ? Number(movement.unitCostKgs) : null,
-          movementTotalCostKgs: movement?.totalCostKgs != null ? Number(movement.totalCostKgs) : null,
+          movementUnitCostKgs: movement?.unitCostKgs,
+          movementTotalCostKgs: movement?.totalCostKgs,
         });
-        layerTotalCostKgs = toStoredMoneyKgs(toMoneyDecimal(unitCostKgs).mul(layerBaseQuantity));
+        layerTotalCostKgs = toExactMoney(toMoneyDecimal(unitCostKgs).mul(layerBaseQuantity));
       }
 
       return {
         batchId: batch.id,
         remainingQuantity: batch.remainingQuantity,
         reservedQuantity: Number(batch.reservedQuantity ?? 0),
-        unitCostKgs: Number(batch.unitCostKgs),
+        unitCostKgs: Number(toExactMoney(batch.unitCostKgs).toFixed(15)),
         layerTotalCostKgs,
+        remainingLayerCostKgs: toMoneyDecimal(batch.remainingLayerCostKgs).gt(0)
+          ? toExactMoney(batch.remainingLayerCostKgs)
+          : undefined,
         layerBaseQuantity,
         wholesalePriceKgs: Number(batch.wholesalePriceKgs),
         hqBranchWholesalePriceKgs: Number(batch.hqBranchWholesalePriceKgs),
@@ -1385,6 +1489,20 @@ export class PricingFifoService {
     });
     const batchPrices = this.calculateBatchPrices(unitCostKgs, markups);
     const quantity = Math.max(movement.quantity, 0);
+    const layerMoney = buildFifoLayerMoneyFromLine({
+      quantity,
+      authoritativeLineTotal:
+        movement.totalCostKgs != null && toMoneyDecimal(movement.totalCostKgs).gt(0)
+          ? movement.totalCostKgs
+          : toMoneyDecimal(unitCostKgs).mul(quantity),
+    });
+    if (movement.totalCostKgs != null && toMoneyDecimal(movement.totalCostKgs).gt(0)) {
+      assertMoneyEqual(
+        movement.totalCostKgs,
+        layerMoney.originalLayerCostKgs,
+        `Branch FIFO create vs HQ transfer movement ${movement.id}`,
+      );
+    }
 
     const batch = await tx.fifoInventoryBatch.create({
       data: {
@@ -1392,7 +1510,9 @@ export class PricingFifoService {
         warehouseId: movement.warehouseId,
         stockMovementId: movement.id,
         receivedAt: movement.createdAt,
-        unitCostKgs,
+        unitCostKgs: layerMoney.unitCostKgs,
+        originalLayerCostKgs: layerMoney.originalLayerCostKgs,
+        remainingLayerCostKgs: layerMoney.remainingLayerCostKgs,
         wholesaleMarkupPercent: markups.wholesaleMarkupPercent,
         wholesalePriceKgs: batchPrices.wholesalePriceKgs,
         hqBranchWholesaleMarkupPercent: markups.hqBranchWholesaleMarkupPercent,
@@ -1427,8 +1547,8 @@ export class PricingFifoService {
       receivingNote: string;
       createMovement: (line: {
         quantity: number;
-        unitCostKgs: number;
-        totalCostKgs: number;
+        unitCostKgs: number | Prisma.Decimal | string;
+        totalCostKgs: number | Prisma.Decimal | string;
         referenceType: string;
         referenceId: string;
         note: string;
@@ -1532,7 +1652,7 @@ export class PricingFifoService {
         continue;
       }
 
-      const totalCostKgs = line.lineTotalCostKgs;
+      const totalCostKgs = line.authoritativeLineTotal ?? line.lineTotalCostKgs;
       const movement = await input.createMovement({
         quantity: line.quantity,
         unitCostKgs: line.finalBranchUnitCostKgs,

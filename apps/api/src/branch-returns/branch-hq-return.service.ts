@@ -14,6 +14,8 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs } from '../common/authoritative-money.util';
+import { toExactMoney, toMoneyDecimal } from '../common/money/money';
+import { buildFifoLayerMoneyFromLine, consumePersistedFifoLayer } from '../common/money/fifo-layer-cost';
 import { syncInventoryBalanceValuationFromFifoRemainingInTx } from '../inventory/inventory-authoritative-value.util';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -600,18 +602,25 @@ export class BranchHqReturnService {
             type: movementType,
             quantity: layer.quantity,
             unitCostKgs: layer.unitCostKgs,
+            totalCostKgs: layer.totalCostKgs,
             referenceType,
             referenceId: layer.allocationId,
             note: `Branch return ${current.returnNumber} / ${item.sku}`,
           });
 
+          const layerMoney = buildFifoLayerMoneyFromLine({
+            quantity: layer.quantity,
+            authoritativeLineTotal: layer.totalCostKgs,
+          });
           const hqBatch = await tx.fifoInventoryBatch.create({
             data: {
               productId: hqProduct.productId,
               warehouseId: current.destinationWarehouseId,
               stockMovementId: movement.id,
               receivedAt: new Date(),
-              unitCostKgs: layer.unitCostKgs,
+              unitCostKgs: layerMoney.unitCostKgs,
+              originalLayerCostKgs: layerMoney.originalLayerCostKgs,
+              remainingLayerCostKgs: layerMoney.remainingLayerCostKgs,
               initialQuantity: layer.quantity,
               remainingQuantity: layer.quantity,
               reservedQuantity: isNonSaleableBranchHqReturnCondition(condition) ? layer.quantity : 0,
@@ -980,31 +989,54 @@ export class BranchHqReturnService {
       unitCostKgs: number;
       totalCostKgs: number;
     }> = [];
-    const totals: number[] = [];
+    const totals: Array<number | string> = [];
     for (const row of reserved) {
+      const batch = await tx.fifoInventoryBatch.findUnique({ where: { id: row.fifoBatchId } });
+      if (!batch) {
+        throw new BadRequestException(`FIFO layer ${row.fifoBatchId} not found for return consume`);
+      }
+      const original = toMoneyDecimal(batch.originalLayerCostKgs).gt(0)
+        ? batch.originalLayerCostKgs
+        : toMoneyDecimal(batch.unitCostKgs).mul(
+            batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+          );
+      const step = consumePersistedFifoLayer({
+        originalLayerCost: original,
+        remainingLayerCost: toMoneyDecimal(batch.remainingLayerCostKgs).gt(0)
+          ? batch.remainingLayerCostKgs
+          : original,
+        layerBaseQuantity: batch.initialQuantity > 0 ? batch.initialQuantity : batch.remainingQuantity,
+        remainingQuantity: batch.remainingQuantity,
+        takeQuantity: row.quantity,
+      });
       await tx.fifoInventoryBatch.update({
         where: { id: row.fifoBatchId },
         data: {
-          remainingQuantity: { decrement: row.quantity },
+          remainingQuantity: step.remainingQuantity,
           reservedQuantity: { decrement: row.quantity },
+          remainingLayerCostKgs: step.remainingCost,
         },
       });
       await tx.branchHqReturnFifoAllocation.update({
         where: { id: row.id },
-        data: { status: 'CONSUMED' },
+        data: {
+          status: 'CONSUMED',
+          unitCostKgs: step.exactUnitCost,
+          totalCostKgs: step.consumedCost,
+        },
       });
       lines.push({
         batchId: row.fifoBatchId,
         quantity: row.quantity,
-        unitCostKgs: Number(row.unitCostKgs),
-        totalCostKgs: Number(row.totalCostKgs),
+        unitCostKgs: Number(step.exactUnitCost.toFixed(15)),
+        totalCostKgs: Number(step.consumedCost.toFixed(15)),
       });
-      totals.push(Number(row.totalCostKgs));
+      totals.push(step.consumedCost.toFixed(15));
       await this.audit(tx, user, 'FIFO_LAYER_DEDUCTED', current.id, {
         branchId: null,
         productId: item.productId,
         quantity: row.quantity,
-        cost: Number(row.totalCostKgs),
+        cost: step.consumedCost.toFixed(),
         sourceFifoLayer: row.fifoBatchId,
       });
     }
@@ -1079,7 +1111,15 @@ export class BranchHqReturnService {
         reservedQuantity: batch.reservedQuantity,
         unitCostKgs: Number(batch.unitCostKgs),
         initialQuantity: batch.initialQuantity,
-        layerTotalCostKgs: roundDisplayMoney(Number(batch.unitCostKgs) * batch.initialQuantity),
+        layerTotalCostKgs: Number(
+          (toMoneyDecimal(batch.originalLayerCostKgs).gt(0)
+            ? toMoneyDecimal(batch.originalLayerCostKgs)
+            : toMoneyDecimal(batch.unitCostKgs).mul(batch.initialQuantity)
+          ).toFixed(15),
+        ),
+        remainingLayerCostKgs: toMoneyDecimal(batch.remainingLayerCostKgs).gt(0)
+          ? Number(toMoneyDecimal(batch.remainingLayerCostKgs).toFixed(15))
+          : undefined,
         sourceReferenceType: batch.referenceType,
         sourceReferenceId: batch.referenceId,
       })),

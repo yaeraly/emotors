@@ -76,7 +76,7 @@ import {
   sumReceiveMovementTotals,
 } from '../procurement/procurement-receive-inventory-reconcile.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
-import { assertMoneyEqual } from '../common/money/money';
+import { assertMoneyEqual, toMoneyDecimal, toStoredMoneyKgs } from '../common/money/money';
 import { roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
@@ -2538,7 +2538,7 @@ export class OperationsService {
         }
         throw new BadRequestException('Landed cost could not be calculated. Complete import cost sections first.');
       }
-      if (recalculated.totalCostKgs <= 0) {
+      if (toMoneyDecimal(recalculated.totalCostKgs).lte(0)) {
         throw new BadRequestException('Landed cost must be calculated before receiving to HQ warehouse.');
       }
 
@@ -2661,8 +2661,8 @@ export class OperationsService {
             productId: movement.productId,
             warehouseId: movement.warehouseId,
             quantity: Math.abs(Number(movement.quantity)),
-            unitCostKgs: Number(movement.unitCostKgs),
-            totalCostKgs: Number(movement.totalCostKgs),
+            unitCostKgs: movement.unitCostKgs,
+            totalCostKgs: movement.totalCostKgs,
             createdAt: movement.createdAt,
             referenceType: movement.referenceType,
             referenceId: movement.referenceId,
@@ -2717,7 +2717,8 @@ export class OperationsService {
           const product = await tx.product.findUnique({ where: { id: item.productId } });
           if (product) {
             const sellingPriceKgs = Number(product.sellingPriceKgs);
-            const marginAmount = Math.round((sellingPriceKgs - next.finalCostKgs + Number.EPSILON) * 100) / 100;
+            const displayFinalCostKgs = toStoredMoneyKgs(next.finalCostKgs);
+            const marginAmount = Math.round((sellingPriceKgs - displayFinalCostKgs + Number.EPSILON) * 100) / 100;
             const marginPercent = sellingPriceKgs === 0 ? 0 : Math.round(((marginAmount / sellingPriceKgs) * 100 + Number.EPSILON) * 100) / 100;
             await tx.product.update({
               where: { id: item.productId },

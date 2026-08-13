@@ -1,10 +1,6 @@
 import { Prisma } from '@prisma/client';
-import {
-  distributeRoundedMoneyAmounts,
-  roundMoneyDecimal,
-  sumRoundedMoney,
-  toMoneyDecimal,
-} from './landed-cost-money.util';
+import { distributeRoundedMoneyAmounts } from './landed-cost-money.util';
+import { distributeExactMoney, sumMoney, toExactMoney, toMoneyDecimal } from '../common/money/money';
 
 export type ExpenseAllocationMethod = 'BY_WEIGHT' | 'BY_QUANTITY' | 'BY_PURCHASE_VALUE' | 'MANUAL';
 
@@ -32,7 +28,7 @@ export const DEFAULT_EXPENSE_ALLOCATION: Record<ExpenseAllocationKey, ExpenseAll
 export type AllocationLineContext = {
   lineShipmentWeightKg: number;
   effectiveQuantity: number;
-  basePurchaseCostKgs: number;
+  basePurchaseCostKgs: number | Prisma.Decimal | string;
   hasKnownWeight: boolean;
 };
 
@@ -48,27 +44,53 @@ export function isWeightBasedAllocation(method: ExpenseAllocationMethod) {
 
 export function allocateExpenseAmount(
   method: ExpenseAllocationMethod,
-  totalCost: number,
+  totalCost: number | Prisma.Decimal | string,
   line: AllocationLineContext,
   totals: AllocationTotals,
 ): number {
+  return allocateExpenseAmountExact(method, totalCost, line, totals).toNumber();
+}
+
+export function allocateExpenseAmountExact(
+  method: ExpenseAllocationMethod,
+  totalCost: number | Prisma.Decimal | string,
+  line: AllocationLineContext,
+  totals: AllocationTotals,
+): Prisma.Decimal {
   const pool = toMoneyDecimal(totalCost);
-  if (pool.lte(0)) return 0;
+  if (pool.lte(0)) return new Prisma.Decimal(0);
 
   switch (method) {
     case 'BY_WEIGHT':
-      if (!line.hasKnownWeight || totals.totalWeight <= 0 || line.lineShipmentWeightKg <= 0) return 0;
-      return pool.mul(toMoneyDecimal(line.lineShipmentWeightKg).div(totals.totalWeight)).toNumber();
+      if (!line.hasKnownWeight || totals.totalWeight <= 0 || line.lineShipmentWeightKg <= 0) {
+        return new Prisma.Decimal(0);
+      }
+      return toExactMoney(
+        pool.mul(toMoneyDecimal(line.lineShipmentWeightKg).div(totals.totalWeight)),
+      );
     case 'BY_QUANTITY':
-      if (totals.totalQuantity <= 0 || line.effectiveQuantity <= 0) return 0;
-      return pool.mul(toMoneyDecimal(line.effectiveQuantity).div(totals.totalQuantity)).toNumber();
+      if (totals.totalQuantity <= 0 || line.effectiveQuantity <= 0) return new Prisma.Decimal(0);
+      return toExactMoney(
+        pool.mul(toMoneyDecimal(line.effectiveQuantity).div(totals.totalQuantity)),
+      );
     case 'BY_PURCHASE_VALUE':
-      if (totals.totalPurchaseValue <= 0 || line.basePurchaseCostKgs <= 0) return 0;
-      return pool.mul(toMoneyDecimal(line.basePurchaseCostKgs).div(totals.totalPurchaseValue)).toNumber();
+      if (totals.totalPurchaseValue <= 0 || toMoneyDecimal(line.basePurchaseCostKgs).lte(0)) {
+        return new Prisma.Decimal(0);
+      }
+      return toExactMoney(
+        pool.mul(toMoneyDecimal(line.basePurchaseCostKgs).div(totals.totalPurchaseValue)),
+      );
     case 'MANUAL':
     default:
-      return 0;
+      return new Prisma.Decimal(0);
   }
+}
+
+export function distributeExactAmounts(
+  rawAmounts: Array<number | Prisma.Decimal | string>,
+  targetTotal: number | Prisma.Decimal | string,
+): Prisma.Decimal[] {
+  return distributeExactMoney(rawAmounts, targetTotal);
 }
 
 export function distributeRoundedAmounts(rawAmounts: number[], targetTotal: number): number[] {
@@ -79,7 +101,7 @@ export function buildAllocationTotals(lines: AllocationLineContext[]): Allocatio
   return {
     totalWeight: lines.reduce((sum, line) => sum + (line.hasKnownWeight ? line.lineShipmentWeightKg : 0), 0),
     totalQuantity: lines.reduce((sum, line) => sum + line.effectiveQuantity, 0),
-    totalPurchaseValue: sumRoundedMoney(lines.map((line) => line.basePurchaseCostKgs)),
+    totalPurchaseValue: Number(sumMoney(lines.map((line) => line.basePurchaseCostKgs)).toFixed(15)),
   };
 }
 

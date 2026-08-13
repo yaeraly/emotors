@@ -2671,7 +2671,12 @@ model FifoInventoryBatch {
   warehouse                      Warehouse                    @relation(fields: [warehouseId], references: [id])
   stockMovementId                String?                      @unique
   receivedAt                     DateTime                     @default(now())
-  unitCostKgs                    Decimal                      @default(0) @db.Decimal(14, 2)
+  /** High-precision exactUnitCost. Display may round to 2dp; never rebuild totals from that. */
+  unitCostKgs                    Decimal                      @default(0) @db.Decimal(30, 15)
+  /** Authoritative original layer себестоимость (source of remaining/consumed). */
+  originalLayerCostKgs           Decimal                      @default(0) @db.Decimal(30, 15)
+  /** Authoritative remaining layer себестоимость. Inventory valuation sums this. */
+  remainingLayerCostKgs          Decimal                      @default(0) @db.Decimal(30, 15)
   wholesaleMarkupPercent         Decimal                      @default(0) @db.Decimal(8, 2)
   wholesalePriceKgs              Decimal                      @default(0) @db.Decimal(14, 2)
   hqBranchWholesaleMarkupPercent Decimal                      @default(0) @db.Decimal(8, 2)
@@ -2707,8 +2712,8 @@ model SaleFifoAllocation {
   productId    String
   product      Product            @relation(fields: [productId], references: [id])
   quantity     Int
-  unitCostKgs  Decimal            @db.Decimal(14, 2)
-  totalCostKgs Decimal            @db.Decimal(14, 2)
+  unitCostKgs  Decimal            @db.Decimal(30, 15)
+  totalCostKgs Decimal            @db.Decimal(30, 15)
   createdAt    DateTime           @default(now())
 
   @@index([saleId])
@@ -2728,11 +2733,11 @@ model DistributionFifoAllocation {
   productId                 String
   product                   Product                     @relation(fields: [productId], references: [id])
   quantity                  Int
-  unitCostKgs               Decimal                     @db.Decimal(14, 2)
+  unitCostKgs               Decimal                     @db.Decimal(30, 15)
   unitPriceKgs              Decimal                     @db.Decimal(14, 2)
   wholesalePriceKgs         Decimal                     @db.Decimal(14, 2)
   hqBranchWholesalePriceKgs Decimal                     @db.Decimal(14, 2)
-  totalCostKgs              Decimal                     @db.Decimal(14, 2)
+  totalCostKgs              Decimal                     @db.Decimal(30, 15)
   totalPriceKgs             Decimal                     @db.Decimal(14, 2)
   markupPercent             Decimal                     @default(0) @db.Decimal(8, 2)
   profitKgs                 Decimal                     @default(0) @db.Decimal(14, 2)
@@ -2848,8 +2853,8 @@ model StockMovement {
   product       Product             @relation(fields: [productId], references: [id])
   type          StockMovementType
   quantity      Int
-  unitCostKgs   Decimal             @default(0) @db.Decimal(14, 2)
-  totalCostKgs  Decimal             @default(0) @db.Decimal(14, 2)
+  unitCostKgs   Decimal             @default(0) @db.Decimal(30, 15)
+  totalCostKgs  Decimal             @default(0) @db.Decimal(30, 15)
   note          String?
   status        StockMovementStatus @default(ACTIVE)
   referenceType String?
@@ -2879,9 +2884,9 @@ model InventoryBalance {
   reservedQuantity Int       @default(0)
   shelf            String?
   zone             String?
-  averageCostKgs   Decimal   @default(0) @db.Decimal(14, 2)
-  landedCostKgs    Decimal   @default(0) @db.Decimal(14, 2)
-  totalValueKgs    Decimal   @default(0) @db.Decimal(14, 2)
+  averageCostKgs   Decimal   @default(0) @db.Decimal(30, 15)
+  landedCostKgs    Decimal   @default(0) @db.Decimal(30, 15)
+  totalValueKgs    Decimal   @default(0) @db.Decimal(30, 15)
   lastReceivingAt  DateTime?
   updatedAt        DateTime  @updatedAt
 
@@ -3378,7 +3383,7 @@ model ProcurementOrder {
   weightedAverageYuanRate               Decimal?                               @db.Decimal(14, 4)
   supplierPaymentStatus                 ProcurementSupplierPaymentLedgerStatus @default(UNPAID)
   totalTransportCostKgs                 Decimal                                @default(0) @db.Decimal(14, 2)
-  totalCostKgs                          Decimal                                @default(0) @db.Decimal(14, 2)
+  totalCostKgs                          Decimal                                @default(0) @db.Decimal(30, 15)
   totalWeightKg                         Decimal                                @default(0) @db.Decimal(14, 3)
   costPerKg                             Decimal                                @default(0) @db.Decimal(14, 4)
   chinaDomesticTransportYuan            Decimal                                @default(0) @db.Decimal(14, 2)
@@ -3769,7 +3774,7 @@ model ProcurementOrderItem {
   receivedQuantity       Int?
   purchasePriceYuan      Decimal                         @db.Decimal(14, 2)
   yuanRate               Decimal                         @db.Decimal(14, 4)
-  costKgs                Decimal                         @db.Decimal(14, 2)
+  costKgs                Decimal                         @db.Decimal(30, 15)
   weightKg               Decimal                         @db.Decimal(14, 3)
   unitWeightKg           Decimal?                        @db.Decimal(14, 3)
   weightStatus           ProcurementItemWeightStatus     @default(NOT_SET)
@@ -3778,18 +3783,18 @@ model ProcurementOrderItem {
   packagingType          String?
   directPackagingCostKgs Decimal                         @default(0) @db.Decimal(14, 2)
   totalWeightKg          Decimal                         @default(0) @db.Decimal(14, 3)
-  chinaDomesticAllocKgs  Decimal                         @default(0) @db.Decimal(14, 2)
-  chinaExportAllocKgs    Decimal                         @default(0) @db.Decimal(14, 2)
-  localTransportAllocKgs Decimal                         @default(0) @db.Decimal(14, 2)
-  packagingAllocKgs      Decimal                         @default(0) @db.Decimal(14, 2)
-  customsAllocKgs        Decimal                         @default(0) @db.Decimal(14, 2)
-  insuranceAllocKgs      Decimal                         @default(0) @db.Decimal(14, 2)
-  bankFeeAllocKgs        Decimal                         @default(0) @db.Decimal(14, 2)
-  otherAllocKgs          Decimal                         @default(0) @db.Decimal(14, 2)
-  transportCostKgs       Decimal                         @db.Decimal(14, 2)
-  finalCostKgs           Decimal                         @db.Decimal(14, 2)
+  chinaDomesticAllocKgs  Decimal                         @default(0) @db.Decimal(30, 15)
+  chinaExportAllocKgs    Decimal                         @default(0) @db.Decimal(30, 15)
+  localTransportAllocKgs Decimal                         @default(0) @db.Decimal(30, 15)
+  packagingAllocKgs      Decimal                         @default(0) @db.Decimal(30, 15)
+  customsAllocKgs        Decimal                         @default(0) @db.Decimal(30, 15)
+  insuranceAllocKgs      Decimal                         @default(0) @db.Decimal(30, 15)
+  bankFeeAllocKgs        Decimal                         @default(0) @db.Decimal(30, 15)
+  otherAllocKgs          Decimal                         @default(0) @db.Decimal(30, 15)
+  transportCostKgs       Decimal                         @db.Decimal(30, 15)
+  finalCostKgs           Decimal                         @db.Decimal(30, 15)
   totalYuan              Decimal                         @db.Decimal(14, 2)
-  totalCostKgs           Decimal                         @db.Decimal(14, 2)
+  totalCostKgs           Decimal                         @db.Decimal(30, 15)
   note                   String?
   landedCostSnapshots    ProcurementLandedCostSnapshot[]
   createdAt              DateTime                        @default(now())
@@ -3925,7 +3930,7 @@ model BranchDistributionOrder {
   pricingPolicyVersionId      String?
   pricingPolicyVersion        PricingPolicyVersion?         @relation(fields: [pricingPolicyVersionId], references: [id])
   totalAmount                 Decimal                       @default(0) @db.Decimal(14, 2)
-  totalCost                   Decimal                       @default(0) @db.Decimal(14, 2)
+  totalCost                   Decimal                       @default(0) @db.Decimal(30, 15)
   totalProfit                 Decimal                       @default(0) @db.Decimal(14, 2)
   transportCompany            String?
   transportCostKgs            Decimal                       @default(0) @db.Decimal(14, 2)
@@ -4054,14 +4059,14 @@ model BranchDistributionOrderItem {
   sku                         String
   productName                 String
   quantity                    Int
-  unitCost                    Decimal                      @db.Decimal(14, 2)
+  unitCost                    Decimal                      @db.Decimal(30, 15)
   unitPrice                   Decimal                      @db.Decimal(14, 2)
-  totalCost                   Decimal                      @db.Decimal(14, 2)
+  totalCost                   Decimal                      @db.Decimal(30, 15)
   totalPrice                  Decimal                      @db.Decimal(14, 2)
   profit                      Decimal                      @db.Decimal(14, 2)
   transportExpenseAllocation  Decimal                      @default(0) @db.Decimal(14, 2)
   transportCostPerUnit        Decimal                      @default(0) @db.Decimal(14, 2)
-  landedUnitCostKgs           Decimal?                     @db.Decimal(14, 2)
+  landedUnitCostKgs           Decimal?                     @db.Decimal(30, 15)
   dispatchedQuantity          Int?
   unitWeightKgSnapshot        Decimal?                     @db.Decimal(14, 3)
   lineWeightKgSnapshot        Decimal?                     @db.Decimal(14, 3)
@@ -4137,7 +4142,7 @@ model GoodsReceivingItem {
   sentQuantity               Int
   receivedQuantity           Int
   differenceQuantity         Int
-  unitCost                   Decimal                     @db.Decimal(14, 2)
+  unitCost                   Decimal                     @db.Decimal(30, 15)
   unitPrice                  Decimal                     @db.Decimal(14, 2)
   transportExpenseAllocation Decimal                     @default(0) @db.Decimal(14, 2)
   transportCostPerUnit       Decimal                     @default(0) @db.Decimal(14, 2)
@@ -5195,17 +5200,17 @@ model ProcurementLandedCostSnapshot {
   actualQty                       Int                  @default(0)
   unitWeightKg                    Decimal?             @db.Decimal(14, 3)
   totalWeightKg                   Decimal              @default(0) @db.Decimal(14, 3)
-  basePurchaseCostKgs             Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedChinaTransportKgs      Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedCargoKgs               Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedKyrgyzstanTransportKgs Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedInsuranceKgs           Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedCustomsKgs             Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedTransportExpensesKgs   Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedPackagingKgs           Decimal              @default(0) @db.Decimal(14, 2)
-  allocatedOtherExpensesKgs       Decimal              @default(0) @db.Decimal(14, 2)
-  totalLandedCostKgs              Decimal              @default(0) @db.Decimal(14, 2)
-  unitLandedCostKgs               Decimal              @default(0) @db.Decimal(14, 2)
+  basePurchaseCostKgs             Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedChinaTransportKgs      Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedCargoKgs               Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedKyrgyzstanTransportKgs Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedInsuranceKgs           Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedCustomsKgs             Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedTransportExpensesKgs   Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedPackagingKgs           Decimal              @default(0) @db.Decimal(30, 15)
+  allocatedOtherExpensesKgs       Decimal              @default(0) @db.Decimal(30, 15)
+  totalLandedCostKgs              Decimal              @default(0) @db.Decimal(30, 15)
+  unitLandedCostKgs               Decimal              @default(0) @db.Decimal(30, 15)
   calculationVersion              Int                  @default(1)
   isFinalized                     Boolean              @default(false)
   isProvisional                   Boolean              @default(false)
@@ -5316,8 +5321,8 @@ model BranchPurchaseRequestItem {
   approvedLineTotalKgs       Decimal?                          @db.Decimal(14, 2)
   wholesalePriceKgs          Decimal                           @default(0) @db.Decimal(14, 2)
   transportExpenseAllocation Decimal                           @default(0) @db.Decimal(14, 2)
-  estimatedUnitCost          Decimal                           @default(0) @db.Decimal(14, 2)
-  estimatedLineProductCostKgs Decimal                          @default(0) @db.Decimal(14, 2)
+  estimatedUnitCost          Decimal                           @default(0) @db.Decimal(30, 15)
+  estimatedLineProductCostKgs Decimal                          @default(0) @db.Decimal(30, 15)
   totalAmount                Decimal                           @default(0) @db.Decimal(14, 2)
   weightKg                   Decimal                           @default(0) @db.Decimal(14, 3)
   note                       String?
@@ -6276,7 +6281,7 @@ model BranchHqReturn {
   status                   BranchHqReturnStatus                    @default(DRAFT)
   totalQuantity            Int                                     @default(0)
   totalLineCount           Int                                     @default(0)
-  totalReturnValueKgs      Decimal                                 @default(0) @db.Decimal(14, 2)
+  totalReturnValueKgs      Decimal                                 @default(0) @db.Decimal(30, 15)
   inTransitQuantity        Int                                     @default(0)
   note                     String?
   rejectionReason          String?
@@ -6326,8 +6331,8 @@ model BranchHqReturnItem {
   reason               BranchHqReturnReason
   condition            BranchHqReturnCondition        @default(NEW)
   comment              String?
-  unitCostKgs          Decimal                        @default(0) @db.Decimal(14, 2)
-  lineReturnValueKgs   Decimal                        @default(0) @db.Decimal(14, 2)
+  unitCostKgs          Decimal                        @default(0) @db.Decimal(30, 15)
+  lineReturnValueKgs   Decimal                        @default(0) @db.Decimal(30, 15)
   shippedQuantity      Int                            @default(0)
   receivedQuantity     Int                            @default(0)
   damagedQuantity      Int                            @default(0)
@@ -6360,8 +6365,8 @@ model BranchHqReturnFifoAllocation {
   fifoBatch         FifoInventoryBatch       @relation(fields: [fifoBatchId], references: [id])
   productId         String
   quantity          Int
-  unitCostKgs       Decimal                  @db.Decimal(14, 2)
-  totalCostKgs      Decimal                  @db.Decimal(14, 2)
+  unitCostKgs       Decimal                  @db.Decimal(30, 15)
+  totalCostKgs      Decimal                  @db.Decimal(30, 15)
   /** RESERVED at branch approval; CONSUMED at shipment; HQ_RECEIVED after HQ accept */
   status            String                   @default("RESERVED")
   sourceReferenceType String?

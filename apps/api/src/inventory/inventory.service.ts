@@ -72,8 +72,8 @@ import {
 } from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
-import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
-import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import { deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import { addMoney, subtractMoney, toExactMoney, toExactUnitCost, toMoneyDecimal } from '../common/money/money';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 import { resolveCurrentProductCatalogUnitCost } from './product-catalog-current-cost.util';
 import {
@@ -1433,9 +1433,8 @@ export class InventoryService {
       include: { product: { include: { productCategory: true } }, warehouse: true },
     });
     const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
-    const totalStockValueKgs = balances.reduce(
-      (sum, item) => sum + Number(item.totalValueKgs),
-      0,
+    const totalStockValueKgs = sumDisplayMoneyTotals(
+      balances.filter((item) => item.quantity > 0).map((item) => item.totalValueKgs),
     );
     const byWarehouse = this.groupStockValue(
       balances,
@@ -1757,7 +1756,10 @@ export class InventoryService {
   async createStockMovementInTx(
     tx: PrismaTx,
     user: AuthUser,
-    dto: CreateStockMovementDto,
+    dto: Omit<CreateStockMovementDto, 'unitCostKgs' | 'totalCostKgs'> & {
+      unitCostKgs?: number | string | Prisma.Decimal;
+      totalCostKgs?: number | string | Prisma.Decimal;
+    },
     options?: {
       branchReceiving?: boolean;
       branchId?: string;
@@ -1817,38 +1819,35 @@ export class InventoryService {
     }
 
     const quantityAbs = Math.abs(dto.quantity);
-    let totalCostKgs: number;
-    let unitCostKgs: number;
+    let totalCostKgs: Prisma.Decimal;
+    let unitCostKgs: Prisma.Decimal;
 
     if (dto.totalCostKgs !== undefined) {
-      totalCostKgs = roundDisplayMoney(dto.totalCostKgs);
-      unitCostKgs = resolveUnitCostFromInventoryLayer({
-        quantity: quantityAbs,
-        totalCostKgs,
-      });
+      totalCostKgs = toExactMoney(dto.totalCostKgs);
+      unitCostKgs = toExactUnitCost(totalCostKgs, quantityAbs);
     } else {
-      unitCostKgs = dto.unitCostKgs ?? Number(product.finalCostKgs);
-      totalCostKgs = roundDisplayMoney(quantityAbs * unitCostKgs);
+      unitCostKgs = toExactMoney(dto.unitCostKgs ?? product.finalCostKgs);
+      totalCostKgs = toExactMoney(toMoneyDecimal(unitCostKgs).mul(quantityAbs));
     }
 
-    const currentTotalValue = roundDisplayMoney(current?.totalValueKgs ?? 0);
+    const currentTotalValue = toExactMoney(current?.totalValueKgs ?? 0);
     // OUT must subtract the movement line cost — never remainingQty × blended average,
     // which keeps transferred China-shipment value in HQ warehouse valuation.
+    const leftoverValue = subtractMoney(currentTotalValue, totalCostKgs);
     const nextTotalValue =
       quantityDelta > 0
-        ? roundDisplayMoney(currentTotalValue + totalCostKgs)
+        ? addMoney(currentTotalValue, totalCostKgs)
         : nextQuantity <= 0
-          ? 0
-          : roundDisplayMoney(Math.max(currentTotalValue - totalCostKgs, 0));
+          ? toExactMoney(0)
+          : leftoverValue.isNegative()
+            ? toExactMoney(0)
+            : toExactMoney(leftoverValue);
     const nextAverageCost =
       quantityDelta > 0
-        ? roundDisplayMoney(
-            (currentQuantity * Number(current?.averageCostKgs ?? 0) + totalCostKgs) /
-              Math.max(currentQuantity + quantityDelta, 1),
-          )
+        ? deriveDisplayUnitCost(nextTotalValue, Math.max(currentQuantity + quantityDelta, 1))
         : nextQuantity > 0
           ? deriveDisplayUnitCost(nextTotalValue, nextQuantity)
-          : Number(current?.averageCostKgs ?? product.finalCostKgs);
+          : roundDisplayMoney(current?.averageCostKgs ?? product.finalCostKgs);
 
     const movement = await tx.stockMovement.create({
       data: {
@@ -2779,8 +2778,8 @@ export class InventoryService {
       const key = keyFn(item);
       const current = grouped.get(key) ?? { quantity: 0, totalStockValueKgs: 0 };
       current.quantity += item.quantity;
-      current.totalStockValueKgs = this.roundMoney(
-        current.totalStockValueKgs + Number(item.totalValueKgs),
+      current.totalStockValueKgs = roundDisplayMoney(
+        sumDisplayMoneyTotals([current.totalStockValueKgs, item.totalValueKgs]),
       );
       grouped.set(key, current);
     }

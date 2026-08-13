@@ -1,6 +1,7 @@
+import { toExactMoney, toMoneyDecimal, type MoneyInput } from '../common/money/money';
 import {
-  allocateProportionalCost,
-  deriveDisplayUnitCost,
+  allocateProportionalCostExact,
+  deriveExactUnitCost,
   roundDisplayMoney,
 } from './product-cost-precision.util';
 
@@ -13,6 +14,7 @@ export type HqAllocationReceiveLine = {
   finalBranchUnitCostKgs: number;
   /** Authoritative branch receive line total (transfer + transport), not unit×qty. */
   lineTotalCostKgs: number;
+  authoritativeLineTotal: ReturnType<typeof toExactMoney>;
 };
 
 /**
@@ -24,8 +26,8 @@ export function buildBranchReceiveLinesFromHqAllocations(
     id: string;
     fifoBatchId: string;
     quantity: number;
-    unitCostKgs: number;
-    totalCostKgs?: number;
+    unitCostKgs: number | MoneyInput;
+    totalCostKgs?: MoneyInput;
   }>,
   acceptedQuantity: number,
   transportCostPerUnit = 0,
@@ -41,22 +43,20 @@ export function buildBranchReceiveLinesFromHqAllocations(
     const take = Math.min(Math.max(0, row.quantity), remaining);
     if (take <= 0) continue;
 
-    const transferUnitCostKgs = roundDisplayMoney(Number(row.unitCostKgs));
+    const transferUnitCostKgs = Number(toExactMoney(row.unitCostKgs).toFixed(15));
     const transport = roundDisplayMoney(Number(transportCostPerUnit));
-    const authoritativeAllocationTotal = Number(row.totalCostKgs ?? 0);
+    const authoritativeAllocationTotal = toMoneyDecimal(row.totalCostKgs ?? 0);
     // Full remaining allocation: keep exact HQ consumed total (preserves layer remainders).
     // Partial take: proportional Decimal share of that authoritative total.
-    const allocationLineTotal =
-      authoritativeAllocationTotal > 0
-        ? take >= row.quantity
-          ? roundDisplayMoney(authoritativeAllocationTotal)
-          : roundDisplayMoney(
-              allocateProportionalCost(authoritativeAllocationTotal, row.quantity, take),
-            )
-        : roundDisplayMoney(transferUnitCostKgs * take);
-    const transportLineTotal = roundDisplayMoney(transport * take);
-    const lineTotalCostKgs = roundDisplayMoney(allocationLineTotal + transportLineTotal);
-    const finalBranchUnitCostKgs = deriveDisplayUnitCost(lineTotalCostKgs, take);
+    const allocationLineTotal = authoritativeAllocationTotal.gt(0)
+      ? take >= row.quantity
+        ? authoritativeAllocationTotal
+        : allocateProportionalCostExact(authoritativeAllocationTotal, row.quantity, take)
+      : toMoneyDecimal(row.unitCostKgs).mul(take);
+    const transportLineTotal = toMoneyDecimal(transport).mul(take);
+    const lineTotalExact = toExactMoney(allocationLineTotal.plus(transportLineTotal));
+    const lineTotalCostKgs = Number(lineTotalExact.toFixed(15));
+    const finalBranchUnitCostKgs = Number(deriveExactUnitCost(lineTotalExact, take).toFixed(15));
 
     lines.push({
       allocationId: row.id,
@@ -66,6 +66,7 @@ export function buildBranchReceiveLinesFromHqAllocations(
       transportCostPerUnit: transport,
       finalBranchUnitCostKgs,
       lineTotalCostKgs,
+      authoritativeLineTotal: lineTotalExact,
     });
     remaining -= take;
   }

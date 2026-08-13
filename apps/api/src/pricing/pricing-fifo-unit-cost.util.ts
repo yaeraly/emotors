@@ -6,8 +6,8 @@ import { deriveDisplayUnitCost, roundDisplayMoney } from './product-cost-precisi
  */
 export function resolveUnitCostFromInventoryLayer(input: {
   quantity: number;
-  unitCostKgs?: number | null;
-  totalCostKgs?: number | null;
+  unitCostKgs?: unknown;
+  totalCostKgs?: unknown;
 }) {
   const qty = Math.abs(Number(input.quantity ?? 0));
   if (qty <= 0) return 0;
@@ -25,10 +25,10 @@ export function resolveUnitCostFromInventoryLayer(input: {
  */
 export function resolveAuthoritativeFifoLayerUnitCost(input: {
   initialQuantity: number;
-  batchUnitCostKgs: number;
+  batchUnitCostKgs: unknown;
   movementQuantity?: number | null;
-  movementUnitCostKgs?: number | null;
-  movementTotalCostKgs?: number | null;
+  movementUnitCostKgs?: unknown;
+  movementTotalCostKgs?: unknown;
 }) {
   const receivedQty =
     input.initialQuantity > 0

@@ -158,7 +158,9 @@ describe('Branch inventory cost parity — first China shipment 914369.80', () =
       0,
     );
     const rebuiltFromDisplayUnit = sumDisplayMoneyTotals(
-      receiveLines.map((line) => roundDisplayMoney(line.finalBranchUnitCostKgs * line.quantity)),
+      receiveLines.map((line) =>
+        roundDisplayMoney(roundDisplayMoney(line.finalBranchUnitCostKgs) * line.quantity),
+      ),
     );
     assert.notEqual(rebuiltFromDisplayUnit, CHINA_BATCH_TOTAL);
     assert.equal(sumDisplayMoneyTotals(receiveLines.map((l) => l.lineTotalCostKgs)), CHINA_BATCH_TOTAL);
