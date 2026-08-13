@@ -1,0 +1,90 @@
+export type NotificationItem = {
+  id: string;
+  type: string;
+  module?: string | null;
+  title: string;
+  message: string;
+  status: 'UNREAD' | 'READ' | 'RESOLVED' | 'ARCHIVED';
+  entityType?: string | null;
+  entityId?: string | null;
+  referenceNumber?: string | null;
+  branchId?: string | null;
+  recipientRole?: string | null;
+  createdAt: string;
+};
+
+export function notificationHref(alert: NotificationItem): string | null {
+  if (alert.entityType === 'InventoryCountSession' && alert.entityId) {
+    if (alert.branchId) {
+      if (alert.recipientRole === 'WAREHOUSE_OPERATOR') {
+        return `/branch-warehouse/warehouse/inventory/${alert.entityId}`;
+      }
+      if (alert.recipientRole === 'FRANCHISE_OWNER') {
+        return `/branch-ceo/warehouse/inventory/${alert.entityId}`;
+      }
+      return `/branch-ceo/warehouse/inventory/${alert.entityId}`;
+    }
+    return `/inventory/count/${alert.entityId}`;
+  }
+  if (alert.entityType === 'BranchDistributionOrder' && alert.entityId) {
+    return `/distribution/orders/${alert.entityId}`;
+  }
+  if (alert.entityType === 'BranchInvoice' && alert.entityId) {
+    return `/distribution/invoices/${alert.entityId}`;
+  }
+  if (alert.entityType === 'ShortageReport' && alert.entityId) {
+    return `/distribution/shortage-reports/${alert.entityId}`;
+  }
+  if (alert.entityType === 'BranchPurchaseRequest' && alert.entityId) {
+    return `/branch-purchase-requests/${alert.entityId}`;
+  }
+  if (alert.entityType === 'Product' && alert.entityId) {
+    return `/products/${alert.entityId}`;
+  }
+  if (alert.entityType === 'ProcurementOrder' && alert.entityId) {
+    if (alert.type === 'RECEIPT_SENT_TO_CREATOR') {
+      return `/procurement/orders/${alert.entityId}?invoiceReceipts=1`;
+    }
+    return `/procurement/orders/${alert.entityId}`;
+  }
+  if (alert.type === 'RECEIPT_SENT_TO_CREATOR' && alert.entityType === 'ProcurementTransportExpense' && alert.entityId) {
+    return `/finance/bills-to-pay?source=TRANSPORT_EXPENSE&id=${alert.entityId}`;
+  }
+  if (alert.type === 'RECEIPT_SENT_TO_CREATOR' && alert.entityType === 'FinanceTransfer' && alert.entityId) {
+    return `/finance/transfers/${alert.entityId}`;
+  }
+  if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
+    return '/pricing';
+  }
+  if (alert.type === 'BRANCH_REQUEST_OUT_OF_STOCK' && alert.entityId) {
+    return `/branch-purchase-requests/${alert.entityId}`;
+  }
+  if (alert.type === 'BRANCH_REQUEST_OUT_OF_STOCK') {
+    return '/branch-product-shortages';
+  }
+  if (alert.type === 'LOW_STOCK' || alert.type === 'OUT_OF_STOCK') {
+    return '/inventory';
+  }
+  return null;
+}
+
+export function notificationModuleIcon(module?: string | null) {
+  switch (module) {
+    case 'INVENTORY':
+      return '📋';
+    case 'PROCUREMENT':
+      return '🛒';
+    case 'WAREHOUSE':
+      return '🏭';
+    case 'DISTRIBUTION':
+      return '🚚';
+    case 'FINANCE':
+      return '💰';
+    case 'SUPPLIER_PAYMENT':
+      return '💳';
+    case 'BRANCH_ORDERS':
+      return '🏪';
+    default:
+      return '🔔';
+  }
+}

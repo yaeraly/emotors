@@ -1,0 +1,252 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { BranchType } from '@prisma/client';
+import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
+import {
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+  sumDisplayMoneyTotals,
+} from '../pricing/product-cost-precision.util';
+import {
+  BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE,
+  compareEstimatedAmountToProductCost,
+  reconcileHqBranchTransferCostParity,
+  resolveBranchPurchaseEstimatedAmountKgs,
+  resolveBranchPurchaseLinePayableAmount,
+  shouldTransferBranchPurchaseAtCost,
+} from './branch-purchase-estimated-amount.util';
+import {
+  sanitizeBranchPurchaseRequest,
+  toBranchPurchaseRequestResponse,
+} from './branch-purchase-request.presenter';
+import { BranchPurchaseRequestStatus } from '@prisma/client';
+
+const CHINA_BATCH_TOTAL = 914369.8;
+
+function buildChinaBatchLines() {
+  const quantity = 11;
+  const rawShares = Array.from({ length: 62 }, (_, index) => 14756.12 + (index % 17) * 0.31);
+  return distributeRoundedAmounts(rawShares, CHINA_BATCH_TOTAL).map((totalCostKgs, index) => ({
+    sku: `SKU-${index}`,
+    quantity,
+    totalCostKgs,
+  }));
+}
+
+describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
+  it('HQ_BRANCH transfers at cost with zero markup', () => {
+    assert.equal(shouldTransferBranchPurchaseAtCost(BranchType.HQ_BRANCH), true);
+    assert.equal(shouldTransferBranchPurchaseAtCost(BranchType.FRANCHISE), false);
+  });
+
+  it('at-cost line payable uses FIFO line total not unit×qty', () => {
+    const fifoLine = 162317.33;
+    const unit = deriveDisplayUnitCost(fifoLine, 11);
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.HQ_BRANCH,
+      quantity: 11,
+      estimatedLineProductCostKgs: fifoLine,
+      unitPriceKgs: unit,
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, fifoLine);
+    assert.notEqual(payable, roundDisplayMoney(unit * 11));
+  });
+
+  it('HQ at-cost never falls back to unit×qty when FIFO line cost is missing', () => {
+    const unit = 14756.12;
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.HQ_BRANCH,
+      quantity: 11,
+      estimatedLineProductCostKgs: 0,
+      unitPriceKgs: unit,
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, 0);
+    assert.notEqual(payable, roundDisplayMoney(unit * 11));
+  });
+
+  it('China batch unit×qty drift of 0.72 is not used as HQ payable total', () => {
+    const lines = buildChinaBatchLines();
+    const authoritative = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const driftedUnitTimesQty = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const hqPayable = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        resolveBranchPurchaseLinePayableAmount({
+          branchType: BranchType.HQ_BRANCH,
+          quantity: line.quantity,
+          estimatedLineProductCostKgs: line.totalCostKgs,
+          unitPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+          hasPricingPolicy: true,
+        }),
+      ),
+    );
+    assert.equal(authoritative, CHINA_BATCH_TOTAL);
+    assert.equal(hqPayable, CHINA_BATCH_TOTAL);
+    assert.notEqual(driftedUnitTimesQty, CHINA_BATCH_TOTAL);
+    // Observed BPR-1786197962954-style total 914369.08 vs procurement 914369.80 (−0.72).
+    assert.ok(Math.abs(roundDisplayMoney(CHINA_BATCH_TOTAL - driftedUnitTimesQty)) > 0);
+  });
+
+  it('franchise line payable uses unit price × quantity', () => {
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType: BranchType.FRANCHISE,
+      quantity: 11,
+      estimatedLineProductCostKgs: 1000,
+      unitPriceKgs: 125,
+      hasPricingPolicy: true,
+    });
+    assert.equal(payable, 1375);
+  });
+
+  it('Ориентировочная сумма equals Себестоимость for HQ_BRANCH', () => {
+    const lines = buildChinaBatchLines();
+    const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const staleEstimated = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const estimated = resolveBranchPurchaseEstimatedAmountKgs({
+      branchType: BranchType.HQ_BRANCH,
+      totalProductCostKgs: productCost,
+      storedEstimatedAmountKgs: staleEstimated,
+    });
+    assert.equal(productCost, CHINA_BATCH_TOTAL);
+    assert.equal(estimated, CHINA_BATCH_TOTAL);
+    assert.notEqual(staleEstimated, CHINA_BATCH_TOTAL);
+    assert.equal(roundDisplayMoney(productCost - estimated), 0);
+  });
+
+  it('HQ Branch BPR Сумма equals FIFO product cost for at-cost orders', () => {
+    const lines = buildChinaBatchLines();
+    const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const commercialUnitTimesQty = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const response = toBranchPurchaseRequestResponse({
+      status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+      reviewedAt: new Date(),
+      totalEstimatedAmount: CHINA_BATCH_TOTAL,
+      transportCostKgs: 0,
+      branch: { branchType: BranchType.HQ_BRANCH },
+      items: lines.map((line) => ({
+        quantity: line.quantity,
+        approvedQuantity: line.quantity,
+        lineStatus: 'APPROVED',
+        estimatedLineProductCostKgs: line.totalCostKgs,
+        totalAmount: line.totalCostKgs,
+        resolvedBranchPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+        wholesalePriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+      })),
+    });
+    assert.equal(response.totalProductCostKgs, CHINA_BATCH_TOTAL);
+    assert.equal(response.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.equal(response.totalEstimatedAmount, response.totalProductCostKgs);
+    assert.notEqual(commercialUnitTimesQty, CHINA_BATCH_TOTAL);
+    assert.equal(productCost, CHINA_BATCH_TOTAL);
+  });
+
+  it('compareEstimatedAmountToProductCost detects unit×qty drift', () => {
+    const lines = buildChinaBatchLines();
+    const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const staleEstimated = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const result = compareEstimatedAmountToProductCost(staleEstimated, productCost);
+    assert.equal(result.ok, false);
+    assert.notEqual(result.differenceKgs, 0);
+    assert.match(BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE, /Ориентировочная сумма/);
+  });
+
+  it('Branch Sales sanitize keeps HQ_BRANCH Сумма equal to FIFO product cost', () => {
+    const lines = buildChinaBatchLines();
+    const commercialEstimated = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
+        totalEstimatedAmount: CHINA_BATCH_TOTAL,
+        transportCostKgs: 0,
+        branch: { branchType: BranchType.HQ_BRANCH },
+        items: lines.map((line, index) => ({
+          id: `item-${index}`,
+          productId: `prod-${index}`,
+          sku: line.sku,
+          productName: line.sku,
+          quantity: line.quantity,
+          approvedQuantity: line.quantity,
+          lineStatus: 'APPROVED',
+          estimatedLineProductCostKgs: line.totalCostKgs,
+          totalAmount: line.totalCostKgs,
+          resolvedBranchPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+          wholesalePriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+        })),
+      },
+      true,
+    );
+    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalProductCostKgs, undefined);
+    const lineSum = sumDisplayMoneyTotals(
+      sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
+    );
+    assert.equal(lineSum, CHINA_BATCH_TOTAL);
+    assert.notEqual(commercialEstimated, CHINA_BATCH_TOTAL);
+    assert.notEqual(sanitized.totalEstimatedAmount, commercialEstimated);
+  });
+
+  it('reconcileHqBranchTransferCostParity enforces FIFO = payable = order total', () => {
+    const lines = buildChinaBatchLines();
+    const fifo = lines.map((line) => line.totalCostKgs);
+    const payable = fifo.map((cost) =>
+      resolveBranchPurchaseLinePayableAmount({
+        branchType: BranchType.HQ_BRANCH,
+        quantity: 11,
+        estimatedLineProductCostKgs: cost,
+        unitPriceKgs: deriveDisplayUnitCost(cost, 11),
+      }),
+    );
+    const parity = reconcileHqBranchTransferCostParity({
+      fifoLineCosts: fifo,
+      payableLineTotals: payable,
+      orderTotalKgs: sumDisplayMoneyTotals(payable),
+    });
+    assert.equal(parity.ok, true);
+    assert.equal(parity.expectedKgs, CHINA_BATCH_TOTAL);
+    assert.equal(parity.differenceKgs, 0);
+  });
+
+  it('repair of estimated amount is idempotent for already-aligned totals', () => {
+    const lines = buildChinaBatchLines();
+    const productCost = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+    const staleEstimated = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const first = resolveBranchPurchaseEstimatedAmountKgs({
+      branchType: BranchType.HQ_BRANCH,
+      totalProductCostKgs: productCost,
+      storedEstimatedAmountKgs: staleEstimated,
+    });
+    const second = resolveBranchPurchaseEstimatedAmountKgs({
+      branchType: BranchType.HQ_BRANCH,
+      totalProductCostKgs: productCost,
+      storedEstimatedAmountKgs: first,
+    });
+    assert.equal(first, productCost);
+    assert.equal(second, productCost);
+  });
+});

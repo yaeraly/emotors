@@ -1,0 +1,30 @@
+{
+  "name": "emotors-os",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @emotors/api\" \"npm run dev -w @emotors/web\"",
+    "build": "npm run prisma:generate && npm run build -w @emotors/api && npm run build -w @emotors/web",
+    "postinstall": "npm run prisma:generate",
+    "prisma:generate": "npx prisma generate --schema apps/api/prisma/schema.prisma",
+    "prisma:migrate": "npm run prisma:migrate -w @emotors/api",
+    "prisma:migrate:dev": "npm run prisma:migrate:dev -w @emotors/api",
+    "prisma:migrate:deploy": "npm run prisma:migrate:deploy -w @emotors/api",
+    "prisma:db:push": "npx prisma db push --schema apps/api/prisma/schema.prisma",
+    "prisma:seed": "npm run prisma:seed -w @emotors/api",
+    "db:cleanup": "npm run db:cleanup -w @emotors/api",
+    "db:cleanup:preview": "npm run db:cleanup:preview -w @emotors/api",
+    "db:cleanup:verify": "npm run db:cleanup:verify -w @emotors/api",
+    "product-code:migrate:preview": "npm run product-code:migrate:preview -w @emotors/api",
+    "product-code:migrate:apply": "npm run product-code:migrate:apply -w @emotors/api"
+  },
+  "devDependencies": {
+    "concurrently": "latest",
+    "prisma": "^6.19.3",
+    "typescript": "5.8.3"
+  }
+}

@@ -1,0 +1,843 @@
+import { ForbiddenException } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { AuthUser } from '../auth/auth.types';
+
+export const FULL_ACCESS_ROLES: Role[] = [
+  Role.OWNER,
+  Role.CEO,
+];
+
+export const HQ_EMPLOYEE_ROLES: Role[] = [
+  Role.CEO,
+  Role.FRANCHISE_DIRECTOR,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.HQ_ACCOUNTANT,
+  Role.MARKETING_MANAGER,
+  Role.CONTENT_CREATOR,
+  Role.ACADEMY_DIRECTOR,
+  Role.SYSTEM_ADMINISTRATOR,
+  Role.HQ_SALES_MANAGER,
+  Role.HQ_CASHIER,
+];
+
+export const HQ_ROLES: Role[] = [
+  ...FULL_ACCESS_ROLES,
+  ...HQ_EMPLOYEE_ROLES.filter((role) => !FULL_ACCESS_ROLES.includes(role)),
+  Role.ACADEMY_MANAGER,
+  Role.PROCUREMENT_MANAGER,
+  Role.INVESTMENT_MANAGER,
+  Role.EXPANSION_MANAGER,
+];
+
+export const BRANCH_REQUIRED_ROLES: Role[] = [
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.MASTER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+];
+
+export const ALL_PERMISSION_CODES = [
+  'users.manage',
+  'branches.manage',
+  'crm.manage',
+  'sales.manage',
+  'inventory.manage',
+  'inventory.view',
+  'products.manage',
+  'products.view',
+  'products.archive',
+  'service.manage',
+  'finance.view',
+  'finance.manage',
+  'payments.manage',
+  'payroll.manage',
+  'kpi.view',
+  'reports.view',
+  'procurement.manage',
+  'procurement.view',
+  'procurement.receive',
+  'distribution.manage',
+  'distribution.view',
+  'academy.manage',
+  'marketing.manage',
+  'analytics.view',
+] as const;
+
+export const ROLE_PERMISSIONS: Record<Role, string[]> = {
+  OWNER: [...ALL_PERMISSION_CODES],
+  CEO: [...ALL_PERMISSION_CODES],
+  SYSTEM_ADMINISTRATOR: [
+    ...ALL_PERMISSION_CODES,
+    'data.permanent_delete',
+    'businessDate.update.hqAdmin',
+  ],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
+  FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
+  WAREHOUSE_MANAGER: [
+    'inventory.manage',
+    'inventory.view',
+    'distribution.manage',
+    'procurement.receive',
+    'products.view',
+  ],
+  CONTENT_CREATOR: ['marketing.manage'],
+  ACADEMY_DIRECTOR: ['academy.manage'],
+  ACADEMY_MANAGER: ['academy.manage'],
+  MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
+  PROCUREMENT_MANAGER: ['procurement.manage'],
+  SUPPLY_CHAIN_MANAGER: [
+    'inventory.view',
+    'procurement.manage',
+    'procurement.view',
+    'distribution.view',
+    'products.manage',
+  ],
+  HQ_SALES_MANAGER: [
+    'distribution.manage',
+    'distribution.view',
+    'inventory.view',
+    'products.view',
+  ],
+  HQ_CASHIER: [
+    'distribution.view',
+    'payments.manage',
+    'finance.view',
+  ],
+  INVESTMENT_MANAGER: ['analytics.view'],
+  EXPANSION_MANAGER: ['analytics.view'],
+  FRANCHISE_OWNER: [
+    'users.manage',
+    'crm.manage',
+    'sales.manage',
+    'inventory.manage',
+    'inventory.view',
+    'products.view',
+    'service.manage',
+    'finance.view',
+    'payments.manage',
+    'kpi.view',
+    'reports.view',
+  ],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
+  MASTER: ['service.manage', 'kpi.view', 'products.view'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
+  CASHIER: ['payments.manage', 'cashier'],
+  ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
+  HQ_ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
+  SALESPERSON: ['sales.manage'],
+};
+
+export function isFullAccessRole(role: Role) {
+  return FULL_ACCESS_ROLES.includes(role);
+}
+
+export function isHqRole(role: Role) {
+  return HQ_ROLES.includes(role);
+}
+
+export function isHqEmployeeRole(role: Role) {
+  return HQ_EMPLOYEE_ROLES.includes(role);
+}
+
+export function canAccessAllBranches(role: Role) {
+  return isHqRole(role);
+}
+
+export function requiresBranch(role: Role) {
+  return BRANCH_REQUIRED_ROLES.includes(role);
+}
+
+export function permissionsForRole(role: Role) {
+  return ROLE_PERMISSIONS[role] ?? [];
+}
+
+export function uniqueRoles(roles: Role[]) {
+  return Array.from(new Set(roles));
+}
+
+export function permissionsForRoles(roles: Role[]) {
+  return Array.from(
+    new Set(uniqueRoles(roles).flatMap((role) => permissionsForRole(role))),
+  );
+}
+
+export function resolveUserRoles(user: Pick<AuthUser, 'role' | 'roles'>) {
+  const fromArray = user.roles?.length ? user.roles : [];
+  return uniqueRoles([user.role, ...fromArray]);
+}
+
+export function resolveUserPermissions(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  if (user.permissions?.length) {
+    return user.permissions;
+  }
+  return permissionsForRoles(resolveUserRoles(user));
+}
+
+export function userHasPermission(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+  permission: string,
+) {
+  return resolveUserPermissions(user).includes(permission);
+}
+
+export function userHasAnyPermission(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+  permissions: string[],
+) {
+  const userRoles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(userRoles)) {
+    return true;
+  }
+  const userPermissions = resolveUserPermissions(user);
+  return permissions.some((permission) => userPermissions.includes(permission));
+}
+
+export function hasAnyFullAccessRole(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => isFullAccessRole(role));
+}
+
+export function hasAnyHqRole(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => isHqRole(role));
+}
+
+export function anyRoleRequiresBranch(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => requiresBranch(role));
+}
+
+export function roleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {
+  return rolesCanAccessRequiredRoles([role], requiredRoles);
+}
+
+export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]) {
+  const userRoles = uniqueRoles(roles);
+  if (!userRoles.length) {
+    return false;
+  }
+
+  return hasAnyFullAccessRole(userRoles) || requiredRoles.some((requiredRole) => userRoles.includes(requiredRole));
+}
+
+export function canManageProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+    return false;
+  }
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER)
+  );
+}
+
+export function canCreateProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageProductCatalog(user);
+}
+
+export function canEditProductUnit(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canArchiveProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canEditSellingPrice(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return resolveUserRoles(user).includes(Role.CEO);
+}
+
+/** CEO and OWNER may view internal price calculation breakdown. */
+export function canViewPriceExplanation(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (isBranchWarehouseOperator(user)) return false;
+  if (roles.includes(Role.SUPPLY_CHAIN_MANAGER)) return false;
+  if (hasAnyFullAccessRole(roles)) return true;
+  if (roles.includes(Role.ACADEMY_DIRECTOR)) return false;
+  return [
+    Role.WAREHOUSE_MANAGER,
+    Role.FINANCE_MANAGER,
+    Role.HQ_ACCOUNTANT,
+    Role.ACCOUNTANT,
+    Role.MARKETING_MANAGER,
+    Role.CONTENT_CREATOR,
+    Role.SYSTEM_ADMINISTRATOR,
+    Role.HQ_CASHIER,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.CASHIER,
+  ].some((role) => roles.includes(role));
+}
+
+export function isBranchWarehouseOperator(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return !!user.branchId && roles.includes(Role.WAREHOUSE_OPERATOR) && !hasAnyFullAccessRole(roles);
+}
+
+export function isBranchOwnerUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return !!user.branchId && roles.includes(Role.FRANCHISE_OWNER) && !hasAnyFullAccessRole(roles);
+}
+
+export function isBranchCashierUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_CASHIER)) return false;
+  return roles.includes(Role.CASHIER);
+}
+
+export function isBranchAccountantUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_ACCOUNTANT)) return false;
+  return roles.includes(Role.ACCOUNTANT);
+}
+
+export function assertBranchCashierCannotManageSales(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (isBranchCashierUser(user)) {
+    throw new ForbiddenException('Branch cashier cannot create or edit sales');
+  }
+}
+
+export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (isBranchAccountantUser(user)) {
+    throw new ForbiddenException('Forbidden resource');
+  }
+}
+
+export function isHqSalesManagerScopedUser(user: Pick<AuthUser, 'role' | 'roles'>) {
+  const roles = resolveUserRoles(user);
+  return roles.includes(Role.HQ_SALES_MANAGER) && !hasAnyFullAccessRole(roles);
+}
+
+export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId' | 'permissions'>) {
+  if (isBranchOwnerUser(user)) return false;
+  if (isBranchWarehouseOperator(user)) return false;
+  if (isBranchCashierUser(user)) return false;
+  if (isHqWarehouseLogisticsOnlyUser(user)) return false;
+  if (isHqSalesManagerScopedUser(user)) return false;
+  return true;
+}
+
+export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  if (isBranchWarehouseOperator(user)) return false;
+  return userHasAnyPermission(user, [
+    'products.view',
+    'products.manage',
+    'inventory.view',
+    'inventory.manage',
+  ]);
+}
+
+export function canEditPurchasePriceYuan(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canViewSupplierPayments(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.HQ_CASHIER) ||
+    userHasPermission(user, 'procurement.view') ||
+    userHasPermission(user, 'procurement.manage') ||
+    userHasPermission(user, 'finance.view') ||
+    userHasPermission(user, 'payments.manage')
+  );
+}
+
+/** HQ Accountant prepares payment tranches (no longer Supply Manager). */
+export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+/** HQ Accountant / Finance Manager may process Cargo Payment invoices in bills-to-pay. */
+export function canProcessHqCargoPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canCreateSupplierPayment(user);
+}
+
+export function canSendProcurementInvoiceToAccountant(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER) ||
+    userHasPermission(user, 'procurement.manage')
+  );
+}
+
+export function canSendSupplierPaymentToCashier(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  return canCreateSupplierPayment(user);
+}
+
+/** Only HQ Cashier (or full-access CEO/Owner) may confirm China Purchase payments. */
+export function canConfirmSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_CASHIER);
+}
+
+export function canReturnSupplierPaymentToAccountant(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  return canConfirmSupplierPayment(user);
+}
+
+export function canEditSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+export function canVoidSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
+export function canReverseSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
+export function canAllowSupplierOverpayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
+export function canChangeSupplierPaymentFinanceAccount(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_CASHIER)
+  );
+}
+
+export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasPermission(user, 'procurement.manage');
+}
+
+export function canViewProcurement(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (isHqSalesManagerScopedUser(user)) return false;
+  if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+    return false;
+  }
+  return userHasAnyPermission(user, ['procurement.manage', 'procurement.view']);
+}
+
+export function canReceiveProcurementToHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) {
+    return true;
+  }
+  if (roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
+    return false;
+  }
+  return roles.includes(Role.WAREHOUSE_MANAGER) && userHasPermission(user, 'procurement.receive');
+}
+
+export function canEditProcurementOrderItems(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (roles.includes(Role.WAREHOUSE_MANAGER) || roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.HQ_ACCOUNTANT)) {
+    return false;
+  }
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
+export function canUnlockProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
+}
+
+export function isHqAdminUser(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return roles.includes(Role.SYSTEM_ADMINISTRATOR);
+}
+
+/** HQ Admin (SYSTEM_ADMINISTRATOR) — permanent business-data deletion for testing. */
+export function canPermanentDeleteBusinessData(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return isHqAdminUser(user) || userHasPermission(user, 'data.permanent_delete');
+}
+
+/** HQ Admin — edit historical business transaction dates for reporting corrections. */
+export function canUpdateBusinessDate(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return isHqAdminUser(user) || userHasPermission(user, 'businessDate.update.hqAdmin');
+}
+
+export function canDeleteProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canDeleteHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canCreateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canDeactivateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canEditWarehouseInfo(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageDistributionOrders(user);
+}
+
+export function canManageDistributionOrders(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_SALES_MANAGER);
+}
+
+/** Commercial branch-order cancellation — HQ Sales / HQ CEO only (not HQ Warehouse Manager). */
+export function canCancelBranchDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageDistributionOrders(user);
+}
+
+export function canViewDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageDistributionOrders(user) ||
+    canDispatchFromHq(user) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.MANAGER) ||
+    roles.includes(Role.FRANCHISE_OWNER) ||
+    roles.includes(Role.WAREHOUSE_OPERATOR) ||
+    userHasAnyPermission(user, ['distribution.manage', 'distribution.view'])
+  );
+}
+
+export function canRecordHqDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.HQ_CASHIER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+/** Branch Cashier submits payment after accountant handoff. */
+export function canSubmitBranchInvoicePayment(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'> & { branchId?: string | null },
+) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_CASHIER) || roles.includes(Role.HQ_ACCOUNTANT) || roles.includes(Role.FINANCE_MANAGER)) {
+    return false;
+  }
+  return roles.includes(Role.CASHIER) || userHasPermission(user, 'payments.manage');
+}
+
+/** Branch Accountant sends invoice to cashier after choosing payment type. */
+export function canSendInvoiceToCashier(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'finance.view');
+}
+
+/** HQ Finance confirms or rejects exceptional branch payments only. */
+export function canConfirmBranchInvoicePayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canRecordHqDistributionPayment(user);
+}
+
+export function canEnterBranchReceivingTransportCost(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
+) {
+  return canEnterBranchTransportCost(user);
+}
+
+/** Branch Warehouse Manager enters HQ→Branch transportation cost after receiving. */
+export function canEnterBranchTransportCost(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.WAREHOUSE_OPERATOR);
+}
+
+export function canViewBranchWarehouseOperationalData(
+  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+) {
+  return isBranchWarehouseOperator(user);
+}
+
+/** HQ Warehouse Manager must not see financial order data. */
+export function isHqWarehouseLogisticsOnlyUser(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    roles.includes(Role.WAREHOUSE_MANAGER) &&
+    !hasAnyFullAccessRole(roles) &&
+    !roles.includes(Role.HQ_SALES_MANAGER) &&
+    !roles.includes(Role.SUPPLY_CHAIN_MANAGER) &&
+    !roles.includes(Role.FINANCE_MANAGER) &&
+    !roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+export function canRequestBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'finance.view');
+}
+
+export function canApproveBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER) ||
+    roles.includes(Role.FINANCE_MANAGER)
+  );
+}
+
+export function canRecordDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canRecordHqDistributionPayment(user) || canSubmitBranchInvoicePayment(user) || userHasPermission(user, 'payments.manage');
+}
+
+export function canManageBranchPurchaseRequests(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageDistributionOrders(user);
+}
+
+export function canAssignBranchHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+/** Only full-access HQ roles (CEO/OWNER/SYSTEM_ADMIN) may change Branch Type. */
+export function canChangeBranchType(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+/** Only Branch Manager (MANAGER) creates routine HQ orders; CEO/OWNER for exceptional cases. */
+export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return roles.includes(Role.MANAGER);
+}
+
+/** Branch Sales Manager creates product requests to HQ (not warehouse operator). */
+export function canCreateBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return false;
+}
+
+export function canManageOwnBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canCreateBranchHqOrder(user) || canCreateBranchProductRequest(user);
+}
+
+export function isBranchSalesManagerUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (!user.branchId || hasAnyFullAccessRole(resolveUserRoles(user))) return false;
+  const roles = resolveUserRoles(user);
+  if (
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.HQ_SALES_MANAGER) ||
+    roles.includes(Role.HQ_CASHIER)
+  ) {
+    return false;
+  }
+  if (roles.includes(Role.FRANCHISE_OWNER)) return false;
+  return roles.includes(Role.MANAGER);
+}
+
+export function canArchiveCustomer(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FRANCHISE_OWNER);
+}
+
+/** Branch CEO and Branch Sales Manager may not edit customer profiles; HQ retains edit access. */
+export function canEditCustomer(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  if (isBranchOwnerUser(user) || isBranchSalesManagerUser(user)) return false;
+  return !user.branchId;
+}
+
+export function canEditCustomerType(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FRANCHISE_OWNER) ||
+    roles.includes(Role.MANAGER)
+  );
+}
+
+export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return !isBranchSalesManagerUser(user);
+}
+
+export function shouldStripSaleFinancialFields(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return isBranchCashierUser(user);
+}
+
+export function shouldStripSaleWorkflowStatus(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return isBranchCashierUser(user);
+}
+
+/** Branch Warehouse Operator receives HQ shipments at branch. */
+export function canReceiveBranchDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return roles.includes(Role.WAREHOUSE_OPERATOR);
+}
+
+export function canViewBranchDiscrepancyReports(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.HQ_SALES_MANAGER) ||
+    isBranchWarehouseOperator(user)
+  );
+}
+
+export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.WAREHOUSE_MANAGER);
+}
+
+export function canManageTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canViewTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageTransportCompany(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
+export function canManageSvhToHqTransport(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canViewSvhToHqTransport(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageSvhToHqTransport(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
+export function canConfirmSvhToHqArrival(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageSvhToHqTransport(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER)
+  );
+}
+
+export function canApproveSvhTransportCostAdjustment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER)
+  );
+}
+
+export function canManageUsers(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+    return true;
+  }
+  if (userHasPermission(user, 'users.manage')) {
+    return true;
+  }
+  return false;
+}
+
+export function legacyRoleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {
+  if (isFullAccessRole(role) || requiredRoles.includes(role)) {
+    return true;
+  }
+
+  const capabilityRoles = requiredRoles.filter((requiredRole) => !isFullAccessRole(requiredRole));
+  if (!capabilityRoles.length) {
+    return false;
+  }
+
+  const permissions = new Set(permissionsForRole(role));
+  return capabilityRoles.some((requiredRole) =>
+    permissionsForRole(requiredRole).some((permission) => permissions.has(permission)),
+  );
+}
+
+export function canManageHqB2bSales(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_SALES_MANAGER);
+}
+
+export function canViewHqB2bSales(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageHqB2bSales(user) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.FINANCE_MANAGER)
+  );
+}
+
+export function canConfirmHqB2bPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_ACCOUNTANT);
+}
+
+export function canApproveHqB2bInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO);
+}
+
+export function canConvertCustomerToFranchise(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO);
+}

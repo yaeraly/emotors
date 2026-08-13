@@ -1,0 +1,309 @@
+'use client';
+
+import { useCallback, useEffect, useRef } from 'react';
+import { apiFetch } from '@/lib/api';
+import {
+  applyLocalMarkupPreview,
+  type MarkupPreviewResponse,
+  type MarkupRowEditorState,
+  isMarkupRowDirty,
+} from '@/lib/pricing-markup-preview';
+
+const PREVIEW_DEBOUNCE_MS = 280;
+const FLASH_DURATION_MS = 650;
+
+type RetailPreviewPayload = {
+  minimumSellingMarkupPercent: number;
+  recommendedRetailMarkupPercent: number;
+  maximumRetailMarkupOverridePercent?: number | null;
+};
+
+type WholesalePreviewPayload = {
+  minimumWholesaleMarkupPercent: number;
+  recommendedWholesaleMarkupPercent: number;
+  maximumWholesaleMarkupOverridePercent?: number | null;
+};
+
+type PreviewPayload = RetailPreviewPayload | WholesalePreviewPayload;
+
+function buildPreviewPayload(
+  channel: 'retail' | 'wholesale',
+  row: MarkupRowEditorState,
+): PreviewPayload | null {
+  if (row.draftMinMarkup == null || row.draftRecommendedMarkup == null || row.draftMaxMarkup == null) {
+    return null;
+  }
+
+  const maxOverride =
+    Math.abs(row.draftMaxMarkup - row.inheritedMaxMarkup) > 0.001 ? row.draftMaxMarkup : null;
+
+  if (channel === 'retail') {
+    return {
+      minimumSellingMarkupPercent: row.draftMinMarkup,
+      recommendedRetailMarkupPercent: row.draftRecommendedMarkup,
+      maximumRetailMarkupOverridePercent: maxOverride,
+    };
+  }
+
+  return {
+    minimumWholesaleMarkupPercent: row.draftMinMarkup,
+    recommendedWholesaleMarkupPercent: row.draftRecommendedMarkup,
+    maximumWholesaleMarkupOverridePercent: maxOverride,
+  };
+}
+
+export function usePricingMarkupPreview<T extends { id: string; effectiveBranchPriceKgs: number } & MarkupRowEditorState>(
+  channel: 'retail' | 'wholesale',
+  setRows: React.Dispatch<React.SetStateAction<T[]>>,
+) {
+  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const controllersRef = useRef<Record<string, AbortController>>({});
+  const flashTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const saveRevisionRef = useRef<Record<string, number>>({});
+  const previewRevisionRef = useRef<Record<string, number>>({});
+
+  const clearFlash = useCallback(
+    (productId: string) => {
+      setRows((current) =>
+        current.map((row) =>
+          row.id === productId
+            ? ({
+                ...row,
+                flash: { min: false, rec: false, max: false },
+              } as T)
+            : row,
+        ),
+      );
+    },
+    [setRows],
+  );
+
+  const cancelRowPreviews = useCallback((productId: string) => {
+    if (timersRef.current[productId]) {
+      clearTimeout(timersRef.current[productId]);
+      delete timersRef.current[productId];
+    }
+    controllersRef.current[productId]?.abort();
+    delete controllersRef.current[productId];
+    if (flashTimersRef.current[productId]) {
+      clearTimeout(flashTimersRef.current[productId]);
+      delete flashTimersRef.current[productId];
+    }
+    previewRevisionRef.current[productId] = (previewRevisionRef.current[productId] ?? 0) + 1;
+  }, []);
+
+  const markRowSaved = useCallback(
+    (productId: string) => {
+      saveRevisionRef.current[productId] = (saveRevisionRef.current[productId] ?? 0) + 1;
+      cancelRowPreviews(productId);
+    },
+    [cancelRowPreviews],
+  );
+
+  const applyPreviewResult = useCallback(
+    (productId: string, result: MarkupPreviewResponse, previewRevision: number) => {
+      if (previewRevisionRef.current[productId] !== previewRevision) {
+        return;
+      }
+
+      setRows((current) =>
+        current.map((row) => {
+          if (row.id !== productId) return row;
+
+          const isDirty = isMarkupRowDirty(row);
+
+          if (result.validationStatus === 'ERROR' || !result.preview) {
+            return {
+              ...row,
+              previewValidationErrors: result.validationErrors,
+              previewValid: false,
+              isDirty,
+              isPreviewing: false,
+            } as T;
+          }
+
+          const flash = {
+            min: Math.abs(row.displayMinPrice - result.preview.minimumPriceKgs) > 0.01,
+            rec: Math.abs(row.displayRecPrice - result.preview.recommendedPriceKgs) > 0.01,
+            max: Math.abs(row.displayMaxPrice - result.preview.maximumPriceKgs) > 0.01,
+          };
+
+          if (flashTimersRef.current[productId]) {
+            clearTimeout(flashTimersRef.current[productId]);
+          }
+          flashTimersRef.current[productId] = setTimeout(() => clearFlash(productId), FLASH_DURATION_MS);
+
+          return {
+            ...row,
+            displayMinPrice: result.preview.minimumPriceKgs,
+            displayRecPrice: result.preview.recommendedPriceKgs,
+            displayMaxPrice: result.preview.maximumPriceKgs,
+            displayMaxMarkup: result.preview.effectiveMaximumMarkupPercent,
+            displayMaxSource: result.preview.maximumMarkupSource,
+            previewValidationErrors: [],
+            previewValid: true,
+            flash,
+            isDirty,
+            isPreviewing: false,
+          } as T;
+        }),
+      );
+    },
+    [clearFlash, setRows],
+  );
+
+  const runPreview = useCallback(
+    async (productId: string, payload: PreviewPayload) => {
+      const saveRevisionAtStart = saveRevisionRef.current[productId] ?? 0;
+      const previewRevision = (previewRevisionRef.current[productId] ?? 0) + 1;
+      previewRevisionRef.current[productId] = previewRevision;
+
+      controllersRef.current[productId]?.abort();
+      const controller = new AbortController();
+      controllersRef.current[productId] = controller;
+
+      setRows((current) =>
+        current.map((row) => (row.id === productId ? ({ ...row, isPreviewing: true } as T) : row)),
+      );
+
+      try {
+        const result = await apiFetch<MarkupPreviewResponse>(`/pricing/${channel}/${productId}/preview`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        if (saveRevisionRef.current[productId] !== saveRevisionAtStart) {
+          return;
+        }
+        applyPreviewResult(productId, result, previewRevision);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        if (saveRevisionRef.current[productId] !== saveRevisionAtStart) {
+          return;
+        }
+        setRows((current) =>
+          current.map((row) =>
+            row.id === productId
+              ? ({
+                  ...row,
+                  isPreviewing: false,
+                  previewValidationErrors: [
+                    error instanceof Error ? error.message : 'Не удалось рассчитать цену',
+                  ],
+                  previewValid: false,
+                } as T)
+              : row,
+          ),
+        );
+      }
+    },
+    [applyPreviewResult, channel, setRows],
+  );
+
+  const schedulePreview = useCallback(
+    (productId: string, row: T) => {
+      const payload = buildPreviewPayload(channel, row);
+      const isDirty = isMarkupRowDirty(row);
+
+      setRows((current) =>
+        current.map((item) => {
+          if (item.id !== productId) return item;
+          const withLocal = applyLocalMarkupPreview({ ...item, ...row, isDirty });
+          return withLocal as T;
+        }),
+      );
+
+      if (!payload) {
+        setRows((current) =>
+          current.map((item) =>
+            item.id === productId
+              ? ({
+                  ...item,
+                  previewValidationErrors: [],
+                  previewValid: null,
+                  isDirty,
+                } as T)
+              : item,
+          ),
+        );
+        return;
+      }
+
+      if (timersRef.current[productId]) {
+        clearTimeout(timersRef.current[productId]);
+      }
+
+      timersRef.current[productId] = setTimeout(() => {
+        void runPreview(productId, payload);
+      }, PREVIEW_DEBOUNCE_MS);
+    },
+    [channel, runPreview, setRows],
+  );
+
+  const cancelRowEdits = useCallback(
+    (productId: string) => {
+      cancelRowPreviews(productId);
+
+      setRows((current) =>
+        current.map((row) => {
+          if (row.id !== productId) return row;
+
+          const minPrice =
+            channel === 'retail'
+              ? Number((row as { minimumRetailPriceKgs?: number }).minimumRetailPriceKgs ?? row.displayMinPrice)
+              : Number((row as { minimumWholesalePriceKgs?: number }).minimumWholesalePriceKgs ?? row.displayMinPrice);
+          const recPrice =
+            channel === 'retail'
+              ? Number((row as { recommendedRetailPriceKgs?: number }).recommendedRetailPriceKgs ?? row.displayRecPrice)
+              : Number(
+                  (row as { recommendedWholesalePriceKgs?: number }).recommendedWholesalePriceKgs ?? row.displayRecPrice,
+                );
+          const maxPrice =
+            channel === 'retail'
+              ? Number((row as { maximumRetailPriceKgs?: number }).maximumRetailPriceKgs ?? row.displayMaxPrice)
+              : Number((row as { maximumWholesalePriceKgs?: number }).maximumWholesalePriceKgs ?? row.displayMaxPrice);
+          const maxMarkup = row.savedMaxMarkup;
+          const maxSource =
+            channel === 'retail'
+              ? ((row as { maximumRetailMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' }).maximumRetailMarkupSource ??
+                  row.displayMaxSource)
+              : ((row as { maximumWholesaleMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' })
+                  .maximumWholesaleMarkupSource ?? row.displayMaxSource);
+
+          return {
+            ...row,
+            draftMinMarkup: row.savedMinMarkup,
+            draftRecommendedMarkup: row.savedRecMarkup,
+            draftMaxMarkup: row.savedMaxMarkup,
+            displayMinPrice: minPrice,
+            displayRecPrice: recPrice,
+            displayMaxPrice: maxPrice,
+            displayMaxMarkup: maxMarkup,
+            displayMaxSource: maxSource,
+            previewValidationErrors: [],
+            previewValid: null,
+            flash: { min: false, rec: false, max: false },
+            isDirty: false,
+            isPreviewing: false,
+          } as T;
+        }),
+      );
+    },
+    [cancelRowPreviews, channel, setRows],
+  );
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    const flashTimers = flashTimersRef.current;
+    const controllers = controllersRef.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+      Object.values(flashTimers).forEach(clearTimeout);
+      Object.values(controllers).forEach((controller) => controller.abort());
+    };
+  }, []);
+
+  return { schedulePreview, cancelRowEdits, cancelRowPreviews, markRowSaved, runPreview };
+}

@@ -1,0 +1,26 @@
+import { Module } from '@nestjs/common';
+import { CommissionsModule } from '../commissions/commissions.module';
+import { CustomersModule } from '../customers/customers.module';
+import { FinanceModule } from '../finance/finance.module';
+import { InventoryModule } from '../inventory/inventory.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PricingModule } from '../pricing/pricing.module';
+import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
+import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
+import { SalesController } from './sales.controller';
+import { SalesService } from './sales.service';
+
+@Module({
+  imports: [
+    InventoryModule,
+    CommissionsModule,
+    PricingModule,
+    NotificationsModule,
+    CustomersModule,
+    FinanceModule,
+  ],
+  controllers: [SalesController],
+  providers: [SalesService, SaleInstallmentApprovalService, BranchSaleInvoiceService],
+  exports: [SalesService, BranchSaleInvoiceService],
+})
+export class SalesModule {}

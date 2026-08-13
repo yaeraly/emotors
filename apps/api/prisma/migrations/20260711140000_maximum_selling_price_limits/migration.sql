@@ -1,0 +1,21 @@
+-- Maximum selling price limits
+CREATE TYPE "PriceAboveRecommendedReasonCode" AS ENUM (
+  'HIGH_TRANSPORTATION_COST',
+  'REMOTE_REGION',
+  'PRODUCT_SHORTAGE',
+  'CUSTOMER_REQUEST',
+  'OTHER'
+);
+
+ALTER TYPE "PricingEnginePriceType" ADD VALUE IF NOT EXISTS 'RETAIL_MAXIMUM';
+ALTER TYPE "PricingEnginePriceType" ADD VALUE IF NOT EXISTS 'WHOLESALE_MAXIMUM';
+
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "enableMaximumRetailPrice" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "maximumRetailMarkupPercent" DECIMAL(8,2) NOT NULL DEFAULT 0;
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "maximumRetailPriceKgs" DECIMAL(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "enableMaximumWholesalePrice" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "maximumWholesaleMarkupPercent" DECIMAL(8,2) NOT NULL DEFAULT 0;
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "maximumWholesalePriceKgs" DECIMAL(14,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE "SaleItem" ADD COLUMN IF NOT EXISTS "priceAboveRecommendedReasonCode" "PriceAboveRecommendedReasonCode";
+ALTER TABLE "SaleItem" ADD COLUMN IF NOT EXISTS "priceAboveRecommendedComment" TEXT;

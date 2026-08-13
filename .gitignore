@@ -1,0 +1,11 @@
+node_modules
+dist
+.next
+.turbo
+.env
+.env.local
+apps/api/.env
+apps/web/.env.local
+npm-debug.log*
+coverage
+uploads

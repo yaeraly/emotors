@@ -1,0 +1,297 @@
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtSignOptions, JwtService } from '@nestjs/jwt';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../prisma/prisma.service';
+import { anyRoleRequiresBranch, permissionsForRoles, uniqueRoles } from '../rbac/rbac';
+import { AuthUser } from './auth.types';
+import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+
+type JwtPayload = {
+  sub: string;
+  email: string;
+  role: Role;
+  roles: Role[];
+  branchId: string;
+};
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  async login(dto: LoginDto, meta?: { ip?: string; userAgent?: string }) {
+    const identifier = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: identifier },
+          { username: identifier },
+          { phone: dto.email.trim() },
+        ],
+      },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+
+    if (!user) {
+      await this.recordLogin(null, false, meta);
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.status !== 'ACTIVE') {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('Аккаунт деактивирован. Вход недоступен.');
+    }
+
+    if (!user.hasLogin) {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('This account does not have login credentials');
+    }
+
+    const roles = this.roleCodes(user);
+
+    if (anyRoleRequiresBranch(roles) && !user.branchId) {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('User branch is not assigned');
+    }
+
+    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+
+    if (!passwordMatches) {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      roles,
+      branchId: user.branchId ?? '',
+    };
+
+    const expiresIn =
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m';
+    const signOptions: JwtSignOptions = {
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn: expiresIn as JwtSignOptions['expiresIn'],
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload, signOptions);
+    const permissions = await this.permissionsForUser(user.id, user.role);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+    await this.recordLogin(user.id, true, meta);
+    await this.audit(user.id, user.role, 'login', 'User', user.id);
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        fullName: user.fullName,
+        role: user.role,
+        roles,
+        branchId: user.branchId,
+        branch: user.branch,
+        status: user.status,
+        permissions,
+        mustChangePassword: user.mustChangePassword,
+      },
+    };
+  }
+
+  async getCurrentUser(user: AuthUser) {
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        branchId: true,
+        branch: true,
+        employeeId: true,
+        phone: true,
+        username: true,
+        status: true,
+        mustChangePassword: true,
+        userRoles: { include: { role: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!currentUser) {
+      throw new UnauthorizedException('User no longer exists');
+    }
+
+    const roles = this.roleCodes(currentUser);
+    const permissions = await this.permissionsForUser(user.id, currentUser.role);
+    const [managerAssignments, salesManagerAssignments] = await Promise.all([
+      this.prisma.hqWarehouseManagerAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      }),
+      this.prisma.hqSalesManagerWarehouseAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      }),
+    ]);
+    const assignedHqWarehouseIds = roles.includes(Role.HQ_SALES_MANAGER)
+      ? salesManagerAssignments.map((row) => row.warehouseId)
+      : roles.includes(Role.WAREHOUSE_MANAGER)
+        ? managerAssignments.map((row) => row.warehouseId)
+        : Array.from(
+            new Set([
+              ...managerAssignments.map((row) => row.warehouseId),
+              ...salesManagerAssignments.map((row) => row.warehouseId),
+            ]),
+          );
+
+    return {
+      ...currentUser,
+      roles,
+      permissions,
+      assignedHqWarehouseIds,
+    };
+  }
+
+  async changePassword(user: AuthUser, dto: ChangePasswordDto) {
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+    if (!currentUser) throw new UnauthorizedException('User no longer exists');
+    const matches = await bcrypt.compare(dto.currentPassword, currentUser.passwordHash);
+    if (!matches) throw new UnauthorizedException('Invalid current password');
+    this.validatePassword(dto.newPassword);
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, mustChangePassword: false },
+    });
+    await this.audit(user.id, user.role, 'PASSWORD_CHANGED', 'User', user.id);
+    await this.audit(user.id, user.role, 'AUTH_SESSION_INVALIDATED', 'User', user.id);
+
+    const roles = this.roleCodes(currentUser);
+    const payload: JwtPayload = {
+      sub: currentUser.id,
+      email: currentUser.email,
+      role: currentUser.role,
+      roles,
+      branchId: currentUser.branchId ?? '',
+    };
+    const expiresIn =
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m';
+    const signOptions: JwtSignOptions = {
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn: expiresIn as JwtSignOptions['expiresIn'],
+    };
+    const accessToken = await this.jwtService.signAsync(payload, signOptions);
+    const permissions = await this.permissionsForUser(currentUser.id, currentUser.role);
+    await this.audit(user.id, user.role, 'AUTH_SESSION_RECREATED', 'User', user.id);
+
+    return {
+      success: true,
+      accessToken,
+      user: {
+        id: currentUser.id,
+        email: currentUser.email,
+        username: currentUser.username,
+        fullName: currentUser.fullName,
+        role: currentUser.role,
+        roles,
+        branchId: currentUser.branchId,
+        branch: currentUser.branch,
+        employeeId: currentUser.employeeId,
+        status: currentUser.status,
+        permissions,
+        mustChangePassword: false,
+      },
+    };
+  }
+
+  async logout(user: AuthUser) {
+    const lastLogin = await this.prisma.loginHistory.findFirst({
+      where: { userId: user.id, success: true, logoutAt: null },
+      orderBy: { loginAt: 'desc' },
+    });
+    if (lastLogin) {
+      await this.prisma.loginHistory.update({
+        where: { id: lastLogin.id },
+        data: { logoutAt: new Date() },
+      });
+    }
+    await this.audit(user.id, user.role, 'logout', 'User', user.id);
+    return { success: true };
+  }
+
+  private validatePassword(password: string) {
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException('Password must contain uppercase, lowercase and number');
+    }
+  }
+
+  private recordLogin(userId: string | null, success: boolean, meta?: { ip?: string; userAgent?: string }) {
+    return this.prisma.loginHistory.create({
+      data: {
+        userId,
+        success,
+        ipAddress: meta?.ip,
+        browser: meta?.userAgent,
+        device: meta?.userAgent,
+      },
+    });
+  }
+
+  private audit(userId: string | null, role: string | null, action: string, entity: string, entityId?: string) {
+    return this.prisma.auditLog.create({
+      data: { userId, role, action, entity, entityId },
+    });
+  }
+
+  private async permissionsForUser(userId: string, role: Role) {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
+    });
+    const roles = rows.map((row) => row.role.code as Role);
+    const assignedRoles = roles.length ? roles : [role];
+    const rolePermissions = rows.flatMap((row) =>
+      row.role.permissions.map((rolePermission) => rolePermission.permission.code),
+    );
+    const basePermissions = Array.from(new Set([...permissionsForRoles(assignedRoles), ...rolePermissions]));
+    const userPermissionRows = await this.prisma.userPermission.findMany({
+      where: { userId, isActive: true },
+      include: { permission: true },
+    });
+    const additionalPermissions = userPermissionRows.map((row) => row.permission.code);
+    const merged = Array.from(new Set([...basePermissions, ...additionalPermissions]));
+    if (additionalPermissions.includes('cashier') || assignedRoles.includes(Role.CASHIER)) {
+      merged.push('cashier', 'payments.manage');
+    }
+    return Array.from(new Set(merged));
+  }
+
+  private roleCodes(user: { role: Role; userRoles?: { role: { code: string } }[] }) {
+    const assigned = user.userRoles?.map((userRole) => userRole.role.code as Role) ?? [];
+    return uniqueRoles([user.role, ...assigned]);
+  }
+}

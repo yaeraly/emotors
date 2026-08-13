@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Sale receipt print layout — A4 portrait, two quarter-page copies */
+.sale-receipt-print-area {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  body.sale-receipt-print-mode * {
+    visibility: hidden;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-print-area,
+  body.sale-receipt-print-mode .sale-receipt-print-area * {
+    visibility: visible;
+  }
+
+  body.sale-receipt-print-mode .sale-details-page {
+    display: none !important;
+  }
+
+  body.sale-receipt-print-mode aside,
+  body.sale-receipt-print-mode header,
+  body.sale-receipt-print-mode nav {
+    display: none !important;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-print-area {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-print-sheet {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-copy {
+    box-sizing: border-box;
+    width: 105mm;
+    height: 148mm;
+    padding: 4mm;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    font-size: 9pt;
+    line-height: 1.35;
+    color: #000;
+    background: #fff;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-copy-label {
+    margin: 0 0 2mm;
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #334155;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-brand {
+    margin: 0;
+    font-size: 11pt;
+    font-weight: 800;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-branch,
+  body.sale-receipt-print-mode .sale-receipt-title,
+  body.sale-receipt-print-mode .sale-receipt-meta {
+    margin: 0.5mm 0;
+    font-size: 8.5pt;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-title {
+    font-weight: 700;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-items {
+    width: 100%;
+    margin: 2mm 0;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-items th,
+  body.sale-receipt-print-mode .sale-receipt-items td {
+    padding: 0.5mm 1mm;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-items th:last-child,
+  body.sale-receipt-print-mode .sale-receipt-items td:last-child {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-totals {
+    margin-top: 2mm;
+    border-top: 0.2mm solid #cbd5e1;
+    padding-top: 2mm;
+    font-size: 8.5pt;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-totals p {
+    display: flex;
+    justify-content: space-between;
+    gap: 2mm;
+    margin: 0.5mm 0;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-totals strong {
+    font-size: 10pt;
+  }
+
+  body.sale-receipt-print-mode .sale-receipt-footer {
+    margin: 2mm 0 0;
+    font-size: 8pt;
+    color: #475569;
+  }
+}
+
+.sale-receipt-screen .sale-receipt-copy-label {
+  display: none;
+}
+
+.sale-receipt-screen .sale-receipt-brand {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.sale-receipt-screen .sale-receipt-branch,
+.sale-receipt-screen .sale-receipt-title,
+.sale-receipt-screen .sale-receipt-meta {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: #475569;
+}
+
+.sale-receipt-screen .sale-receipt-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sale-receipt-screen .sale-receipt-items {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.sale-receipt-screen .sale-receipt-items th,
+.sale-receipt-screen .sale-receipt-items td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.sale-receipt-screen .sale-receipt-items th {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  background: #fff;
+}
+
+.sale-receipt-screen .sale-receipt-items th:last-child,
+.sale-receipt-screen .sale-receipt-items td:last-child {
+  text-align: right;
+}
+
+.sale-receipt-screen .sale-receipt-totals p {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.sale-receipt-screen .sale-receipt-totals strong {
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.sale-receipt-screen .sale-receipt-footer {
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: #64748b;
+}
