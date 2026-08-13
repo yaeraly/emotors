@@ -19,6 +19,9 @@ type Props = {
   loading?: boolean;
   disabled?: boolean;
   onChange: (productId: string) => void;
+  /** When set, Enter on a highlighted selectable option adds immediately instead of only selecting. */
+  onEnterAdd?: (option: BranchWarehouseStockProductOption) => void;
+  onDuplicateAttempt?: () => void;
 };
 
 function normalizeSearch(value: string) {
@@ -33,6 +36,8 @@ export function BranchWarehouseStockProductCombobox({
   loading = false,
   disabled = false,
   onChange,
+  onEnterAdd,
+  onDuplicateAttempt,
 }: Props) {
   const { t } = useTranslation();
   const listboxId = useId();
@@ -131,9 +136,26 @@ export function BranchWarehouseStockProductCombobox({
     if (event.key === 'Enter') {
       event.preventDefault();
       const option = filtered[highlightedIndex];
-      if (option && isOptionSelectable(option)) {
-        selectOption(option);
+      if (!option) return;
+
+      if (excluded.has(option.productId)) {
+        onDuplicateAttempt?.();
+        return;
       }
+
+      if (!isOptionSelectable(option)) return;
+
+      if (onEnterAdd) {
+        onEnterAdd(option);
+        onChange('');
+        setQuery('');
+        setOpen(false);
+        setHighlightedIndex(0);
+        requestAnimationFrame(() => inputRef.current?.focus());
+        return;
+      }
+
+      selectOption(option);
       return;
     }
 

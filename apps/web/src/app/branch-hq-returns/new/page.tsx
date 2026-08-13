@@ -98,14 +98,20 @@ export default function NewBranchHqReturnPage() {
 
   const addedProductIds = useMemo(() => lines.map((line) => line.productId), [lines]);
 
-  function addLine() {
+  function addLineFromOption(option: {
+    productId: string;
+    productName: string;
+    productCode: string;
+    availableQuantity: number;
+  }) {
     setError('');
-    const product = stock.find((row) => row.productId === selectedProductId);
+    const product = stock.find((row) => row.productId === option.productId);
     if (!product) {
       setError(t('branchHqReturn.selectProduct'));
       return;
     }
     if (lines.some((line) => line.productId === product.productId)) {
+      toast.error(t('branchHqReturn.alreadyAdded'));
       return;
     }
     setLines((current) => [
@@ -199,24 +205,16 @@ export default function NewBranchHqReturnPage() {
 
         <form onSubmit={onSubmit} className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-              <BranchWarehouseStockProductCombobox
-                label={t('branchHqReturn.product')}
-                value={selectedProductId}
-                options={stockOptions}
-                excludedProductIds={addedProductIds}
-                loading={loadingStock}
-                onChange={setSelectedProductId}
-              />
-              <button
-                type="button"
-                onClick={addLine}
-                disabled={loadingStock || !selectedProductId}
-                className="h-fit rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {t('branchHqReturn.addItem')}
-              </button>
-            </div>
+            <BranchWarehouseStockProductCombobox
+              label={t('branchHqReturn.product')}
+              value={selectedProductId}
+              options={stockOptions}
+              excludedProductIds={addedProductIds}
+              loading={loadingStock}
+              onChange={setSelectedProductId}
+              onEnterAdd={addLineFromOption}
+              onDuplicateAttempt={() => toast.error(t('branchHqReturn.alreadyAdded'))}
+            />
 
             <div className="mt-6 overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">

@@ -7351,7 +7351,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqReturn.searchProduct': 'Поиск товара',
     'branchHqReturn.nothingFound': 'Ничего не найдено',
     'branchHqReturn.available': 'Доступно',
-    'branchHqReturn.alreadyAdded': 'Уже добавлен',
+    'branchHqReturn.alreadyAdded': 'Товар уже добавлен',
 
   },
   en: {
